@@ -1,0 +1,4 @@
+name: fake-ios
+detect:
+  any_file: ["*.xcodeproj"]
+  confidence: high

@@ -1,0 +1,6 @@
+name: fake-ios
+display_name: "Fake iOS"
+version: 0.1.0
+loop_template: dev-pipeline
+roles: [architect]
+tool_agents: []
