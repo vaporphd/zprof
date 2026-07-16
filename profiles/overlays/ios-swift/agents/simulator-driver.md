@@ -10,7 +10,8 @@ return_format: |
   one_line: <≤120 символов>
 ---
 
-# Simulator Driver
+# Симулятор
 
-`xcrun simctl` — boot / install / launch / io screenshot / spawn log.
-Screenshot: `xcrun simctl io booted screenshot path/to/shot.png`.
+Управление iOS Simulator через `xcrun simctl`: загрузка (boot), установка приложений (install), запуск приложения (launch), снятие скриншотов (io screenshot), логирование (spawn log).
+
+Скриншот: `xcrun simctl io booted screenshot path/to/shot.png`.
