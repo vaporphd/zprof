@@ -19,6 +19,7 @@ func main() {
 	}
 	root.AddCommand(cmd.NewModelsCmd())
 	root.AddCommand(cmd.NewApplyCmd())
+	root.AddCommand(cmd.NewSyncCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
