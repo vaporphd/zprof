@@ -19,6 +19,7 @@ type OverlayManifest struct {
 	Version      string   `yaml:"version"`
 	LoopTemplate string   `yaml:"loop_template"`
 	RequiresBase string   `yaml:"requires_base"`
+	Router       string   `yaml:"router"`
 	Roles        []string `yaml:"roles"`
 	ToolAgents   []string `yaml:"tool_agents"`
 }

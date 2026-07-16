@@ -82,15 +82,23 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 		}
 	}
 
-	// 3. Render AGENT_LOOP.md
+	// 3. Render AGENT_LOOP.md (thin router only)
 	loopPath := filepath.Join(opts.ProjectDir, "AGENT_LOOP.md")
-	loopBlocks := buildLoopBlocks(opts)
+	loopBlocks := buildRouterBlocks(opts)
 	conflicts, err := renderManagedFile(loopPath, loopBlocks, opts)
 	if err != nil {
 		return nil, fmt.Errorf("render AGENT_LOOP.md: %w", err)
 	}
 	res.Conflicts = append(res.Conflicts, conflicts...)
 	res.UpdatedFiles = append(res.UpdatedFiles, loopPath)
+
+	// 3.5. Render workflows/*.md (composed base workflow + overlay extensions)
+	wfConflicts, wfFiles, err := writeWorkflowFiles(opts)
+	if err != nil {
+		return nil, fmt.Errorf("render workflows: %w", err)
+	}
+	res.Conflicts = append(res.Conflicts, wfConflicts...)
+	res.UpdatedFiles = append(res.UpdatedFiles, wfFiles...)
 
 	// 4. Render CLAUDE.md
 	claudePath := filepath.Join(opts.ProjectDir, "CLAUDE.md")
@@ -123,26 +131,66 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	return res, nil
 }
 
-func buildLoopBlocks(opts ApplyOpts) []managed.Block {
-	var blocks []managed.Block
-	if len(opts.Overlays) > 0 {
-		loopTemplate := opts.Overlays[0].Manifest.LoopTemplate
-		if base, ok := opts.Base.LoopTemplates[loopTemplate]; ok {
-			blocks = append(blocks, managed.Block{
+// buildRouterBlocks returns the managed blocks for AGENT_LOOP.md. It is now
+// a thin router: the base router content only, no overlay contributions.
+func buildRouterBlocks(opts ApplyOpts) []managed.Block {
+	return []managed.Block{
+		{
+			Overlay: "base",
+			Key:     "router",
+			Content: opts.Base.Router,
+		},
+	}
+}
+
+// writeWorkflowFiles renders workflows/<name>.md for every unique workflow
+// referenced by opts.Overlays, composing the base workflow content with each
+// overlay's workflow-extension (LoopMD) content as separate managed blocks.
+func writeWorkflowFiles(opts ApplyOpts) ([]managed.Conflict, []string, error) {
+	var names []string
+	seen := map[string]bool{}
+	for _, o := range opts.Overlays {
+		name := o.Manifest.LoopTemplate
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+
+	var conflicts []managed.Conflict
+	var updated []string
+	for _, name := range names {
+		base, ok := opts.Base.Workflows[name]
+		if !ok {
+			return nil, nil, fmt.Errorf("base workflow %q not found (referenced by an overlay)", name)
+		}
+		blocks := []managed.Block{
+			{
 				Overlay: "base",
-				Key:     "loop-template-" + loopTemplate,
+				Key:     "workflow-" + name,
 				Content: base,
+			},
+		}
+		for _, o := range opts.Overlays {
+			if o.Manifest.LoopTemplate != name {
+				continue
+			}
+			blocks = append(blocks, managed.Block{
+				Overlay: o.Manifest.Name,
+				Key:     "workflow-extension",
+				Content: o.LoopMD,
 			})
 		}
+		path := filepath.Join(opts.ProjectDir, "workflows", name+".md")
+		c, err := renderManagedFile(path, blocks, opts)
+		if err != nil {
+			return nil, nil, fmt.Errorf("render workflows/%s.md: %w", name, err)
+		}
+		conflicts = append(conflicts, c...)
+		updated = append(updated, path)
 	}
-	for _, o := range opts.Overlays {
-		blocks = append(blocks, managed.Block{
-			Overlay: o.Manifest.Name,
-			Key:     "loop",
-			Content: o.LoopMD,
-		})
-	}
-	return blocks
+	return conflicts, updated, nil
 }
 
 func buildClaudeBlocks(opts ApplyOpts) []managed.Block {
@@ -161,6 +209,16 @@ func buildClaudeBlocks(opts ApplyOpts) []managed.Block {
 			Content: o.ClaudeBlock,
 		})
 	}
+	blocks = append(blocks, managed.Block{
+		Overlay: "base",
+		Key:     "consilium",
+		Content: buildConsiliumTable(opts),
+	})
+	blocks = append(blocks, managed.Block{
+		Overlay: "base",
+		Key:     "executing",
+		Content: buildExecutingTable(opts),
+	})
 	return blocks
 }
 

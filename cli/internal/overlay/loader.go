@@ -29,13 +29,16 @@ type Overlay struct {
 }
 
 // Base is the fully loaded base profile: its manifest, base agent prompts,
-// and shared loop/state templates.
+// and shared workflow/state templates.
 type Base struct {
 	Manifest        *manifest.OverlayManifest
 	Agents          map[string]string
 	ClaudeBlockBase string
-	LoopTemplates   map[string]string
+	Workflows       map[string]string
 	StateTemplates  map[string]string
+	// Router is the thin AGENT_LOOP.md router content, loaded from the file
+	// named by the manifest's `router:` key.
+	Router string
 }
 
 // readAgents walks dir and returns a map of agent name (relative path, without
@@ -128,7 +131,8 @@ func LoadOverlay(dir string) (*Overlay, error) {
 }
 
 // LoadBase loads the base profile directory (base/) into a Base: its
-// manifest.yaml, agents/*.md, loop-templates/*.md, and state-templates/*.md.
+// manifest.yaml, agents/*.md, workflows/*.md, state-templates/*.md, and the
+// router file named by the manifest's `router:` key.
 // claude-block-base.md is optional.
 func LoadBase(dir string) (*Base, error) {
 	m, err := manifest.LoadOverlay(filepath.Join(dir, "manifest.yaml"))
@@ -139,7 +143,7 @@ func LoadBase(dir string) (*Base, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read base agents: %w", err)
 	}
-	loopTemplates, err := readTemplateDir(filepath.Join(dir, "loop-templates"))
+	workflows, err := readTemplateDir(filepath.Join(dir, "workflows"))
 	if err != nil {
 		return nil, err
 	}
@@ -151,12 +155,21 @@ func LoadBase(dir string) (*Base, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read claude-block-base.md: %w", err)
 	}
+	var router string
+	if m.Router != "" {
+		data, err := os.ReadFile(filepath.Join(dir, m.Router))
+		if err != nil {
+			return nil, fmt.Errorf("read router %s: %w", m.Router, err)
+		}
+		router = string(data)
+	}
 	return &Base{
 		Manifest:        m,
 		Agents:          agents,
 		ClaudeBlockBase: string(claudeBase),
-		LoopTemplates:   loopTemplates,
+		Workflows:       workflows,
 		StateTemplates:  stateTemplates,
+		Router:          router,
 	}, nil
 }
 
