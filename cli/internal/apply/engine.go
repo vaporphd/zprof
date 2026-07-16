@@ -115,6 +115,16 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 
 func buildLoopBlocks(opts ApplyOpts) []managed.Block {
 	var blocks []managed.Block
+	if len(opts.Overlays) > 0 {
+		loopTemplate := opts.Overlays[0].Manifest.LoopTemplate
+		if base, ok := opts.Base.LoopTemplates[loopTemplate]; ok {
+			blocks = append(blocks, managed.Block{
+				Overlay: "base",
+				Key:     "loop-template-" + loopTemplate,
+				Content: base,
+			})
+		}
+	}
 	for _, o := range opts.Overlays {
 		blocks = append(blocks, managed.Block{
 			Overlay: o.Manifest.Name,

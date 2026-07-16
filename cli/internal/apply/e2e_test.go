@@ -107,4 +107,10 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	// Assert .gitignore has thoughts/
 	gi, _ := os.ReadFile(filepath.Join(proj, ".gitignore"))
 	require.Contains(t, string(gi), "thoughts/")
+
+	// Assert AGENT_LOOP.md has the base loop template composed in
+	// (base/loop-templates/dev-pipeline.md), not just the overlay's own
+	// loop block.
+	loop, _ := os.ReadFile(filepath.Join(proj, "AGENT_LOOP.md"))
+	require.Contains(t, string(loop), "следующая задача")
 }
