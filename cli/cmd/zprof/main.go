@@ -18,6 +18,7 @@ func main() {
 		Version: version,
 	}
 	root.AddCommand(cmd.NewModelsCmd())
+	root.AddCommand(cmd.NewApplyCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
