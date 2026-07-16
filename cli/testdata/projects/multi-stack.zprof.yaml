@@ -1,0 +1,11 @@
+overlays:
+  - backend-python
+  - frontend-web
+language: ru
+with_gates: false
+minimal: false
+model_overrides:
+  architect-py: opus-1m
+  intake-agent: claude-haiku-4-5-20251001
+agent_overrides:
+  planner: planner-strict
