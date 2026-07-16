@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/alcherk/zprof/internal/managed"
 	"github.com/alcherk/zprof/internal/manifest"
@@ -48,9 +49,15 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	agentDest := filepath.Join(opts.ProjectDir, ".claude", "agents")
 	multi := len(opts.Overlays) > 1
 
-	// 1. Base agents (never namespaced)
+	// 1. Base agents (never namespaced; skip gates/* when !WithGates)
 	for name, content := range opts.Base.Agents {
-		override, _ := opts.Project.ResolvedModel(name)
+		if !opts.Project.WithGates && strings.HasPrefix(name, "gates/") {
+			continue
+		}
+		override, err := opts.Project.ResolvedModel(name)
+		if err != nil && !errors.Is(err, manifest.ErrNoOverride) {
+			return nil, fmt.Errorf("resolve model for %s: %w", name, err)
+		}
 		if err := WriteAgent(agentDest, name, content, override); err != nil {
 			return nil, fmt.Errorf("write base agent %s: %w", name, err)
 		}
@@ -64,7 +71,10 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 			if multi {
 				out = overlay.NamespaceAgent(name, o.Manifest.Name)
 			}
-			override, _ := opts.Project.ResolvedModel(out)
+			override, err := opts.Project.ResolvedModel(out)
+			if err != nil && !errors.Is(err, manifest.ErrNoOverride) {
+				return nil, fmt.Errorf("resolve model for %s: %w", out, err)
+			}
 			if err := WriteAgent(agentDest, out, content, override); err != nil {
 				return nil, fmt.Errorf("write %s agent %s: %w", o.Manifest.Name, name, err)
 			}

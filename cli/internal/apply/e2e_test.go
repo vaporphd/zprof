@@ -52,24 +52,20 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 
 	// Assert expected files.
 	//
-	// NOTE: base/agents/gates/*.md (north-star-auditor, evidence-auditor,
-	// plan-reviewer) ARE part of the base pack on disk (Task 10.4), and
-	// overlay.readAgents walks base/agents/ recursively (Task 5.1), so
-	// Apply copies them unconditionally today — the --with-gates flag does
-	// not currently gate this loader. Verified empirically below; the
-	// gates/*.md paths are asserted alongside the rest of the base pack.
+	// NOTE: default Project.WithGates is false, so base/agents/gates/*.md
+	// (north-star-auditor, evidence-auditor, plan-reviewer) must NOT be
+	// written — see TestE2E_IOSApplyWithGates below for the WithGates:true
+	// case where they ARE expected.
 	for _, f := range []string{
 		".claude/agents/planner.md",
 		".claude/agents/docs-writer.md",
 		".claude/agents/dev-orchestrator.md",
 		".claude/agents/exploratory-orchestrator.md",
-		".claude/agents/gates/north-star-auditor.md",
-		".claude/agents/gates/evidence-auditor.md",
-		".claude/agents/gates/plan-reviewer.md",
 		".claude/agents/architect.md",
 		".claude/agents/implementer.md",
 		".claude/agents/tester.md",
 		".claude/agents/bug-hunter.md",
+		".claude/agents/reviewer.md",
 		".claude/agents/refactor-agent.md",
 		".claude/agents/explorer.md",
 		".claude/agents/xcode-runner.md",
@@ -89,6 +85,14 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 		".gitignore",
 	} {
 		require.FileExists(t, filepath.Join(proj, f), "missing: %s", f)
+	}
+
+	for _, f := range []string{
+		".claude/agents/gates/north-star-auditor.md",
+		".claude/agents/gates/evidence-auditor.md",
+		".claude/agents/gates/plan-reviewer.md",
+	} {
+		require.NoFileExists(t, filepath.Join(proj, f), "should be absent without --with-gates: %s", f)
 	}
 
 	// Assert agent model resolved (planner=sonnet → claude-sonnet-5)
@@ -113,4 +117,35 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	// loop block.
 	loop, _ := os.ReadFile(filepath.Join(proj, "AGENT_LOOP.md"))
 	require.Contains(t, string(loop), "следующая задача")
+}
+
+func TestE2E_IOSApplyWithGates(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err)
+	profilesDir := filepath.Join(root, "profiles")
+	fixture := filepath.Join(root, "cli", "testdata", "projects", "smoke-ios")
+
+	proj := t.TempDir()
+	copyDir(t, fixture, proj)
+
+	base, err := overlay.LoadBase(filepath.Join(profilesDir, "base"))
+	require.NoError(t, err)
+	ios, err := overlay.LoadOverlay(filepath.Join(profilesDir, "overlays", "ios-swift"))
+	require.NoError(t, err)
+
+	_, err = Apply(ApplyOpts{
+		ProjectDir: proj, Base: base, Overlays: []*overlay.Overlay{ios},
+		Project:   &manifest.ProjectManifest{Overlays: []string{"ios-swift"}, Language: "ru", WithGates: true},
+		MergeMode: managed.ModeOverwrite,
+	})
+	require.NoError(t, err)
+
+	// With --with-gates, the gates/*.md agents ARE written.
+	for _, f := range []string{
+		".claude/agents/gates/north-star-auditor.md",
+		".claude/agents/gates/evidence-auditor.md",
+		".claude/agents/gates/plan-reviewer.md",
+	} {
+		require.FileExists(t, filepath.Join(proj, f), "missing with --with-gates: %s", f)
+	}
 }
