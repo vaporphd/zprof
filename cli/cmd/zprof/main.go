@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/alcherk/zprof/internal/cmd"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +17,7 @@ func main() {
 		Short:   "Layered profile system for Claude Code",
 		Version: version,
 	}
+	root.AddCommand(cmd.NewModelsCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
