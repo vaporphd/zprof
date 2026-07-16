@@ -1,0 +1,16 @@
+name: ios-swift
+display_name: "iOS / Swift (UIKit + SwiftUI + AppKit)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+tool_agents:
+  - xcode-runner
+  - spm-manager
+  - simulator-driver
