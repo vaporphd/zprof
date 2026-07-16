@@ -3,10 +3,6 @@
 Основной поток. Overlay подставляет свои stack-aware агенты
 (architect / implementer / tester / bug-hunter / refactor-agent / explorer).
 
-## Trigger-фразы
-- EN: `take next task`, `drain the queue`, `next task`, `run pipeline`
-- RU: `следующая задача`, `дальше`, `прогони пайплайн`, `возьми следующее`
-
 ## Dispatch table
 | Задача | Первый агент |
 |---|---|

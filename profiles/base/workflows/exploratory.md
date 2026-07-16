@@ -1,9 +1,5 @@
 # Exploratory pipeline (RE / analysis)
 
-## Trigger-фразы
-- EN: `analyze <target>`, `symbolicate <crash>`, `explain <address>`, `decompile <apk>`
-- RU: `разбери <файл>`, `символизируй <краш>`, `объясни <адрес>`, `декомпильни <apk>`
-
 ## Pipeline
 `intake → unpack → explore → hypothesize → verify → report`
 
