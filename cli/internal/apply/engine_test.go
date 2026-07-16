@@ -59,6 +59,33 @@ func TestApplyIdempotent(t *testing.T) {
 	require.Equal(t, string(claude1), string(claude2))
 }
 
+func TestWorkflowFileComposesBaseAndOverlay(t *testing.T) {
+	proj := t.TempDir()
+	b, o := loadTestRepo(t)
+	_, err := Apply(ApplyOpts{
+		ProjectDir: proj,
+		Base:       b,
+		Overlays:   []*overlay.Overlay{o},
+		Project:    &manifest.ProjectManifest{Overlays: []string{"fake-ios"}, Language: "ru"},
+		MergeMode:  managed.ModeOverwrite,
+	})
+	require.NoError(t, err)
+
+	wfPath := filepath.Join(proj, "workflows", "dev-pipeline.md")
+	require.FileExists(t, wfPath)
+	data, err := os.ReadFile(wfPath)
+	require.NoError(t, err)
+	content := string(data)
+
+	// Base workflow block present with its own marker + content.
+	require.Contains(t, content, "<!-- zprof:begin overlay=base block=workflow-dev-pipeline -->")
+	require.Contains(t, content, "dev-pipeline template")
+
+	// Overlay's workflow-extension block present with its own marker + content.
+	require.Contains(t, content, "<!-- zprof:begin overlay=fake-ios block=workflow-extension -->")
+	require.Contains(t, content, "loop.md")
+}
+
 func TestApplyMultiOverlayNamespacesAgents(t *testing.T) {
 	// use fake-ios twice under two names to prove namespacing wiring
 	proj := t.TempDir()

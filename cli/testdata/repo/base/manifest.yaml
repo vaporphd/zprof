@@ -1,3 +1,4 @@
 name: base
 version: 0.1.0
 loop_template: dev-pipeline
+router: agent-loop-router.md

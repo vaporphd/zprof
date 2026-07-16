@@ -13,8 +13,9 @@ func TestLoadBase(t *testing.T) {
 	require.Equal(t, "base", b.Manifest.Name)
 	require.Contains(t, b.Agents, "planner")
 	require.Contains(t, b.Agents["planner"], "Планировщик")
-	require.Contains(t, b.LoopTemplates, "dev-pipeline")
+	require.Contains(t, b.Workflows, "dev-pipeline")
 	require.Contains(t, b.StateTemplates, "todo")
+	require.Contains(t, b.Router, "Agent loop router")
 }
 
 func TestLoadOverlay(t *testing.T) {

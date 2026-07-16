@@ -83,6 +83,7 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 		"docs/adr/0000-template.md",
 		".zprof.yaml",
 		".gitignore",
+		"workflows/dev-pipeline.md",
 	} {
 		require.FileExists(t, filepath.Join(proj, f), "missing: %s", f)
 	}
@@ -108,15 +109,30 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	require.Contains(t, string(claude), "<!-- zprof:begin overlay=ios-swift block=stack-config -->")
 	require.Contains(t, string(claude), "build_cmd:")
 
+	// Assert CLAUDE.md has the auto-generated Consilium and Executing
+	// tables, with at least one row for the ios-swift overlay (not
+	// namespaced, since this is a single-overlay apply).
+	require.Contains(t, string(claude), "## Consilium")
+	require.Contains(t, string(claude), "## Executing")
+	require.Contains(t, string(claude), "| implementer | implementer | ios-swift |")
+
 	// Assert .gitignore has thoughts/
 	gi, _ := os.ReadFile(filepath.Join(proj, ".gitignore"))
 	require.Contains(t, string(gi), "thoughts/")
 
-	// Assert AGENT_LOOP.md has the base loop template composed in
-	// (base/loop-templates/dev-pipeline.md), not just the overlay's own
-	// loop block.
+	// Assert AGENT_LOOP.md is now a thin router: only the base router
+	// content, none of the workflow's own dispatch/trigger content that
+	// used to be inlined via the old loop-template block.
 	loop, _ := os.ReadFile(filepath.Join(proj, "AGENT_LOOP.md"))
-	require.Contains(t, string(loop), "следующая задача")
+	require.Contains(t, string(loop), "Agent loop router")
+	require.NotContains(t, string(loop), "Dispatch table")
+	require.NotContains(t, string(loop), "Trigger-фразы")
+
+	// Assert workflows/dev-pipeline.md composes the base workflow content
+	// (base/workflows/dev-pipeline.md) plus the ios-swift extension.
+	wf, _ := os.ReadFile(filepath.Join(proj, "workflows", "dev-pipeline.md"))
+	require.Contains(t, string(wf), "Dispatch table")
+	require.Contains(t, string(wf), "<!-- zprof:begin overlay=ios-swift block=workflow-extension -->")
 }
 
 func TestE2E_IOSApplyWithGates(t *testing.T) {
