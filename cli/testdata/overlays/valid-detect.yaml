@@ -1,0 +1,11 @@
+name: ios-swift
+detect:
+  any_file:
+    - "*.xcodeproj"
+    - "*.xcworkspace"
+    - "Package.swift"
+    - "project.yml"
+  any_regex:
+    - path: "Package.swift"
+      match: "swift-tools-version"
+  confidence: high
