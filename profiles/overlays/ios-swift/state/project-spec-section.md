@@ -84,4 +84,4 @@
 **SwiftLint Rules:** Strict (ban implicit unwrapping, force casts, etc.)  
 **Type Safety:** No `Any`, prefer protocols  
 **Concurrency:** async/await throughout; no DispatchQueue callback chains  
-**Testing:** Unit tests for business logic; XCTest + Mockito for mocking
+**Testing:** Unit tests for business logic; XCTest + protocol-based mocking (или Cuckoo / Mockable если нужна библиотека)
