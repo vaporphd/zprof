@@ -9,6 +9,9 @@ return_format: |
   artifact: <commit SHA + files touched (before size → after size)>
   next: reviewer | null
   one_line: <≤120 chars>
+  confidence: <0.0-1.0; optional; self-reported confidence in the result>
+  self_check: [<optional list of checklist items you verified before returning>]
+  notes: <optional; single line noting anything the orchestrator should record but doesn't fit the schema>
 ---
 
 # Systems C++ Refactor Agent

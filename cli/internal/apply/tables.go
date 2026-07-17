@@ -80,6 +80,17 @@ func buildConsiliumTable(opts ApplyOpts) string {
 	}
 
 	toolRows := ""
+	// Base ships tool-agents too (evaluator lives in base since it doesn't
+	// need overlay-specific knowledge). Render those first so the base
+	// tools appear at the top of the companion table.
+	if opts.Base != nil && opts.Base.Manifest != nil {
+		for _, name := range opts.Base.Manifest.ToolAgents {
+			if _, ok := opts.Base.Agents[name]; !ok {
+				continue
+			}
+			toolRows += "| " + name + " | " + name + " | base |\n"
+		}
+	}
 	for _, o := range opts.Overlays {
 		if o == nil || o.Manifest == nil {
 			continue

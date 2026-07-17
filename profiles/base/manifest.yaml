@@ -4,4 +4,5 @@ version: 0.1.0
 requires_base: ">= 0.0.0"
 router: agent-loop-router.md
 roles: []
-tool_agents: []
+tool_agents:
+  - evaluator

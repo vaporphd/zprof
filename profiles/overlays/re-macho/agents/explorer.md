@@ -10,6 +10,9 @@ return_format: |
   sub_questions_answered_static: <int>
   next: hypothesizer
   one_line: <≤120 chars>
+  confidence: <0.0-1.0; optional; self-reported confidence in the result>
+  self_check: [<optional list of checklist items you verified before returning>]
+  notes: <optional; single line noting anything the orchestrator should record but doesn't fit the schema>
 ---
 
 # Explorer — re-macho overlay (static Mach-O reverse engineering)
