@@ -1,0 +1,20 @@
+name: backend-python
+display_name: "Backend / Python (FastAPI + SQLAlchemy 2 + Pydantic 2 + uv)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - uv-manager
+  - pytest-runner
+  - alembic-manager
+  - ruff-checker
+  - mypy-checker
+  - init-fastapi

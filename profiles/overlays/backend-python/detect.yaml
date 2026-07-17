@@ -1,0 +1,19 @@
+name: backend-python
+detect:
+  any_file:
+    - "pyproject.toml"
+    - "uv.lock"
+    - "poetry.lock"
+    - "requirements.txt"
+    - "requirements-dev.txt"
+    - "setup.py"
+    - "setup.cfg"
+    - "manage.py"
+  any_regex:
+    - path: "pyproject.toml"
+      match: "fastapi|starlette|uvicorn|gunicorn|django|flask|litestar"
+    - path: "requirements.txt"
+      match: "fastapi|django|flask|litestar|uvicorn|gunicorn"
+    - path: "**/*.py"
+      match: "from fastapi|from django|from flask|from litestar"
+  confidence: high
