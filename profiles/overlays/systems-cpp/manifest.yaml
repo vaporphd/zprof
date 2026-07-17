@@ -1,0 +1,20 @@
+name: systems-cpp
+display_name: "Systems / C++20-23 (CMake + Conan + clang + sanitizers)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - cmake-runner
+  - conan-manager
+  - clang-tidy-checker
+  - sanitizer-runner
+  - lldb-driver
+  - init-cpp

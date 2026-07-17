@@ -1,0 +1,23 @@
+name: systems-cpp
+detect:
+  any_file:
+    - "CMakeLists.txt"
+    - "CMakePresets.json"
+    - "Makefile"
+    - "conanfile.txt"
+    - "conanfile.py"
+    - "vcpkg.json"
+    - "meson.build"
+    - "BUILD"
+    - "BUILD.bazel"
+    - "*.pro"
+  any_regex:
+    - path: "CMakeLists.txt"
+      match: "CXX|CMAKE_CXX_STANDARD|add_library|add_executable|project\\("
+    - path: "conanfile.py"
+      match: "class .*ConanFile"
+    - path: "**/*.cpp"
+      match: "^#include\\s*<|std::|namespace"
+    - path: "**/*.hpp"
+      match: "#pragma once|#ifndef .+_HPP_"
+  confidence: high
