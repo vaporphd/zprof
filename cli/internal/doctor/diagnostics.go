@@ -8,9 +8,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/models"
 )
 
 // Issue severity levels.

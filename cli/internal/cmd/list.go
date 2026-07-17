@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/spf13/cobra"
 )
 

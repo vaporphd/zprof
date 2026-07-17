@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 	"gopkg.in/yaml.v3"
 )
 

@@ -4,7 +4,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/alcherk/zprof/internal/wizard"
+	"github.com/vaporphd/zprof/internal/wizard"
 	"github.com/spf13/cobra"
 )
 

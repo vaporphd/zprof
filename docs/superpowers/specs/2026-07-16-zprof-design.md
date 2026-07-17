@@ -28,12 +28,12 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  zprof (Go CLI, brew tap alcherk/tap/zprof)             │
+│  zprof (Go CLI, brew tap vaporphd/tap/zprof)             │
 │  — wizard, apply, sync, model resolver                  │
 └────────────────────────┬────────────────────────────────┘
                          ↓ читает / клонирует
 ┌─────────────────────────────────────────────────────────┐
-│  ~/.zprof/repo/  (клон alcherk/zprof-profiles, семвер)  │
+│  ~/.zprof/repo/  (клон vaporphd/zprof-profiles, семвер)  │
 │    base/         универсальные workflow-роли,           │
 │                  loop templates, gates                  │
 │    overlays/                                            │
@@ -461,13 +461,13 @@ intake (crash / dSYM / binary)
 
 Два репо:
 
-**`alcherk/zprof`** — Go CLI
+**`vaporphd/zprof`** — Go CLI
 - Cобирается через `goreleaser`
-- Brew tap: `alcherk/tap/zprof` → `brew install alcherk/tap/zprof`
+- Brew tap: `vaporphd/tap/zprof` → `brew install vaporphd/tap/zprof`
 - GitHub Releases с multi-arch бинарями (darwin-arm64/amd64, linux-arm64/amd64)
 - Self-update: `zprof update` → `brew upgrade`
 
-**`alcherk/zprof-profiles`** — контент (base/ + overlays/)
+**`vaporphd/zprof-profiles`** — контент (base/ + overlays/)
 - Семантические теги: `v0.1.0`, `v0.2.0`, ...
 - CLI по умолчанию тянет `main` (rolling), можно закрепить: `zprof sync --pin v0.1.0`
 - Локальный клон в `~/.zprof/repo/`

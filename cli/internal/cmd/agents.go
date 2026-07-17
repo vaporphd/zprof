@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
 )
 

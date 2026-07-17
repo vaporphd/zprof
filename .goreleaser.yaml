@@ -51,7 +51,7 @@ changelog:
 
 release:
   github:
-    owner: alcherk
+    owner: vaporphd
     name: zprof
   draft: false
   prerelease: auto
@@ -65,7 +65,7 @@ release:
 
     Install via Homebrew:
     ```sh
-    brew install alcherk/tap/zprof
+    brew install vaporphd/tap/zprof
     ```
 
     Or download the tarball for your platform below.
@@ -73,12 +73,12 @@ release:
 brews:
   - name: zprof
     repository:
-      owner: alcherk
+      owner: vaporphd
       name: homebrew-tap
       branch: main
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Formula
-    homepage: https://github.com/alcherk/zprof
+    homepage: https://github.com/vaporphd/zprof
     description: "Layered profile system for Claude Code (overlays + agents + workflows)"
     license: MIT
     install: |

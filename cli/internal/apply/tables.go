@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // roleAgents is the whitelist of agent basenames considered "roles" for the

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
 )
 

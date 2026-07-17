@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // ApplyOpts bundles everything Apply needs to write a project's agents,

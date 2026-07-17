@@ -3,7 +3,7 @@
 // Note: this package is named "sync", which collides with the stdlib "sync"
 // package. Callers outside this package should import it with an alias, e.g.:
 //
-//	sy "github.com/alcherk/zprof/internal/sync"
+//	sy "github.com/vaporphd/zprof/internal/sync"
 package sync
 
 import (

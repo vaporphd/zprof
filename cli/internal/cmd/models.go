@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
 )
 

@@ -24,7 +24,7 @@
 
 ```
 zprof/
-├── cli/                                        # Go module (module: github.com/alcherk/zprof)
+├── cli/                                        # Go module (module: github.com/vaporphd/zprof)
 │   ├── cmd/zprof/main.go                       # entrypoint; wires cobra root
 │   ├── internal/
 │   │   ├── models/registry.go                  # tier alias → exact ID
@@ -138,7 +138,7 @@ zprof/
 cd /Volumes/mydata/projects/zprof
 mkdir -p cli/cmd/zprof cli/internal profiles/base profiles/overlays
 cd cli
-go mod init github.com/alcherk/zprof
+go mod init github.com/vaporphd/zprof
 go get github.com/spf13/cobra@v1.9.1
 go get github.com/spf13/viper@v1.19.0
 go get github.com/charmbracelet/huh@v0.5.3
@@ -395,7 +395,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -429,7 +429,7 @@ func NewModelsCmd() *cobra.Command {
 // cli/cmd/zprof/main.go — add import + register
 import (
 	// ...
-	"github.com/alcherk/zprof/internal/cmd"
+	"github.com/vaporphd/zprof/internal/cmd"
 )
 
 func main() {
@@ -862,7 +862,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 	"gopkg.in/yaml.v3"
 )
 
@@ -958,7 +958,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -994,7 +994,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 type Match struct {
@@ -1756,7 +1756,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 type Overlay struct {
@@ -1981,7 +1981,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 )
 
 var modelLineRe = regexp.MustCompile(`(?m)^model:\s*(\S+)\s*$`)
@@ -2056,7 +2056,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2116,7 +2116,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // EnsureStateFiles writes each state template to its canonical path if not
@@ -2185,9 +2185,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -2274,9 +2274,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 type ApplyOpts struct {
@@ -2501,10 +2501,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/apply"
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/apply"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/spf13/cobra"
 )
 
@@ -2704,15 +2704,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/apply"
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
-	sy "github.com/alcherk/zprof/internal/sync"
+	"github.com/vaporphd/zprof/internal/apply"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
+	sy "github.com/vaporphd/zprof/internal/sync"
 	"github.com/spf13/cobra"
 )
 
-const defaultRemote = "https://github.com/alcherk/zprof-profiles.git"
+const defaultRemote = "https://github.com/vaporphd/zprof-profiles.git"
 
 func NewSyncCmd() *cobra.Command {
 	var remote string
@@ -2798,11 +2798,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/apply"
-	"github.com/alcherk/zprof/internal/detect"
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/apply"
+	"github.com/vaporphd/zprof/internal/detect"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/charmbracelet/huh"
 )
 
@@ -2944,7 +2944,7 @@ package cmd
 import (
 	"os"
 
-	"github.com/alcherk/zprof/internal/wizard"
+	"github.com/vaporphd/zprof/internal/wizard"
 	"github.com/spf13/cobra"
 )
 
@@ -2999,7 +2999,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/spf13/cobra"
 )
 
@@ -3062,7 +3062,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -3093,8 +3093,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
 )
 
@@ -3236,9 +3236,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/models"
 )
 
 type Issue struct {
@@ -3319,7 +3319,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alcherk/zprof/internal/doctor"
+	"github.com/vaporphd/zprof/internal/doctor"
 	"github.com/spf13/cobra"
 )
 
@@ -4375,9 +4375,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
 )
 
@@ -4540,7 +4540,7 @@ your project a working agent-loop (hft_moex-style) in one command.
 ## Quickstart
 
 ```
-brew install alcherk/tap/zprof   # (planned for Plan C)
+brew install vaporphd/tap/zprof   # (planned for Plan C)
 cd your-ios-project
 zprof init                       # detects stack, applies overlays
 ```
@@ -4641,7 +4641,7 @@ Estimated ~10-15 tasks:
 
 - goreleaser.yaml — multi-arch build (darwin/linux, arm64/amd64)
 - GitHub Releases workflow (tag → release)
-- Brew tap repo (`alcherk/homebrew-tap`) with Formula/zprof.rb
+- Brew tap repo (`vaporphd/homebrew-tap`) with Formula/zprof.rb
 - Split monorepo → separate `zprof-profiles` repo; CLI defaults to that URL
 - `zprof update` subcommand (self-update via brew)
 - Semver tagging discipline documented in RELEASING.md

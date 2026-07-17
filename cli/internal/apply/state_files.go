@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // EnsureStateFiles writes each state template to its canonical path in

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alcherk/zprof/internal/doctor"
+	"github.com/vaporphd/zprof/internal/doctor"
 	"github.com/spf13/cobra"
 )
 

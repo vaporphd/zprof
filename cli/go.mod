@@ -1,4 +1,4 @@
-module github.com/alcherk/zprof
+module github.com/vaporphd/zprof
 
 go 1.22
 

@@ -6,15 +6,15 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alcherk/zprof/internal/apply"
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
-	sy "github.com/alcherk/zprof/internal/sync"
+	"github.com/vaporphd/zprof/internal/apply"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
+	sy "github.com/vaporphd/zprof/internal/sync"
 	"github.com/spf13/cobra"
 )
 
-const defaultRemote = "https://github.com/alcherk/zprof-profiles.git"
+const defaultRemote = "https://github.com/vaporphd/zprof-profiles.git"
 
 // NewSyncCmd returns the `zprof sync` command.
 func NewSyncCmd() *cobra.Command {

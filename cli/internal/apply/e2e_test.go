@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/managed"
-	"github.com/alcherk/zprof/internal/manifest"
-	"github.com/alcherk/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/managed"
+	"github.com/vaporphd/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
 )
 

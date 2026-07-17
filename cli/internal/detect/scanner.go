@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 type Match struct {

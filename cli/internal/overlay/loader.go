@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 // Overlay is a fully loaded overlay directory: its manifest, detect rules,

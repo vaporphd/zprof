@@ -1,6 +1,6 @@
 # Agent Authoring Guide
 
-Standard for full-fledged Claude Code subagents in zprof overlays. Based on a deep read of AlexGladkov/harnest and alcherk/claude-code-agents.
+Standard for full-fledged Claude Code subagents in zprof overlays. Based on a deep read of AlexGladkov/harnest and vaporphd/claude-code-agents.
 
 ## What "full-fledged" means
 
@@ -32,7 +32,7 @@ return_format: |
 ---
 ```
 
-**Color convention (steal from alcherk):** `blue`=scaffolder/planner, `green`=backend generator/coordinator, `purple`=UI generator/refactor, `red`=diagnostics/YOLO, `orange`=security/devops, `cyan`=multiplatform/spec-writer.
+**Color convention (steal from vaporphd):** `blue`=scaffolder/planner, `green`=backend generator/coordinator, `purple`=UI generator/refactor, `red`=diagnostics/YOLO, `orange`=security/devops, `cyan`=multiplatform/spec-writer.
 
 **Model tier default:** `sonnet` for executors, `opus` for orchestrators and architect/reviewer/bug-hunter/refactor (roles requiring deep reasoning), `haiku` for mechanical tool wrappers and report writers.
 
@@ -128,7 +128,7 @@ Full reference survey at:
 `/private/tmp/claude-501/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824/scratchpad/reference-survey.md`
 
 Source repos (cloned locally, read-only):
-- `/private/tmp/claude-501/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824/scratchpad/refs/alcherk/`
+- `/private/tmp/claude-501/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824/scratchpad/refs/vaporphd/`
 - `/private/tmp/claude-501/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824/scratchpad/refs/harnest/`
 
-When writing a new agent, first read the equivalent alcherk agent for its stack (mapping in `reference-survey.md` Section "Role → alcherk source mapping").
+When writing a new agent, first read the equivalent vaporphd agent for its stack (mapping in `reference-survey.md` Section "Role → vaporphd source mapping").

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/alcherk/zprof/internal/cmd"
+	"github.com/vaporphd/zprof/internal/cmd"
 	"github.com/spf13/cobra"
 )
 

@@ -8,7 +8,7 @@ your project a working agent-loop (hft_moex-style) in one command.
 **Development mode (clone this repo):**
 
 ```bash
-git clone https://github.com/alcherk/zprof
+git clone https://github.com/vaporphd/zprof
 cd zprof/cli
 make install
 ln -snf $(pwd)/../profiles ~/.zprof/repo
@@ -18,7 +18,7 @@ cd /your/project && zprof init
 **Installation via brew:**
 
 ```bash
-brew install alcherk/tap/zprof
+brew install vaporphd/tap/zprof
 cd your-ios-project
 zprof init
 ```
@@ -62,12 +62,12 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The workflow builds macOS + Linux binaries (arm64 + amd64), publishes a GitHub Release with tarballs + checksums, and pushes an updated Formula to `alcherk/homebrew-tap`.
+The workflow builds macOS + Linux binaries (arm64 + amd64), publishes a GitHub Release with tarballs + checksums, and pushes an updated Formula to `vaporphd/homebrew-tap`.
 
 **One-time repo secrets required:**
 
-- `HOMEBREW_TAP_TOKEN` — Personal Access Token with `contents:write` on `alcherk/homebrew-tap` (fine-grained token scoped to that single repo). GITHUB_TOKEN is not enough because the Formula is pushed to a different repository.
+- `HOMEBREW_TAP_TOKEN` — Personal Access Token with `contents:write` on `vaporphd/homebrew-tap` (fine-grained token scoped to that single repo). GITHUB_TOKEN is not enough because the Formula is pushed to a different repository.
 
 **Prerequisite repos:**
 
-- `alcherk/homebrew-tap` must exist with a `Formula/` directory; empty repo is fine — goreleaser creates `Formula/zprof.rb` on first release.
+- `vaporphd/homebrew-tap` must exist with a `Formula/` directory; empty repo is fine — goreleaser creates `Formula/zprof.rb` on first release.

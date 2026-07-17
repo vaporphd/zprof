@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 
-	"github.com/alcherk/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/models"
 )
 
 var modelLineRe = regexp.MustCompile(`(?m)^model:\s*(\S+)\s*$`)

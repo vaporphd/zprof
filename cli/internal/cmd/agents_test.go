@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alcherk/zprof/internal/manifest"
+	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/stretchr/testify/require"
 )
 
