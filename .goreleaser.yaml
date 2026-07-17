@@ -1,0 +1,94 @@
+version: 2
+
+project_name: zprof
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: zprof
+    dir: cli
+    main: ./cmd/zprof
+    binary: zprof
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+
+archives:
+  - id: zprof
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE*
+      - README.md
+      - profiles/**/*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - Merge pull request
+      - Merge branch
+
+release:
+  github:
+    owner: alcherk
+    name: zprof
+  draft: false
+  prerelease: auto
+  header: |
+    ## zprof {{ .Tag }}
+
+    Layered profile system for Claude Code — 7 overlays × ~13 deep agents each.
+
+  footer: |
+    ---
+
+    Install via Homebrew:
+    ```sh
+    brew install alcherk/tap/zprof
+    ```
+
+    Or download the tarball for your platform below.
+
+brews:
+  - name: zprof
+    repository:
+      owner: alcherk
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/alcherk/zprof
+    description: "Layered profile system for Claude Code (overlays + agents + workflows)"
+    license: MIT
+    install: |
+      bin.install "zprof"
+      (share/"zprof").install "profiles"
+    test: |
+      system "#{bin}/zprof", "--version"
+    caveats: |
+      On first use, bootstrap the profiles repo:
+        mkdir -p ~/.zprof
+        ln -s #{share}/zprof/profiles ~/.zprof/repo
+      Then in any project:
+        zprof init

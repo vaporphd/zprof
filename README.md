@@ -15,12 +15,19 @@ ln -snf $(pwd)/../profiles ~/.zprof/repo
 cd /your/project && zprof init
 ```
 
-**Installation via brew (planned for Plan C):**
+**Installation via brew:**
 
 ```bash
 brew install alcherk/tap/zprof
 cd your-ios-project
 zprof init
+```
+
+Requires a one-time bootstrap of the profiles repo (Formula does this into `$(brew --prefix)/share/zprof/profiles`):
+
+```bash
+mkdir -p ~/.zprof
+ln -s $(brew --prefix)/share/zprof/profiles ~/.zprof/repo
 ```
 
 ## What it does
@@ -45,3 +52,22 @@ cd cli
 make build test
 ZPROF_REPO=$PWD/../profiles ./bin/zprof init  # dev mode
 ```
+
+## Release (maintainer)
+
+Tag a version and push — GitHub Actions runs goreleaser end-to-end (`.github/workflows/release.yml`):
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The workflow builds macOS + Linux binaries (arm64 + amd64), publishes a GitHub Release with tarballs + checksums, and pushes an updated Formula to `alcherk/homebrew-tap`.
+
+**One-time repo secrets required:**
+
+- `HOMEBREW_TAP_TOKEN` — Personal Access Token with `contents:write` on `alcherk/homebrew-tap` (fine-grained token scoped to that single repo). GITHUB_TOKEN is not enough because the Formula is pushed to a different repository.
+
+**Prerequisite repos:**
+
+- `alcherk/homebrew-tap` must exist with a `Formula/` directory; empty repo is fine — goreleaser creates `Formula/zprof.rb` on first release.
