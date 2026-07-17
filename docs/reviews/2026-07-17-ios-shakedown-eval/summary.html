@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>zprof eval — 52353252…3824</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --dim: #6b7280;
+  --muted: #f3f4f6;
+  --border: #e5e7eb;
+  --ok: #10b981;
+  --ok-bg: #d1fae5;
+  --warn: #f59e0b;
+  --warn-bg: #fef3c7;
+  --bad: #ef4444;
+  --bad-bg: #fee2e2;
+  --accent: #6366f1;
+  --code-bg: #f3f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e5e7eb;
+    --dim: #94a3b8;
+    --muted: #1e293b;
+    --border: #334155;
+    --ok-bg: #064e3b;
+    --warn-bg: #78350f;
+    --bad-bg: #7f1d1d;
+    --code-bg: #1e293b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+}
+main.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.5rem; }
+h1 .dim { color: var(--dim); font-weight: 400; }
+h2 { font-size: 1.15rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+header .tier1-note { color: var(--dim); font-style: italic; margin-top: 0; }
+code {
+  font-family: "SF Mono", ui-monospace, "Menlo", monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  background: var(--code-bg);
+  border-radius: 3px;
+}
+dl.session-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0;
+}
+dl.session-meta dt {
+  color: var(--dim);
+  font-weight: 500;
+}
+dl.session-meta dd { margin: 0; word-break: break-all; }
+.dim { color: var(--dim); }
+.scroll { overflow-x: auto; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+table thead th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+table tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table tbody tr:hover { background: var(--muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.detail { max-width: 55ch; word-break: break-word; color: var(--dim); font-size: 0.85rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.15em 0.55em;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--muted);
+  color: var(--fg);
+}
+.badge.ok    { background: var(--ok-bg);   color: var(--ok); }
+.badge.warn  { background: var(--warn-bg); color: var(--warn); }
+.badge.bad   { background: var(--bad-bg);  color: var(--bad); }
+.badges { margin: 0.5rem 0; }
+.badges .badge { margin-right: 0.35rem; }
+
+.num.ok   { color: var(--ok);   font-weight: 600; }
+.num.warn { color: var(--warn); font-weight: 600; }
+.num.bad  { color: var(--bad);  font-weight: 600; }
+
+.ok { color: var(--ok); }
+p.ok { padding: 0.5rem 0.75rem; background: var(--ok-bg); border-left: 3px solid var(--ok); border-radius: 3px; }
+
+table.bars td.bars-role { width: 12rem; }
+table.bars td.bars-cell { width: 100%; }
+table.bars .bar {
+  height: 0.75rem;
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  border-radius: 2px;
+}
+
+details.violations-list summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+details.violations-list summary:hover { color: var(--fg); }
+details.violations-list[open] summary { margin-bottom: 0.5rem; }
+
+section.footer { margin-top: 3rem; color: var(--dim); }
+section.footer h2 { color: var(--fg); }
+section.footer ul { line-height: 1.7; }
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+<h1>zprof eval <span class="dim">— 52353252…3824</span></h1>
+<p class="tier1-note">Tier 1 — deterministic. No LLM ran. Zero tokens spent producing this page.</p>
+<dl class="session-meta">
+<dt>Session ID</dt><dd><code>52353252-b350-486d-9ad5-678f47053824</code></dd>
+<dt>Log path</dt><dd><code>/Users/alv/.claude/projects/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824.jsonl</code></dd>
+<dt>Span</dt><dd><strong>22h02m</strong> <span class="dim">(2026-07-16T14:47:47Z → 2026-07-17T12:50:11Z)</span></dd>
+<dt>Main model</dt><dd><code>claude-opus-4-7</code></dd>
+<dt>Main-loop tokens</dt><dd>in 2,519 / out 2,746,372 <span class="dim">(cache: 315,410,367 read, 7,647,888 create)</span></dd>
+<dt>Subagent tokens</dt><dd><strong>5,962,610</strong> output across <strong>78</strong> dispatches</dd>
+</dl>
+</header>
+<section>
+<h2>Per-role scorecard</h2>
+<div class="scroll">
+<table class="scoreboard">
+<thead><tr>
+<th>Role</th><th>Model</th><th>N</th><th>Pass@1</th><th>Median tok</th><th>ApT</th><th>Compliance</th><th>Notes</th>
+</tr></thead>
+<tbody>
+<tr><td><code>architect</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">108,855</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>bug-hunter</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">102,660</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>explorer</code></td><td><code>opus</code></td><td class="num">6</td><td class="num bad">0.00</td><td class="num">94,555</td><td class="num">0.0</td><td><span class="badge warn">preamble×5</span></td><td></td></tr>
+<tr><td><code>implementer</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">100,618</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>other</code></td><td><code>sonnet</code></td><td class="num">35</td><td class="num bad">0.00</td><td class="num">87,442</td><td class="num">0.0</td><td><span class="badge warn">preamble×29</span></td><td></td></tr>
+<tr><td><code>refactor-agent</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">109,915</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>reviewer</code></td><td><code>opus</code></td><td class="num">6</td><td class="num bad">0.00</td><td class="num">102,520</td><td class="num">0.0</td><td><span class="badge warn">preamble×5</span></td><td></td></tr>
+<tr><td><code>simulator-driver</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">102,397</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>spm-manager</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">0</td><td class="num">0.0</td><td><span class="ok">clean</span></td><td></td></tr>
+<tr><td><code>swiftlint-checker</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">79,931</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>tester</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">110,323</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>testflight-shipper</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">83,929</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>xcode-runner</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">0</td><td class="num">0.0</td><td><span class="ok">clean</span></td><td></td></tr>
+<tr><td><code>xcodegen-driver</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">83,459</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+</tbody></table>
+</div></section>
+<section>
+<h2>Token spend by role</h2>
+<div class="scroll"><table class="bars"><tbody>
+<tr><td class="bars-role"><code>other</code></td><td class="bars-cell"><div class="bar" style="width:100%"></div></td><td class="num">2,438,562</td></tr>
+<tr><td class="bars-role"><code>reviewer</code></td><td class="bars-cell"><div class="bar" style="width:21%"></div></td><td class="num">536,329</td></tr>
+<tr><td class="bars-role"><code>explorer</code></td><td class="bars-cell"><div class="bar" style="width:19%"></div></td><td class="num">484,734</td></tr>
+<tr><td class="bars-role"><code>architect</code></td><td class="bars-cell"><div class="bar" style="width:18%"></div></td><td class="num">441,805</td></tr>
+<tr><td class="bars-role"><code>refactor-agent</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">434,324</td></tr>
+<tr><td class="bars-role"><code>tester</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">431,651</td></tr>
+<tr><td class="bars-role"><code>bug-hunter</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">429,792</td></tr>
+<tr><td class="bars-role"><code>implementer</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">415,697</td></tr>
+<tr><td class="bars-role"><code>simulator-driver</code></td><td class="bars-cell"><div class="bar" style="width:4%"></div></td><td class="num">102,397</td></tr>
+<tr><td class="bars-role"><code>testflight-shipper</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">83,929</td></tr>
+<tr><td class="bars-role"><code>xcodegen-driver</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">83,459</td></tr>
+<tr><td class="bars-role"><code>swiftlint-checker</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">79,931</td></tr>
+</tbody></table></div>
+</section>
+<section>
+<h2>Contract violations</h2>
+<div class="badges">
+<span class="badge warn">return-preamble × 63</span><span class="badge bad">dispatch-never-returned × 15</span></div>
+<details class="violations-list">
+<summary>78 violations — click to expand</summary>
+<div class="scroll"><table><thead><tr><th>#</th><th>Role</th><th>Kind</th><th>Detail</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: File: `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/archite…</td></tr>
+<tr><td class="num">2</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/impleme…</td></tr>
+<tr><td class="num">3</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/teste…</td></tr>
+<tr><td class="num">4</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/bug-h…</td></tr>
+<tr><td class="num">5</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/refac…</td></tr>
+<tr><td class="num">6</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/explo…</td></tr>
+<tr><td class="num">7</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/revie…</td></tr>
+<tr><td class="num">8</td><td><code>xcode-runner</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">9</td><td><code>spm-manager</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">10</td><td><code>simulator-driver</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: This reads clean end to end — 201 lines, all sections present, no stray artifa…</td></tr>
+<tr><td class="num">11</td><td><code>testflight-shipper</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/testf…</td></tr>
+<tr><td class="num">12</td><td><code>xcodegen-driver</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/xcode…</td></tr>
+<tr><td class="num">13</td><td><code>swiftlint-checker</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents…</td></tr>
+<tr><td class="num">14</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: File: `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/ar…</td></tr>
+<tr><td class="num">15</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/im…</td></tr>
+<tr><td class="num">16</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/te…</td></tr>
+<tr><td class="num">17</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/bu…</td></tr>
+<tr><td class="num">18</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/…</td></tr>
+<tr><td class="num">19</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written to `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agen…</td></tr>
+<tr><td class="num">20</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/re…</td></tr>
+<tr><td class="num">21</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/uv…</td></tr>
+<tr><td class="num">22</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written. 181 lines, within the 180-230 target.</td></tr>
+<tr><td class="num">23</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. 208 lines, within the 200-260 target.</td></tr>
+<tr><td class="num">24</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote **ruff-checker.md** (191 lines) at `/Volumes/mydata/projects/zprof/p…</td></tr>
+<tr><td class="num">25</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/a…</td></tr>
+<tr><td class="num">26</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent written at `/Volumes/mydata/projects/zprof/profiles/overlays/backend-pytho…</td></tr>
+<tr><td class="num">27</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/arch…</td></tr>
+<tr><td class="num">28</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/impl…</td></tr>
+<tr><td class="num">29</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 447 lines - within the 350-450 target. Done.</td></tr>
+<tr><td class="num">30</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/bug-…</td></tr>
+<tr><td class="num">31</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/refa…</td></tr>
+<tr><td class="num">32</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/ex…</td></tr>
+<tr><td class="num">33</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/revi…</td></tr>
+<tr><td class="num">34</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">35</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">36</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">37</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agent…</td></tr>
+<tr><td class="num">38</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/age…</td></tr>
+<tr><td class="num">39</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/age…</td></tr>
+<tr><td class="num">40</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/archi…</td></tr>
+<tr><td class="num">41</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 496 lines — inside the 450-550 target.</td></tr>
+<tr><td class="num">42</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/teste…</td></tr>
+<tr><td class="num">43</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/bug-h…</td></tr>
+<tr><td class="num">44</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Landed at exactly 450 lines — top of the 350-450 target. Written to `/Volumes/…</td></tr>
+<tr><td class="num">45</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written at `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/…</td></tr>
+<tr><td class="num">46</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written 465 lines at `/Volumes/mydata/projects/zprof/profiles/overlays/systems-c…</td></tr>
+<tr><td class="num">47</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done, Alex. 211 lines, matches vite-runner shape and every requested section.</td></tr>
+<tr><td class="num">48</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done, Alex. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/…</td></tr>
+<tr><td class="num">49</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent created successfully at `/Volumes/mydata/projects/zprof/profiles/overlays/…</td></tr>
+<tr><td class="num">50</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents…</td></tr>
+<tr><td class="num">51</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/lldb-…</td></tr>
+<tr><td class="num">52</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/ini…</td></tr>
+<tr><td class="num">53</td><td><code>architect</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">54</td><td><code>implementer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">55</td><td><code>tester</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">56</td><td><code>bug-hunter</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">57</td><td><code>refactor-agent</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">58</td><td><code>explorer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">59</td><td><code>reviewer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">60</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents/reviewer.m…</td></tr>
+<tr><td class="num">61</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">62</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">63</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">64</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: ## Summary</td></tr>
+<tr><td class="num">65</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written to `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents…</td></tr>
+<tr><td class="num">66</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents/init…</td></tr>
+<tr><td class="num">67</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/intake.m…</td></tr>
+<tr><td class="num">68</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/unpacker…</td></tr>
+<tr><td class="num">69</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/explorer…</td></tr>
+<tr><td class="num">70</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Landed at 301 lines — inside the 300–400 target.</td></tr>
+<tr><td class="num">71</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/verifier…</td></tr>
+<tr><td class="num">72</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/re…</td></tr>
+<tr><td class="num">73</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: The agent file is complete at 201 lines, within the requested 200-260 range.</td></tr>
+<tr><td class="num">74</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 214 lines, within the 200-260 target. File is complete and consistent with sibli…</td></tr>
+<tr><td class="num">75</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 250 lines — squarely in the 250-320 target range. File complete at `/Volumes/m…</td></tr>
+<tr><td class="num">76</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 310 lines — within the 300-380 target range. The agent file is complete and se…</td></tr>
+<tr><td class="num">77</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent file written at `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho…</td></tr>
+<tr><td class="num">78</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 180 lines — within the 180-240 target range.</td></tr>
+</tbody></table></div>
+</details>
+</section>
+<section class="footer">
+<h2>What Tier 2 would add</h2>
+<ul>
+<li>Panel-judge quality (1-5) per dispatch across correctness / adherence / efficiency framings.</li>
+<li>Model-tier recommendation per role (advisory).</li>
+<li>Reasoning-quality assessment on ADR / review artifacts.</li>
+</ul>
+<p class="dim">Run <code>zprof eval --deep &lt;sessionId&gt;</code> to dispatch the <code>evaluator</code> subagent.</p>
+</section>
+</main></body></html>
