@@ -1,0 +1,19 @@
+name: re-macho
+display_name: "Reverse Engineering / Mach-O (otool + class-dump + Hopper + Frida + lldb)"
+version: 0.1.0
+loop_template: exploratory
+requires_base: ">= 0.1.0"
+roles:
+  - intake
+  - unpacker
+  - explorer
+  - hypothesizer
+  - verifier
+  - report-writer
+tool_agents:
+  - otool-runner
+  - class-dump-runner
+  - lldb-attach
+  - frida-instrumentor
+  - hopper-launcher
+  - entitlements-parser

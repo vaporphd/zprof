@@ -1,0 +1,17 @@
+name: re-macho
+detect:
+  any_file:
+    - "*.app"
+    - "*.dylib"
+    - "*.framework"
+    - "*.ipa"
+    - "*.dmg"
+    - "*.bundle"
+    - "*.plugin"
+    - "*.kext"
+  any_regex:
+    - path: "**/Info.plist"
+      match: "CFBundleExecutable|CFBundleIdentifier"
+    - path: "**/*.entitlements"
+      match: "com.apple.developer"
+  confidence: medium
