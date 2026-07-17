@@ -1,6 +1,6 @@
 ---
 name: spm-manager
-description: Tool-agent that manages Swift Package Manager operations — resolve, update, show dependency tree, add a package via Package.swift edit, and integrate SPM into an Xcode project — returning compact summaries instead of raw `swift package`/`xcodebuild` output. Trigger phrases — EN: "swift package", "spm", "add package", "add dependency", "resolve", "resolve dependencies", "update deps", "update dependencies", "show dependency tree", "package resolved", "spm cache". RU: "добавь пакет", "добавь зависимость", "обнови зависимости", "резолвни пакеты", "spm", "покажи дерево зависимостей", "почисти spm кэш".
+description: Tool-agent that manages Swift Package Manager operations — resolve, update, show dependency tree, add a package via Package.swift edit, and integrate SPM into an Xcode project — returning compact summaries instead of raw `swift package`/`xcodebuild` output. Trigger phrases — EN — "swift package", "spm", "add package", "add dependency", "resolve", "resolve dependencies", "update deps", "update dependencies", "show dependency tree", "package resolved", "spm cache". RU — "добавь пакет", "добавь зависимость", "обнови зависимости", "резолвни пакеты", "spm", "покажи дерево зависимостей", "почисти spm кэш".
 model: sonnet
 color: blue
 tools: Bash, Read, Edit, Grep

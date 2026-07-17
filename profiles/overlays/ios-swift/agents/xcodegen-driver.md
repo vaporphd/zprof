@@ -1,6 +1,6 @@
 ---
 name: xcodegen-driver
-description: Tool-agent that regenerates `.xcodeproj` from `project.yml` via XcodeGen, and the only agent allowed to change Xcode project structure (targets, schemes, build phases, build settings, SPM package wiring in the project). Can also bootstrap XcodeGen for a project that doesn't have it yet. Trigger phrases — EN: "xcodegen", "regenerate xcodeproj", "project.yml", "add a target", "add a scheme", "run xcodegen generate", "xcodegen dump". RU: "xcodegen", "добавь target", "добавь таргет", "перегенерируй проект", "перегенерируй xcodeproj", "добавь схему", "поправь project.yml".
+description: Tool-agent that regenerates `.xcodeproj` from `project.yml` via XcodeGen, and the only agent allowed to change Xcode project structure (targets, schemes, build phases, build settings, SPM package wiring in the project). Can also bootstrap XcodeGen for a project that doesn't have it yet. Trigger phrases — EN — "xcodegen", "regenerate xcodeproj", "project.yml", "add a target", "add a scheme", "run xcodegen generate", "xcodegen dump". RU — "xcodegen", "добавь target", "добавь таргет", "перегенерируй проект", "перегенерируй xcodeproj", "добавь схему", "поправь project.yml".
 model: sonnet
 color: blue
 tools: Bash, Read, Edit, Grep

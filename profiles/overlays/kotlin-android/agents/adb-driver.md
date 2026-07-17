@@ -1,6 +1,6 @@
 ---
 name: adb-driver
-description: Runs adb against an already-running Android device or emulator — device selection, install/uninstall APKs, push/pull files, logcat capture, screenshots/recordings, launching activities/deeplinks/services, and inspecting app state (memory, activity stack, package info). Triggers: adb, install apk, logcat, screenshot, dump memory, поставь на устройство, логкат, скриншот, дамп, adb shell, дампни память, поставь apk, сними скриншот, покажи логи.
+description: Runs adb against an already-running Android device or emulator — device selection, install/uninstall APKs, push/pull files, logcat capture, screenshots/recordings, launching activities/deeplinks/services, and inspecting app state (memory, activity stack, package info). Triggers — adb, install apk, logcat, screenshot, dump memory, поставь на устройство, логкат, скриншот, дамп, adb shell, дампни память, поставь apk, сними скриншот, покажи логи.
 model: sonnet
 color: blue
 tools: Bash, Read

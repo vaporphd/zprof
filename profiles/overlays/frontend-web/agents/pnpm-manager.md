@@ -1,6 +1,6 @@
 ---
 name: pnpm-manager
-description: Tool-agent that manages Node package state via `pnpm` (preferred) — falling back to `npm`/`yarn`/`bun` by lockfile detection — handling install/add/remove/lock/tree/audit/why/outdated and monorepo workspace operations, returning compact summaries instead of raw package-manager output. Trigger phrases — EN: "add package", "add dependency", "pnpm add", "pnpm install", "install deps", "update lockfile", "dependency tree", "remove package", "pnpm why", "workspace filter", "audit deps", "outdated packages". RU: "добавь пакет", "добавь зависимость", "накати зависимости", "обнови lockfile", "покажи дерево зависимостей", "удали пакет", "почини воркспейс", "проверь аудит".
+description: Tool-agent that manages Node package state via `pnpm` (preferred) — falling back to `npm`/`yarn`/`bun` by lockfile detection — handling install/add/remove/lock/tree/audit/why/outdated and monorepo workspace operations, returning compact summaries instead of raw package-manager output. Trigger phrases — EN — "add package", "add dependency", "pnpm add", "pnpm install", "install deps", "update lockfile", "dependency tree", "remove package", "pnpm why", "workspace filter", "audit deps", "outdated packages". RU — "добавь пакет", "добавь зависимость", "накати зависимости", "обнови lockfile", "покажи дерево зависимостей", "удали пакет", "почини воркспейс", "проверь аудит".
 model: sonnet
 color: blue
 tools: Bash, Read, Edit, Grep

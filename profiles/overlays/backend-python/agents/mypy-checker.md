@@ -1,6 +1,6 @@
 ---
 name: mypy-checker
-description: Tool-agent that runs mypy (static type checker for Python) in strict mode and reports type errors grouped by code and module—never dumps raw output into caller's context. Trigger phrases — EN: "run mypy", "type check", "static type analysis", "type errors", "check types", "strict mode". RU: "запусти mypy", "проверка типов", "статические типы", "типизация", "проверь типы".
+description: Tool-agent that runs mypy (static type checker for Python) in strict mode and reports type errors grouped by code and module—never dumps raw output into caller's context. Trigger phrases — EN — "run mypy", "type check", "static type analysis", "type errors", "check types", "strict mode". RU — "запусти mypy", "проверка типов", "статические типы", "типизация", "проверь типы".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

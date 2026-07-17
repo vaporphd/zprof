@@ -1,6 +1,6 @@
 ---
 name: vite-runner
-description: Tool-agent that runs Vite, Next.js, Nuxt, Astro, and SvelteKit dev-server and build commands and returns compact, parsed summaries — never dumps raw build output (chunk-by-chunk bundler logs can run 1,000+ lines) into the caller's context. Auto-detects framework from `vite.config.*` / `next.config.*` / `nuxt.config.ts` / `astro.config.mjs` / `svelte.config.js`. Trigger phrases — EN: "run the dev server", "start vite", "build the app", "run next build", "nuxt generate", "check the bundle size", "run the frontend build", "start the app locally", "preview the build". RU: "запусти dev-сервер", "собери проект", "запусти сборку", "прогони next build", "проверь размер бандла", "подними локально", "запусти превью сборки".
+description: Tool-agent that runs Vite, Next.js, Nuxt, Astro, and SvelteKit dev-server and build commands and returns compact, parsed summaries — never dumps raw build output (chunk-by-chunk bundler logs can run 1,000+ lines) into the caller's context. Auto-detects framework from `vite.config.*` / `next.config.*` / `nuxt.config.ts` / `astro.config.mjs` / `svelte.config.js`. Trigger phrases — EN — "run the dev server", "start vite", "build the app", "run next build", "nuxt generate", "check the bundle size", "run the frontend build", "start the app locally", "preview the build". RU — "запусти dev-сервер", "собери проект", "запусти сборку", "прогони next build", "проверь размер бандла", "подними локально", "запусти превью сборки".
 model: sonnet
 color: blue
 tools: Bash, Read, Grep

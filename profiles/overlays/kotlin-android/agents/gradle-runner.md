@@ -1,6 +1,6 @@
 ---
 name: gradle-runner
-description: Tool-agent that runs `./gradlew` commands and returns compact, parsed summaries — never dumps raw Gradle output into the caller's context. Trigger phrases — EN: "run gradle", "build apk", "assemble", "gradle task", "run the tests", "run gradlew", "build debug apk", "run lint", "check dependency tree". RU: "собери", "запусти gradle", "собери апк", "прогони тесты", "запусти градл", "собери дебажную сборку", "прогони линт", "проверь зависимости".
+description: Tool-agent that runs `./gradlew` commands and returns compact, parsed summaries — never dumps raw Gradle output into the caller's context. Trigger phrases — EN — "run gradle", "build apk", "assemble", "gradle task", "run the tests", "run gradlew", "build debug apk", "run lint", "check dependency tree". RU — "собери", "запусти gradle", "собери апк", "прогони тесты", "запусти градл", "собери дебажную сборку", "прогони линт", "проверь зависимости".
 model: sonnet
 color: blue
 tools: Bash, Read, Grep

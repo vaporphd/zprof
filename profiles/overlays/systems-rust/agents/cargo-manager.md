@@ -1,6 +1,6 @@
 ---
 name: cargo-manager
-description: Tool-agent that manages Rust dependency state via `cargo` — add/remove/update, workspace `[workspace.dependencies]`, `cargo tree`, feature flags, and Cargo profiles — falling back to a plain diff-and-report shape whenever the caller only wants inspection, not mutation. Trigger phrases — EN: "add crate", "add dependency", "cargo add", "cargo update", "update lockfile", "dependency tree", "cargo tree", "remove crate", "bump version", "workspace dependency", "cargo audit", "check for CVEs". RU: "добавь крейт", "добавь зависимость", "накати cargo update", "обнови lockfile", "покажи дерево зависимостей", "удали крейт", "обнови версию", "workspace-зависимость", "проверь уязвимости".
+description: Tool-agent that manages Rust dependency state via `cargo` — add/remove/update, workspace `[workspace.dependencies]`, `cargo tree`, feature flags, and Cargo profiles — falling back to a plain diff-and-report shape whenever the caller only wants inspection, not mutation. Trigger phrases — EN — "add crate", "add dependency", "cargo add", "cargo update", "update lockfile", "dependency tree", "cargo tree", "remove crate", "bump version", "workspace dependency", "cargo audit", "check for CVEs". RU — "добавь крейт", "добавь зависимость", "накати cargo update", "обнови lockfile", "покажи дерево зависимостей", "удали крейт", "обнови версию", "workspace-зависимость", "проверь уязвимости".
 model: sonnet
 color: blue
 tools: Bash, Read, Edit, Grep

@@ -1,6 +1,6 @@
 ---
 name: eslint-checker
-description: Tool-agent that runs ESLint 9 (flat config) + Prettier, detects violations, reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to auto-fix. EN triggers: "eslint", "lint check", "format frontend", "check js style", "run eslint", "fix linting". RU: "eslint", "линтер", "проверь js", "отформатируй", "прогони eslint", "поправь стиль".
+description: Tool-agent that runs ESLint 9 (flat config) + Prettier, detects violations, reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to auto-fix. EN triggers — "eslint", "lint check", "format frontend", "check js style", "run eslint", "fix linting". RU — "eslint", "линтер", "проверь js", "отформатируй", "прогони eslint", "поправь стиль".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

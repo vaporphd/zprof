@@ -1,6 +1,6 @@
 ---
 name: emulator-driver
-description: Tool-agent that manages Android emulator (AVD) lifecycle — list, create, start, stop, wait-for-boot, wipe user data, snapshot save/load. Trigger phrases — EN: "start emulator", "stop emulator", "list avds", "boot emulator", "wipe emulator", "cold boot", "create avd", "kill emulator", "emulator status". RU: "запусти эмулятор", "останови эмулятор", "список авд", "загрузи эмулятор", "сотри данные эмулятора", "холодная загрузка", "создай авд", "убей эмулятор", "avd".
+description: Tool-agent that manages Android emulator (AVD) lifecycle — list, create, start, stop, wait-for-boot, wipe user data, snapshot save/load. Trigger phrases — EN — "start emulator", "stop emulator", "list avds", "boot emulator", "wipe emulator", "cold boot", "create avd", "kill emulator", "emulator status". RU — "запусти эмулятор", "останови эмулятор", "список авд", "загрузи эмулятор", "сотри данные эмулятора", "холодная загрузка", "создай авд", "убей эмулятор", "avd".
 model: sonnet
 color: blue
 tools: Bash, Read

@@ -1,6 +1,6 @@
 ---
 name: rustfmt-checker
-description: Tool-agent that runs rustfmt (Rust formatter) in check-only mode by default, parsing format drift and returning a compact summary. Never writes (applies formatting) without explicit opt-in; never modifies rustfmt.toml without asking. Sibling [[clippy-checker]] handles lints. Trigger phrases — EN: "check formatting", "check if code is formatted", "format check", "is it formatted", "would rustfmt change anything", "check code style", "format drift". RU: "проверь форматирование", "проверь стиль кода", "есть ли расхождения в форматировании", "проверь rustfmt", "форматирование в порядке".
+description: Tool-agent that runs rustfmt (Rust formatter) in check-only mode by default, parsing format drift and returning a compact summary. Never writes (applies formatting) without explicit opt-in; never modifies rustfmt.toml without asking. Sibling [[clippy-checker]] handles lints. Trigger phrases — EN — "check formatting", "check if code is formatted", "format check", "is it formatted", "would rustfmt change anything", "check code style", "format drift". RU — "проверь форматирование", "проверь стиль кода", "есть ли расхождения в форматировании", "проверь rustfmt", "форматирование в порядке".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

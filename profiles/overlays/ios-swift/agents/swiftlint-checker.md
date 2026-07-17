@@ -1,6 +1,6 @@
 ---
 name: swiftlint-checker
-description: Tool-agent that runs swiftlint (Swift style checker plus a subset of semantic rules, pinned 0.55+) via Homebrew binary or SPM build plugin, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to `--fix`. Trigger phrases — EN: "swiftlint", "lint swift", "style swift", "check swift style", "run swiftlint", "swiftlint fix", "format swift". RU: "swiftlint", "стиль", "залинтуй swift", "проверь стиль свифт", "прогони swiftlint", "почисти стиль", "поправь форматирование".
+description: Tool-agent that runs swiftlint (Swift style checker plus a subset of semantic rules, pinned 0.55+) via Homebrew binary or SPM build plugin, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to `--fix`. Trigger phrases — EN — "swiftlint", "lint swift", "style swift", "check swift style", "run swiftlint", "swiftlint fix", "format swift". RU — "swiftlint", "стиль", "залинтуй swift", "проверь стиль свифт", "прогони swiftlint", "почисти стиль", "поправь форматирование".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

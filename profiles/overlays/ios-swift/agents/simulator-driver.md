@@ -1,6 +1,6 @@
 ---
 name: simulator-driver
-description: Tool-agent that manages iOS Simulator lifecycle via `xcrun simctl` — list devices, boot/shutdown, install/uninstall app, launch with args, capture logs/screenshots/recordings, reset content. Trigger phrases — EN: "simulator", "simctl", "boot simulator", "install app on simulator", "launch on simulator", "simulator screenshot", "reset simulator", "erase simulator". RU: "симулятор", "запусти симулятор", "установи app", "установи приложение на симулятор", "скриншот симулятора", "сбрось симулятор", "загрузи симулятор".
+description: Tool-agent that manages iOS Simulator lifecycle via `xcrun simctl` — list devices, boot/shutdown, install/uninstall app, launch with args, capture logs/screenshots/recordings, reset content. Trigger phrases — EN — "simulator", "simctl", "boot simulator", "install app on simulator", "launch on simulator", "simulator screenshot", "reset simulator", "erase simulator". RU — "симулятор", "запусти симулятор", "установи app", "установи приложение на симулятор", "скриншот симулятора", "сбрось симулятор", "загрузи симулятор".
 model: sonnet
 color: blue
 tools: Bash, Read

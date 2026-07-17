@@ -1,6 +1,6 @@
 ---
 name: clang-tidy-checker
-description: Tool-agent that runs clang-tidy 18+ against C++ codebase, consumes compile_commands.json from [[cmake-runner]], detects violations, reports findings grouped by check category — never applies --fix without explicit user opt-in. EN triggers: "clang-tidy", "tidy", "check cpp style", "c++ lint", "run clang-tidy". RU: "clang-tidy", "линтер C++", "проверь стиль", "прогони tidy", "поправь tidy".
+description: Tool-agent that runs clang-tidy 18+ against C++ codebase, consumes compile_commands.json from [[cmake-runner]], detects violations, reports findings grouped by check category — never applies --fix without explicit user opt-in. EN triggers — "clang-tidy", "tidy", "check cpp style", "c++ lint", "run clang-tidy". RU — "clang-tidy", "линтер C++", "проверь стиль", "прогони tidy", "поправь tidy".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

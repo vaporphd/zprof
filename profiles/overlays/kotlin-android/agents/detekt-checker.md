@@ -1,6 +1,6 @@
 ---
 name: detekt-checker
-description: Tool-agent that runs detekt (static code analysis for Kotlin) via the `io.gitlab.arturbosch.detekt` Gradle plugin and reports code smells, complexity metrics, and rule violations grouped by category — never dumps the raw XML report into the caller's context. Trigger phrases — EN: "run detekt", "static analysis", "code smells", "complexity", "detekt baseline", "check complexity metrics". RU: "детект", "статанализ", "запусти детект", "код смеллы", "сложность", "проверь сложность кода".
+description: Tool-agent that runs detekt (static code analysis for Kotlin) via the `io.gitlab.arturbosch.detekt` Gradle plugin and reports code smells, complexity metrics, and rule violations grouped by category — never dumps the raw XML report into the caller's context. Trigger phrases — EN — "run detekt", "static analysis", "code smells", "complexity", "detekt baseline", "check complexity metrics". RU — "детект", "статанализ", "запусти детект", "код смеллы", "сложность", "проверь сложность кода".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

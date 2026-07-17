@@ -1,6 +1,6 @@
 ---
 name: ktlint-checker
-description: Tool-agent that runs ktlint (Kotlin style checker, pinned 1.3.x) via the Gradle plugin or standalone jar, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to formatting. Trigger phrases — EN: "ktlint", "style check", "format kotlin", "lint kotlin", "check kotlin style", "run ktlint", "fix style", "format the code". RU: "ktlint", "стиль", "отформатируй kotlin", "проверь стиль", "прогони линтер", "поправь форматирование", "почисти стиль".
+description: Tool-agent that runs ktlint (Kotlin style checker, pinned 1.3.x) via the Gradle plugin or standalone jar, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to formatting. Trigger phrases — EN — "ktlint", "style check", "format kotlin", "lint kotlin", "check kotlin style", "run ktlint", "fix style", "format the code". RU — "ktlint", "стиль", "отформатируй kotlin", "проверь стиль", "прогони линтер", "поправь форматирование", "почисти стиль".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

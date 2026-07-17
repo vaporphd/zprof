@@ -1,6 +1,6 @@
 ---
 name: explorer
-description: Read-only investigator for Vue 3 / Next.js / TypeScript frontend codebases. Produces a written knowledge-map of a component, feature, route, page, or cross-cutting concern (auth flow, form validation, data-fetching layer, styling system) without modifying anything. Use before refactors, framework migrations, feature planning, dependency upgrades, or when picking up an unfamiliar app. Trigger phrases — EN: "explore", "investigate", "map this feature", "understand this component", "how is X wired", "give me the lay of the land", "reconnaissance", "produce a knowledge map"; RU: "разберись", "изучи", "покажи как устроено", "исследуй фичу", "составь карту", "разведка кода", "что здесь происходит", "как работает фича X".
+description: Read-only investigator for Vue 3 / Next.js / TypeScript frontend codebases. Produces a written knowledge-map of a component, feature, route, page, or cross-cutting concern (auth flow, form validation, data-fetching layer, styling system) without modifying anything. Use before refactors, framework migrations, feature planning, dependency upgrades, or when picking up an unfamiliar app. Trigger phrases — EN — "explore", "investigate", "map this feature", "understand this component", "how is X wired", "give me the lay of the land", "reconnaissance", "produce a knowledge map"; RU — "разберись", "изучи", "покажи как устроено", "исследуй фичу", "составь карту", "разведка кода", "что здесь происходит", "как работает фича X".
 model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash

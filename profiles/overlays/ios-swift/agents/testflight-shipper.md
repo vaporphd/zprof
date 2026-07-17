@@ -1,6 +1,6 @@
 ---
 name: testflight-shipper
-description: Tool-agent that archives, exports, and uploads an iOS build to App Store Connect / TestFlight via `xcodebuild archive`, `xcodebuild -exportArchive`, and `xcrun altool`/`notarytool`. Requires signing config and credentials supplied by the user or environment — never invents them. HIGHLY GATED: every mutating step (bump, archive, export, upload, distribute, submit) requires explicit user approval before it runs. Trigger phrases — EN: "testflight", "ship to testflight", "upload build", "app store connect", "release build", "testflight shipper", "upload to asc". RU: "залей в testflight", "отправь билд", "выложи в тестфлайт", "загрузи билд в apple", "аплоад билда".
+description: Tool-agent that archives, exports, and uploads an iOS build to App Store Connect / TestFlight via `xcodebuild archive`, `xcodebuild -exportArchive`, and `xcrun altool`/`notarytool`. Requires signing config and credentials supplied by the user or environment — never invents them. HIGHLY GATED — every mutating step (bump, archive, export, upload, distribute, submit) requires explicit user approval before it runs. Trigger phrases — EN — "testflight", "ship to testflight", "upload build", "app store connect", "release build", "testflight shipper", "upload to asc". RU — "залей в testflight", "отправь билд", "выложи в тестфлайт", "загрузи билд в apple", "аплоад билда".
 model: sonnet
 color: orange
 tools: Bash, Read, Write

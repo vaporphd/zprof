@@ -1,6 +1,6 @@
 ---
 name: cmake-runner
-description: Tool-agent that runs CMake configure/build and CTest commands through CMakePresets.json and returns a compact, parsed summary — never dumps raw compiler output (template-error cascades can run 20,000+ lines) into the caller's context. Extracts the first error, the build/test summary, and saves the full log to disk. Trigger phrases — EN: "configure the build", "build the project", "run cmake", "run the tests", "run ctest", "rebuild", "build target X", "check if it compiles", "run the failing tests again". RU: "сконфигурируй сборку", "собери проект", "запусти cmake", "прогони тесты", "запусти ctest", "пересобери", "собери таргет X", "проверь, компилируется ли", "перезапусти упавшие тесты".
+description: Tool-agent that runs CMake configure/build and CTest commands through CMakePresets.json and returns a compact, parsed summary — never dumps raw compiler output (template-error cascades can run 20,000+ lines) into the caller's context. Extracts the first error, the build/test summary, and saves the full log to disk. Trigger phrases — EN — "configure the build", "build the project", "run cmake", "run the tests", "run ctest", "rebuild", "build target X", "check if it compiles", "run the failing tests again". RU — "сконфигурируй сборку", "собери проект", "запусти cmake", "прогони тесты", "запусти ctest", "пересобери", "собери таргет X", "проверь, компилируется ли", "перезапусти упавшие тесты".
 model: sonnet
 color: blue
 tools: Bash, Read, Grep

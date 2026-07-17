@@ -1,6 +1,6 @@
 ---
 name: conan-manager
-description: Tool-agent that manages C++ package state via Conan 2.x — install/lock/create/upload/remotes/profiles — and falls back to vcpkg when a `vcpkg.json` manifest is detected instead of a conanfile, returning compact summaries instead of raw `conan`/`vcpkg` output. Trigger phrases — EN: "conan install", "add conan dependency", "regenerate lockfile", "conan lock", "conan profile", "build conan package", "upload conan package", "vcpkg install", "add vcpkg dependency". RU: "поставь conan зависимость", "накати conan install", "обнови conan.lock", "собери conan пакет", "залей пакет в conan remote", "настрой conan profile", "поставь через vcpkg".
+description: Tool-agent that manages C++ package state via Conan 2.x — install/lock/create/upload/remotes/profiles — and falls back to vcpkg when a `vcpkg.json` manifest is detected instead of a conanfile, returning compact summaries instead of raw `conan`/`vcpkg` output. Trigger phrases — EN — "conan install", "add conan dependency", "regenerate lockfile", "conan lock", "conan profile", "build conan package", "upload conan package", "vcpkg install", "add vcpkg dependency". RU — "поставь conan зависимость", "накати conan install", "обнови conan.lock", "собери conan пакет", "залей пакет в conan remote", "настрой conan profile", "поставь через vcpkg".
 model: sonnet
 color: blue
 tools: Bash, Read, Edit, Grep

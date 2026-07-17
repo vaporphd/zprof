@@ -1,6 +1,6 @@
 ---
 name: tsc-checker
-description: Tool-agent that runs tsc --noEmit and vue-tsc for type-safe TypeScript/Vue, returning compact error summary—never raw output. Trigger phrases — EN: "run tsc", "type check", "typescript errors", "strict mode", "check types". RU: "запусти tsc", "проверка типов", "типы typescript", "режим strict", "проверь типы".
+description: Tool-agent that runs tsc --noEmit and vue-tsc for type-safe TypeScript/Vue, returning compact error summary—never raw output. Trigger phrases — EN — "run tsc", "type check", "typescript errors", "strict mode", "check types". RU — "запусти tsc", "проверка типов", "типы typescript", "режим strict", "проверь типы".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

@@ -1,6 +1,6 @@
 ---
 name: clippy-checker
-description: Tool-agent that runs clippy (Rust linter bundled with rustup, pinned 0.1.83+) via `cargo clippy`, parses violations, and reports a compact summary grouped by lint — never modifies code unless the user explicitly opts in to --fix. Trigger phrases — EN: "clippy", "lint check", "check rust style", "run clippy", "fix lints", "rust warnings". RU: "clippy", "линтер", "проверь стиль", "прогони clippy", "исправь линты", "ржавые ошибки".
+description: Tool-agent that runs clippy (Rust linter bundled with rustup, pinned 0.1.83+) via `cargo clippy`, parses violations, and reports a compact summary grouped by lint — never modifies code unless the user explicitly opts in to --fix. Trigger phrases — EN — "clippy", "lint check", "check rust style", "run clippy", "fix lints", "rust warnings". RU — "clippy", "линтер", "проверь стиль", "прогони clippy", "исправь линты", "ржавые ошибки".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep

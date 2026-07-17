@@ -1,6 +1,6 @@
 ---
 name: pytest-runner
-description: Tool-agent that runs `uv run pytest` and returns compact, parsed summaries — never dumps raw pytest output (failure cascades can run 5,000+ lines) into the caller's context. Trigger phrases — EN: "run pytest", "run the tests", "run tests", "test this", "run test suite", "check coverage", "run failing test", "rerun last failed". RU: "прогони тесты", "запусти pytest", "прогони тест-сьют", "проверь покрытие", "запусти упавший тест", "перезапусти failed".
+description: Tool-agent that runs `uv run pytest` and returns compact, parsed summaries — never dumps raw pytest output (failure cascades can run 5,000+ lines) into the caller's context. Trigger phrases — EN — "run pytest", "run the tests", "run tests", "test this", "run test suite", "check coverage", "run failing test", "rerun last failed". RU — "прогони тесты", "запусти pytest", "прогони тест-сьют", "проверь покрытие", "запусти упавший тест", "перезапусти failed".
 model: sonnet
 color: blue
 tools: Bash, Read, Grep

@@ -1,6 +1,6 @@
 ---
 name: ruff-checker
-description: Tool-agent that runs ruff (Rust-based Python linter and formatter, ~100x faster than pylint+flake8, pinned 0.7+) via `uv run`, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to formatting. Trigger phrases — EN: "ruff", "lint check", "format python", "lint python", "check python style", "run ruff", "fix style", "format the code". RU: "ruff", "линтер", "отформатируй python", "проверь стиль", "прогони линтер", "поправь форматирование", "почисти код".
+description: Tool-agent that runs ruff (Rust-based Python linter and formatter, ~100x faster than pylint+flake8, pinned 0.7+) via `uv run`, parses violations, and reports a compact summary grouped by rule — never modifies code unless the user explicitly opts in to formatting. Trigger phrases — EN — "ruff", "lint check", "format python", "lint python", "check python style", "run ruff", "fix style", "format the code". RU — "ruff", "линтер", "отформатируй python", "проверь стиль", "прогони линтер", "поправь форматирование", "почисти код".
 model: haiku
 color: cyan
 tools: Bash, Read, Grep
