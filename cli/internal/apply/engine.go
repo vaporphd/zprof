@@ -117,8 +117,8 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	}
 	res.StateFiles = state
 
-	// 6. .gitignore append (thoughts/)
-	if err := ensureGitignore(opts.ProjectDir); err != nil {
+	// 6. .gitignore append (base entries + per-overlay contributions).
+	if err := ensureGitignore(opts.ProjectDir, opts.Overlays); err != nil {
 		return nil, err
 	}
 
@@ -246,7 +246,7 @@ func renderManagedFile(path string, blocks []managed.Block, opts ApplyOpts) ([]m
 	return conflicts, nil
 }
 
-func ensureGitignore(dir string) error {
+func ensureGitignore(dir string, overlays []*overlay.Overlay) error {
 	p := filepath.Join(dir, ".gitignore")
 	data, err := os.ReadFile(p)
 	if err != nil && !os.IsNotExist(err) {
@@ -254,8 +254,19 @@ func ensureGitignore(dir string) error {
 	}
 	content := string(data)
 	entries := []string{"thoughts/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
+	for _, o := range overlays {
+		if o == nil || o.Manifest == nil {
+			continue
+		}
+		entries = append(entries, o.Manifest.Gitignore...)
+	}
 	needAppend := ""
+	seen := map[string]bool{}
 	for _, e := range entries {
+		if e == "" || seen[e] {
+			continue
+		}
+		seen[e] = true
 		if !containsLine(content, e) {
 			needAppend += e + "\n"
 		}

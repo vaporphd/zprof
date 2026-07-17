@@ -18,3 +18,24 @@ tool_agents:
   - testflight-shipper
   - xcodegen-driver
   - swiftlint-checker
+
+gitignore:
+  - .build/
+  - .swiftpm/
+  - "*.xcodeproj/"
+  - "*.xcworkspace/"
+  - DerivedData/
+  - xcuserdata/
+  - "*.xcuserstate"
+  - "*.hmap"
+  - "*.ipa"
+  - "*.dSYM.zip"
+  - "*.dSYM"
+
+executing:
+  implementer: "*.swift under Sources/**, Tests/**"
+  tester: "XCTest / swift-testing files under Tests/**"
+  xcodegen-driver: "project.yml + xcodegen generate; owns .xcodeproj shape"
+  spm-manager: "Package.swift, Package.resolved"
+  xcode-runner: "xcodebuild build/test invocations"
+  swiftlint-checker: ".swiftlint.yml + swiftlint runs"

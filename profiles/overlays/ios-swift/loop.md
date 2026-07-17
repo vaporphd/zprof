@@ -21,7 +21,10 @@ Package.swift, SwiftUI vs UIKit vs AppKit layers.
 | Lint | `swiftlint-checker` |
 
 ### Изоляция — специфичные правила
-- Никогда не открывать полностью `project.pbxproj` в контекст. Использовать
-  `xcodegen-driver` для правок.
+- **XcodeGen обязателен** для любого проекта с `.xcodeproj`. `project.yml` —
+  единственный источник правды. `project.pbxproj` gitignore-ится и никогда не
+  редактируется вручную. Bare SPM (`Package.swift` без `.xcodeproj`) — исключение.
+- Никогда не открывать `project.pbxproj` в контекст. Все правки структуры —
+  через `xcodegen-driver`, который меняет `project.yml` и запускает `xcodegen generate`.
 - xcodebuild output может быть 10k+ строк — parser tool-агент возвращает
   только first error + last N lines.

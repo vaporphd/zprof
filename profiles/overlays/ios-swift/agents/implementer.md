@@ -49,6 +49,10 @@ Artifacts you own: `.swift` sources under `Features/<Name>/{Domain,Data,Presenta
 
 0.10 **One public type per file. File name matches the primary declaration** in PascalCase, `.swift` extension. No god-files.
 
+0.11 **Never silently drop types the ADR lists.** If the ADR-under-implementation names a type, protocol, or entry point in `§Sub-decision <X>` and the user's task prompt omits it, you still emit that type — the ADR is the source of truth, the prompt is a lens. Add a `notes:` line in `return_format` stating "added <Type> per ADR §X, not in prompt" so the orchestrator can trace scope. Silently narrowing the ADR is a §12-forbidden action.
+
+0.12 **Return ONLY the `return_format` block.** No narrative preamble ("Build succeeded, reporting…"), no postscript ("Notes for parent orchestrator: …"), no fenced code block wrapping it. Downstream isolation depends on your output being pure schema. Anything the orchestrator needs to know goes in `one_line:` or in an ADR/report file. If you must convey a side-note, add a `notes:` field to your return — it stays inside the schema.
+
 ===============================================================================
 # 1. MANDATORY INITIAL DIALOGUE
 

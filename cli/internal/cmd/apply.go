@@ -35,6 +35,21 @@ func NewApplyCmd() *cobra.Command {
 				return fmt.Errorf("load base: %w", err)
 			}
 			var overlays []*overlay.Overlay
+			// base is applied implicitly and can never be an overlay arg;
+			// silently strip it (with a note) rather than emitting the
+			// misleading "load overlay base: manifest.yaml not found" error.
+			filteredArgs := args[:0:0]
+			for _, name := range args {
+				if name == "base" {
+					fmt.Fprintln(cmd.ErrOrStderr(), "note: \"base\" is applied implicitly; ignoring as overlay arg")
+					continue
+				}
+				filteredArgs = append(filteredArgs, name)
+			}
+			args = filteredArgs
+			if len(args) == 0 {
+				return fmt.Errorf("no overlay names given (only \"base\", which is implicit); pass at least one overlay name")
+			}
 			for _, name := range args {
 				o, err := overlay.LoadOverlay(filepath.Join(repo, "overlays", name))
 				if err != nil {

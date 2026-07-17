@@ -22,6 +22,16 @@ type OverlayManifest struct {
 	Router       string   `yaml:"router"`
 	Roles        []string `yaml:"roles"`
 	ToolAgents   []string `yaml:"tool_agents"`
+	// Gitignore is the list of extra `.gitignore` entries this overlay
+	// contributes. The apply engine unions them with the base entries and
+	// appends any that are not already present. Order-preserving.
+	Gitignore []string `yaml:"gitignore"`
+	// Executing maps agent name -> file-scope description (a comma-separated
+	// glob list rendered verbatim in CLAUDE.md's "## Executing" table). When
+	// present, the apply engine renders one row per entry; when absent the
+	// legacy detect-globs fallback is used, which is imprecise for overlays
+	// with multiple executing agents.
+	Executing map[string]string `yaml:"executing"`
 }
 
 // LoadOverlay reads and validates an overlay manifest.yaml file at path.

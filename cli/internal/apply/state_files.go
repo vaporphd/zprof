@@ -20,6 +20,7 @@ func EnsureStateFiles(projectDir string, base *overlay.Base, minimal bool) ([]st
 	if !minimal {
 		targets["project-spec-skeleton"] = filepath.Join(projectDir, "docs", "PROJECT_SPEC.md")
 		targets["adr-template"] = filepath.Join(projectDir, "docs", "adr", "0000-template.md")
+		targets["reviews-readme"] = filepath.Join(projectDir, "docs", "reviews", "README.md")
 	}
 
 	var created []string

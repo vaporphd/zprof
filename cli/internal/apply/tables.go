@@ -41,7 +41,9 @@ var gateRoles = map[string]bool{
 
 // buildConsiliumTable auto-generates the "## Consilium" markdown table
 // (role -> agent -> source) from the base and overlay agents actually
-// present in this apply.
+// present in this apply. A companion "### Tool Agents" section lists
+// each overlay's tool-agents (from manifest.ToolAgents) so the user can
+// see the full dispatchable inventory without diffing .claude/agents/.
 func buildConsiliumTable(opts ApplyOpts) string {
 	multi := len(opts.Overlays) > 1
 
@@ -77,13 +79,40 @@ func buildConsiliumTable(opts ApplyOpts) string {
 		}
 	}
 
+	toolRows := ""
+	for _, o := range opts.Overlays {
+		if o == nil || o.Manifest == nil {
+			continue
+		}
+		for _, name := range o.Manifest.ToolAgents {
+			if _, ok := o.Agents[name]; !ok {
+				continue
+			}
+			agent := name
+			if multi {
+				agent = overlay.NamespaceAgent(name, o.Manifest.Name)
+			}
+			toolRows += "| " + name + " | " + agent + " | " + o.Manifest.Name + " |\n"
+		}
+	}
+	if toolRows != "" {
+		b.WriteString("\n### Tool Agents\n\n")
+		b.WriteString("Dispatched from within a workflow rather than the top-level router. Present in `.claude/agents/` and callable by name.\n\n")
+		b.WriteString("| Tool | Agent | Source |\n")
+		b.WriteString("|---|---|---|\n")
+		b.WriteString(toolRows)
+	}
+
 	return strings.TrimRight(b.String(), "\n")
 }
 
 // buildExecutingTable auto-generates the "## Executing" markdown table
-// (agent -> file scope) from each overlay's detect.yaml globs, mapping to
-// the overlay's implementer agent (falling back to dev-orchestrator if the
-// overlay ships no implementer).
+// (agent -> file scope). Preferred source: overlay manifest's `executing:`
+// map, which lets each overlay declare exactly which agents own which
+// paths. Fallback (for overlays that don't declare `executing:`): map the
+// overlay's implementer to its detect.yaml file globs — imprecise, since
+// detect globs are for detection, not ownership, but preserved for
+// backward compatibility with older manifests.
 func buildExecutingTable(opts ApplyOpts) string {
 	multi := len(opts.Overlays) > 1
 
@@ -93,6 +122,20 @@ func buildExecutingTable(opts ApplyOpts) string {
 	b.WriteString("|---|---|\n")
 
 	for _, o := range opts.Overlays {
+		if o == nil || o.Manifest == nil {
+			continue
+		}
+		if len(o.Manifest.Executing) > 0 {
+			for _, agentName := range sortedMapKeys(o.Manifest.Executing) {
+				scope := o.Manifest.Executing[agentName]
+				agent := agentName
+				if multi {
+					agent = overlay.NamespaceAgent(agentName, o.Manifest.Name)
+				}
+				b.WriteString("| " + agent + " | " + scope + " |\n")
+			}
+			continue
+		}
 		agent := "dev-orchestrator"
 		if _, ok := o.Agents["implementer"]; ok {
 			agent = "implementer"
@@ -110,6 +153,15 @@ func buildExecutingTable(opts ApplyOpts) string {
 	}
 
 	return strings.TrimRight(b.String(), "\n")
+}
+
+func sortedMapKeys(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func sortedKeys(m map[string]string) []string {
