@@ -1,0 +1,20 @@
+name: kotlin-android
+display_name: "Android / Kotlin (Jetpack Compose + Coroutines + Hilt)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - gradle-runner
+  - adb-driver
+  - emulator-driver
+  - ktlint-checker
+  - detekt-checker
+  - init-android
