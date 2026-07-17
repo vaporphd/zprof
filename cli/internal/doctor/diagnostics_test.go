@@ -137,6 +137,57 @@ func TestDiagnoseUnclosedManagedBlockErrors(t *testing.T) {
 	require.True(t, findIssue(issues, LevelError, "managed marker error"))
 }
 
+// TestDiagnoseAgentBrokenYAMLFrontmatter guards the H0 regression: an
+// agent whose description contains `: ` (colon+space) inside a plain
+// scalar breaks YAML parsing. Claude Code silently drops the agent; doctor
+// must catch it before ship.
+func TestDiagnoseAgentBrokenYAMLFrontmatter(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	repo := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	// Description contains `EN: "..."` — the exact H0 pattern.
+	broken := "---\nname: implementer\n" +
+		`description: Writes code. Triggers — EN: "implement", "add"; RU: "реализуй".` +
+		"\nmodel: opus\n---\nbody\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"), []byte(broken), 0o644))
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelError, "YAML frontmatter parse error"))
+}
+
+// TestDiagnoseAgentNoFrontmatterErrors — an agent .md missing the leading
+// `---` fence isn't loadable by Claude Code either.
+func TestDiagnoseAgentNoFrontmatterErrors(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	repo := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "planner.md"),
+		[]byte("# Planner\n\nNo YAML anywhere.\n"), 0o644))
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelError, "no YAML frontmatter"))
+}
+
+// TestDiagnoseAgentFrontmatterMissingName — `name` is the only frontmatter
+// field the doctor treats as a hard contract because Claude Code keys the
+// tool registry on it.
+func TestDiagnoseAgentFrontmatterMissingName(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	repo := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "x.md"),
+		[]byte("---\nmodel: opus\ndescription: hi\n---\nbody\n"), 0o644))
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelError, "missing `name` field"))
+}
+
 func TestDiagnoseCleanProjectHasNoIssues(t *testing.T) {
 	proj := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
