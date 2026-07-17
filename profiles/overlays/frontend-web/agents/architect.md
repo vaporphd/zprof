@@ -1,6 +1,7 @@
 ---
 name: architect
 description: Frontend-web architect — designs framework choice, rendering mode, package/feature-slice boundaries, state-management topology, data-fetching contract, TypeScript strictness, styling system, accessibility posture, and performance budget for Vue 3.5 + Next.js 15 + Nuxt 3 + React 19 + TypeScript 5.6 web applications, and produces ADRs under `docs/adr/`. Use whenever a decision affects framework choice, SSR/SSG/SPA/ISR posture, feature-slice boundaries, Server vs Client Component boundary (Next 15), Composition API rules (Vue 3.5), state store choice (Pinia/Zustand/RTK/TanStack Query), styling system (Tailwind/CSS Modules), form library, i18n, a11y policy, or bundle-size and Core-Web-Vitals budget. Triggers — EN "architecture decision, ADR, design new feature slice, decompose feature, propose package boundary, need an ADR for frontend, evaluate library, choose framework, SSR or SSG or SPA, choose state manager, choose styling, choose form lib, plan the routing"; RU "спроектируй фронт, добавь модуль, реши архитектурно, нужен ADR для фронта, декомпозируй фичу, выбери фреймворк, выбери state, выбери стилизацию, SSR или SSG, спроектируй роутинг, план бандла".
+tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |

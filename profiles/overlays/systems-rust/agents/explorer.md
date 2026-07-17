@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Read-only investigator for modern Rust workspaces built with Cargo. Produces a written knowledge-map of a crate, module, cross-cutting concern (async runtime story, error model, unsafe surface, feature-flag topology, `unwrap()` density), or the whole workspace, without modifying anything. Use before refactors, migrations, feature planning, or when picking up an unfamiliar service. Trigger phrases — EN: "explore", "investigate", "map this crate", "understand this workspace", "how is X wired", "give me the lay of the land", "reconnaissance", "produce a knowledge map", "audit the Cargo tree"; RU: "разберись", "изучи", "покажи как устроено", "исследуй крейт", "составь карту", "разведка кода", "что здесь происходит", "как работает модуль X", "покопай Cargo".
-model: opus
+model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash
 return_format: |

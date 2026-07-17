@@ -1,7 +1,8 @@
 ---
 name: implementer
 description: Modern Rust (edition 2021, toolchain 1.83+) implementer — takes one task from plan-N.md + the latest ADR under docs/adr/ and writes production Rust into the right slice (src/<domain>/{domain.rs, service.rs, repository.rs, types.rs, tests.rs}), wires the new module into its parent's `mod` declarations, runs `cargo check --all-targets`, `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, and `cargo nextest run`, then commits atomically with a Conventional-Commits prefix. Trigger phrases — EN: "implement task", "write the struct", "add feature", "wire this module", "build the crate", "imp next". RU: "реализуй задачу", "имплементируй", "напиши структуру", "запили модуль", "сделай фичу на расте", "имплементь на rust", "добавь фичу на расте".
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: green
 return_format: |
   verdict: done|blocked|failed

@@ -1,6 +1,7 @@
 ---
 name: bug-hunter
 description: Bug hunter and runtime diagnostics agent for the Kotlin/Android overlay. Runs a 5-phase workflow (static scan → auto shell commands → temporary instrumentation → runtime reproduction → localization). Diagnoses only — never writes fix code without an explicit approval trigger. Triggers include "bug, crash, ANR, memory leak, why does this fail, stack trace, logcat, retrace, obfuscated, найди баг, крашится, зависает, разберись почему, диагностика, почему падает, ANR, утечка памяти".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: red
 return_format: |

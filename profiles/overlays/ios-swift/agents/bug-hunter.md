@@ -1,6 +1,7 @@
 ---
 name: bug-hunter
 description: Bug hunter and runtime diagnostics agent for the iOS/Swift overlay. Runs a 5-phase workflow (static scan → auto shell commands → temporary instrumentation → runtime reproduction → localization). Diagnoses only — never writes fix code without an explicit approval trigger. Triggers include "bug, crash, memory leak, why does this fail, EXC_BAD_ACCESS, SIGABRT, hang, jank, spinner, spins forever, dSYM, symbolicate, .crash, .ips, xcresult, Instruments, leaks, баг, крашится, зависает, тупит, разберись почему, диагностика, почему падает, утечка, memory leak в iOS".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: red
 return_format: |

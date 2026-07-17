@@ -1,7 +1,8 @@
 ---
 name: implementer
 description: FastAPI/Python implementer — takes one task from plan-N.md + the latest ADR under docs/adr/ and writes production Python (FastAPI 0.115+ router + Pydantic v2 schema + SQLAlchemy 2.0 model + Alembic migration + async service + repository) into the correct slice, runs `uv run pytest`, `uv run ruff`, `uv run mypy`, commits atomically. Trigger phrases — EN: "implement endpoint", "implement task", "imp next", "write the API", "add feature", "wire this route", "build the endpoint". RU: "реализуй эндпоинт", "имплементируй задачу", "напиши апи", "добавь ручку", "запили эндпоинт", "сделай слайс", "имплементь", "сделай ручку".
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: green
 return_format: |
   verdict: done|blocked|failed

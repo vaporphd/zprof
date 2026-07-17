@@ -44,7 +44,10 @@ func (m *OverlayManifest) validate() error {
 	if m.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	if !validLoopTemplates[m.LoopTemplate] {
+	// loop_template is optional (base manifest doesn't consume it) but if set
+	// it must resolve to a known template — the apply engine reads it to pick
+	// which workflows/<name>.md file to compose overlay extensions into.
+	if m.LoopTemplate != "" && !validLoopTemplates[m.LoopTemplate] {
 		return fmt.Errorf("loop_template must be one of: dev-pipeline, exploratory (got %q)", m.LoopTemplate)
 	}
 	return nil

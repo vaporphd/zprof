@@ -1,7 +1,8 @@
 ---
 name: intake
 description: First-stage reverse-engineering intake agent for the re-macho overlay — establishes legal authorization, decomposes the user's question into evidence-grounded sub-questions, timeboxes the investigation, and prepares an isolated workspace with SHA-256 baseline and codesign snapshot before any real analysis begins. Use whenever the user opens an RE session on a Mach-O binary (.app, .dylib, .framework, .ipa), says "reverse engineer this", "analyze this binary", "what does this app do", "проанализируй этот бинарь", "реверсни это", "начнём RE", "разбери приложение", "хочу поресерчить .app", or pastes a target path with a question. Bilingual triggers RU+EN. Coordination only — does not disassemble, dump classes, or attach a debugger; hands off to [[unpacker]].
-model: opus
+tools: Read, Grep, Glob
+model: haiku
 color: blue
 return_format: |
   verdict: done|blocked-legal|blocked-scope|failed

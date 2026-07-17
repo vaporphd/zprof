@@ -1,6 +1,7 @@
 ---
 name: refactor-agent
 description: Semantics-preserving refactoring for iOS/Swift (Swift 5.9+, Xcode 15+, SwiftUI, Combine, Swift Concurrency, swiftformat 0.53+, swiftlint 0.55+). Restructures existing code — SOLID enforcement, file/method splits, layer hygiene, SwiftUI extraction, concurrency cleanup, DTO/domain separation, visibility narrowing, dead-code removal. Never introduces features, never fixes bugs, never changes observable behavior. Triggers — EN "refactor, cleanup, split file, extract, restructure, rename, inline, extract method, extract type, tighten visibility, dedupe, hoist state". RU "отрефачь, разбей файл, вынеси, почисти, переименуй, инлайнь, отрефактори, чистка, декомпозиция, вынеси в extension, разбей класс, убери дублирование, вынеси во ViewModel".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: purple
 return_format: |

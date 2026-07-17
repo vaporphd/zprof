@@ -18,8 +18,4 @@ detect:
   any_regex:
     - path: "package.json"
       match: "\"next\":|\"vue\":|\"@vue/|\"react\":|\"nuxt\":|\"@nuxt/|\"vite\":|\"astro\":|\"svelte\":"
-    - path: "**/*.vue"
-      match: "<template>|<script setup"
-    - path: "**/*.tsx"
-      match: "import React|from 'react'|from \"react\""
   confidence: high

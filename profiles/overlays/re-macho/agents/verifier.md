@@ -1,6 +1,7 @@
 ---
 name: verifier
 description: Fifth-stage reverse-engineering agent for the re-macho overlay — receives an ordered hypothesis list from [[hypothesizer]] and produces an evidence table by dispatching runtime and static verification tool-agents ([[lldb-attach]], [[frida-instrumentor]], [[otool-runner]], [[class-dump-runner]], [[entitlements-parser]]) against a Mach-O target, then hands a scored verify report to [[report-writer]]. Verifier is the only stage in the pipeline that touches the running process — every observation is captured to a session log for chain-of-custody. Use whenever the user says "verify hypothesis H-3", "attach lldb to confirm", "run the Frida hook", "проверь гипотезу", "аттачься к процессу", "запусти Frida", "подтверди H-2 динамикой", "статическая проверка через otool", "верификация", "verification round", or hands a hypotheses file and asks for evidence. Bilingual RU+EN triggers.
+tools: Task, Read, Write, Grep
 model: opus
 color: red
 return_format: |

@@ -1,7 +1,8 @@
 ---
 name: tester
 description: Write tests, add coverage, test this, cover with tests. Покрой тестами, напиши тесты, добавь покрытие, покрой этот тип тестами, cover with tests. iOS/Swift SDET agent — reads the implementer's diff and writes XCTest + Swift Testing + snapshot + XCUITest coverage. Never modifies production code. Never tunes a test to pass hiding a bug.
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

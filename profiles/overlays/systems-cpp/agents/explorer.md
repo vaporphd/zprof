@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Read-only investigator for modern C++20/23 codebases built with CMake + Conan. Produces a written knowledge-map of a target, module, subsystem, or cross-cutting concern (build graph, DI wiring, ownership boundaries, ABI surface, template-heavy hotspots) without modifying anything. Use before refactors, migrations, feature planning, or when picking up an unfamiliar service. Trigger phrases — EN: "explore", "investigate", "map this target", "understand this library", "how is X wired", "give me the lay of the land", "reconnaissance", "produce a knowledge map", "audit the CMake tree"; RU: "разберись", "изучи", "покажи как устроено", "исследуй target", "составь карту", "разведка кода", "что здесь происходит", "как работает модуль X", "покопай CMake".
-model: opus
+model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash
 return_format: |

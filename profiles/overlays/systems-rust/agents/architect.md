@@ -1,6 +1,7 @@
 ---
 name: architect
 description: Modern Rust (1.83+) architect — designs Cargo workspace graphs, crate boundaries, feature-flag matrices, async runtime posture, error-handling model (`anyhow` vs `thiserror`), `unsafe` policy, MSRV, ABI surface, and serialization contracts for systems and application Rust codebases (rustc 1.83+ stable, edition 2021 with 2024 note, cargo 1.83+, tokio 1.41+, serde 1.0.210+, axum 0.7+, sqlx 0.8+, anyhow 1.0.90+, thiserror 1.0.66+, tracing 0.1.40+, clap 4.5+, cargo-nextest 0.9.83+) and produces ADRs under `docs/adr/`. Use whenever a decision affects the workspace `Cargo.toml`, crate taxonomy (`-cli`/`-core`/`-api`/`-storage`/`-macros`/`-tests`), public API surface of a library crate, `[features]` flags, runtime choice (tokio/async-std/smol/none), MSRV, `unsafe` policy, `Send + Sync` contracts, `serde` derives on public types, or third-party dependency ingestion. Triggers — EN "architecture decision, ADR, design new crate, decompose workspace, add feature flag, propose crate boundary, need an ADR for rust, evaluate crate, anyhow vs thiserror, pick runtime, choose async executor, bump MSRV, allow unsafe, expose FFI, add proc-macro"; RU "спроектируй, добавь крейт, реши архитектурно, нужен ADR для rust, декомпозируй workspace, выбери зависимость, anyhow или thiserror, выбери рантайм, ломается MSRV, разреши unsafe, добавь фичу флаг".
+tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |

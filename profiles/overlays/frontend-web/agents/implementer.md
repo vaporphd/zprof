@@ -1,7 +1,8 @@
 ---
 name: implementer
 description: Vue 3 / Next.js / TypeScript implementer — takes exactly one task from the current `plan-N.md` plus the latest ADR under `docs/adr/` and writes production frontend code (Vue SFCs, React/Next Server or Client Components, composables/hooks, stores, api client, Zod schemas, typed tests) into the correct feature slice; runs `pnpm test`, `pnpm typecheck`, `pnpm lint` before an atomic commit. Trigger phrases — EN "implement component", "implement task", "imp next", "build the page", "wire this route", "add feature", "ship the slice"; RU "реализуй компонент", "имплементируй задачу", "напиши страницу", "запили фичу", "сделай слайс", "имплементь фронт", "запили роут".
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: green
 return_format: |
   verdict: done|blocked|failed

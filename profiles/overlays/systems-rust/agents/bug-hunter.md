@@ -1,6 +1,7 @@
 ---
 name: bug-hunter
 description: Bug hunter and runtime diagnostics agent for the systems-rust overlay (Rust 1.83+ stable, cargo, nextest, sanitizers-via-miri, tokio-console, cargo-flamegraph). Runs a 5-phase workflow (static scan → auto cargo commands → temporary instrumentation → runtime reproduction → localization). Diagnoses only — never applies a fix without an explicit approval trigger. Triggers include "bug, panic, panicked at, unwrap on None, index out of bounds, borrow checker, cannot borrow as mutable, lifetime mismatch, does not live long enough, async deadlock, tokio deadlock, task hang, stack overflow, undefined behavior, miri, use after free in unsafe, data race, tokio blocked, cargo build fails, cargo check E0308, cargo nextest, clippy warning, performance regression, cargo bench regression, баг, паника, крашится Rust, дедлок в токио, лайфтайм, borrow checker ругается, разберись почему падает Rust".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: red
 return_format: |

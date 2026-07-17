@@ -1,7 +1,8 @@
 ---
 name: tester
 description: Write tests, add coverage, test this endpoint, cover with tests. Покрой тестами, напиши тесты pytest, добавь coverage, покрой этот эндпоинт, cover with tests. Python/FastAPI SDET agent — reads the implementer's diff and writes pytest unit + integration + endpoint tests. Never modifies production code. Never tunes a test to pass hiding a bug.
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

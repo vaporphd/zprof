@@ -11,6 +11,4 @@ detect:
   any_regex:
     - path: "Cargo.toml"
       match: "\\[package\\]|\\[workspace\\]|edition\\s*=\\s*\"20"
-    - path: "**/*.rs"
-      match: "^use |^fn |^pub|^struct|^impl|^mod|^trait"
   confidence: high

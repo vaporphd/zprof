@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Kotlin/Android code reviewer — audits diffs (single commit, branch-vs-main, module, or file) for architecture violations, coroutine misuse, Compose stability, null-safety, error handling, Android security (deep links, exported components, WebView, PendingIntent, EncryptedSharedPreferences, crypto), performance, test hygiene, dependency and build hygiene. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + performance + arch). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, review this commit, review the diff, verdict on branch, quality gate, block or approve"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода".
+tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |

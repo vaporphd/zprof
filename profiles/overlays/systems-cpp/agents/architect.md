@@ -1,6 +1,7 @@
 ---
 name: architect
 description: Modern C++20/23 architect — designs CMake target graphs, dependency arrows, ABI stability posture, module/header boundaries, ownership contracts, concurrency policy, and error-handling model for systems and application C++ codebases (clang++-18+ / g++-13+ / MSVC 19.38+ with CMake 3.28+, Conan 2.x or vcpkg, Ninja) and produces ADRs under `docs/adr/`. Use whenever a decision affects the CMake target graph, public headers, ABI, module interface (`.cppm`), template surface, sanitizer coverage, exception vs `std::expected` policy, ownership contract, threading model, or third-party dependency ingestion. Triggers — EN "architecture decision, ADR, design new target, decompose library, add module, propose target boundary, need an ADR for cpp, evaluate library, exceptions vs expected, pick allocator, choose concurrency, ABI break, PIMPL vs template"; RU "спроектируй, добавь таргет, реши архитектурно, нужен ADR для cpp, декомпозируй библиотеку, выбери библиотеку, C++ модули или заголовки, исключения или expected, ABI ломается, выбери многопоточность".
+tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |

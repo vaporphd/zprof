@@ -1,6 +1,7 @@
 ---
 name: refactor-agent
 description: Semantics-preserving refactoring for modern C++ (C++20/23, clang-18+, clang-tidy-18, clang-format-18, IWYU 0.22+, CMake 3.28+, Ninja, ctest presets, ASan/UBSan/TSan). Restructures existing code — SOLID enforcement, file/function splits, header hygiene, PIMPL introduction, concurrency cleanup, CMake target modernization, C++11→C++20/23 migrations (`boost::optional`→`std::optional`, `typedef`→`using`, `enable_if`→`concepts`, `sprintf`→`std::format`/`std::print`, `bool`+out-param→`std::expected`, manual threads→`std::jthread`, manual locks→RAII), naming, dead-code removal, const- and move-semantics sweeps. Never introduces features, never fixes bugs, never changes observable behavior. Triggers — EN: "refactor, cleanup, split header, extract, restructure, rename, inline, extract function, extract class, introduce pimpl, migrate to modules, migrate to ranges, migrate to format, migrate to expected, replace macro with constexpr, tighten const, header hygiene, IWYU sweep, modernize cmake target, dedupe". RU: "отрефачь, разбей заголовок, вынеси, почисти, переименуй, инлайнь, отрефактори, декомпозиция, введи pimpl, мигрируй на ranges, мигрируй на format, мигрируй на expected, замени макрос на constexpr, ужми const, вычисти заголовки, IWYU, модернизируй cmake, убери дублирование".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: purple
 return_format: |

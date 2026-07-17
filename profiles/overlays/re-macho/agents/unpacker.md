@@ -1,7 +1,8 @@
 ---
 name: unpacker
 description: Second-stage RE agent for the re-macho overlay. Extracts iOS/macOS containers (.ipa, .app, .dmg, .pkg, .framework, .dylib, raw Mach-O) into a workspace, thins fat binaries via lipo, verifies FairPlay encryption status, and (only with a confirmed jailbroken device) drives decryption via bagbak/frida-ios-dump. Bilingual triggers — EN "unpack this ipa", "extract the app bundle", "thin this fat binary", "is this FairPlay encrypted", "mount the dmg", "expand the pkg", "get the Mach-O out"; RU "распакуй ipa", "вытащи app бандл", "разбери фэт бинарь", "это фэрплэй зашифровано", "смонтируй dmg", "распакуй pkg", "достань мач-о".
-model: opus
+tools: Read, Write, Bash, Grep
+model: haiku
 color: cyan
 return_format: |
   verdict: done | blocked-encrypted | blocked-missing-tool | failed

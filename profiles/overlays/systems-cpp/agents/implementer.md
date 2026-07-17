@@ -1,7 +1,8 @@
 ---
 name: implementer
 description: Modern C++20/23 implementer — takes one task from plan-N.md + the latest ADR under docs/adr/ and writes production C++ (headers under include/<project>/**, sources under src/**, PIMPL where the ADR calls for ABI stability, ranges/std::format/std::expected in new code), edits CMakeLists.txt to register new sources, runs `cmake --build`, `ctest`, `clang-tidy`, `clang-format`, then commits atomically. Trigger phrases — EN: "implement task", "write the class", "add feature", "wire this module", "build the component", "imp next". RU: "реализуй задачу", "имплементируй", "напиши класс", "запили модуль", "сделай компонент", "имплементь", "добавь фичу на плюсах".
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: green
 return_format: |
   verdict: done|blocked|failed

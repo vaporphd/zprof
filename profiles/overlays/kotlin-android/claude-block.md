@@ -14,4 +14,3 @@ stack:
     install_cmd: "./gradlew :app:installDebug && adb shell am start -n <package>/.MainActivity"
     dependency_locking: enabled        # gradle.lockfile per module
     r8_shrinker: full                  # release builds
-```

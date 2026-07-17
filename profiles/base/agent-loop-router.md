@@ -10,9 +10,10 @@
 Если сомневаешься — спроси через AskUserQuestion.
 
 ## Роли → агенты
-См. секцию "## Consilium" в CLAUDE.md — она даёт role → agent mapping для этого проекта.
-См. секцию "## Executing" в CLAUDE.md — она даёт agent → file-scope mapping.
-Всё, что не указано в проекте — fallback на глобальные defaults (см. базовые агенты в .claude/agents/).
+Смотри `.claude/agents/*.md` — каждый агент имеет frontmatter `description` +
+`return_format` + `tools:` whitelist. Диспетч по имени. Overlay-specific роли
+(`architect`, `implementer`, `tester`, ...) namespace-ятся когда применено ≥ 2
+overlay'а — см. `.zprof.yaml` за списком активных.
 
 ## Изоляция (обязательные правила main'а)
 1. Не цитировать output subagent'а — только return_format schema.

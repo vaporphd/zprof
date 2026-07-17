@@ -1,6 +1,7 @@
 ---
 name: architect
 description: Kotlin/Android architect — designs module boundaries, layer rules, and dependency arrows for Android apps (Compose + Hilt + Coroutines) and produces ADRs under `docs/adr/`. Use whenever a decision affects module graph, DI wiring, navigation layering, persistence choice, or coroutine scoping. Triggers — EN "architecture decision, ADR, design new module, decompose feature, propose module boundary, need an ADR, evaluate library, plan the graph"; RU "спроектируй, добавь модуль, реши архитектурно, нужен ADR, декомпозируй фичу, выбери библиотеку, продумай слой".
+tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |

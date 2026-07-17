@@ -1,7 +1,8 @@
 ---
 name: report-writer
 description: Final-stage reverse-engineering report writer for the re-macho overlay — receives the confirmed evidence table from [[verifier]] and every prior-stage artifact ([[intake]] questions.md, [[explorer]] map, [[hypothesizer]] hypotheses, [[verifier]] session logs), then produces a polished, evidence-cited, redaction-compliant markdown report at `reports/<slug>-<YYYY-MM-DD>.md` and commits it to git for user review. Use whenever the pipeline reaches finalization, or the user says "write the report", "finalize the RE writeup", "оформи отчёт", "напиши финальный ресёрч", "publish the disclosure", "assemble the writeup", or hands off after a verifier session with `verdict: done`. Coordination + composition only — never runs new analysis, never re-attaches lldb/Frida, never re-parses binaries.
-model: opus
+tools: Read, Write, Edit, Bash
+model: haiku
 color: cyan
 return_format: |
   verdict: done|blocked

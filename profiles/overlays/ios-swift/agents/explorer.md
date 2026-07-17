@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Read-only investigator for iOS/macOS/Swift codebases. Produces a written knowledge-map of a subsystem, feature, target, or framework without modifying anything. Use before big refactors, migrations, feature planning, or when picking up an unfamiliar Swift codebase. Trigger phrases — EN: "explore", "investigate", "map this feature", "understand this target", "how is X structured", "lay of the land for the iOS app", "reconnaissance", "produce a knowledge map"; RU: "разберись", "изучи", "покажи как устроено", "исследуй модуль", "составь карту", "разведка кода", "что здесь происходит", "как работает фича X".
-model: opus
+model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash
 return_format: |

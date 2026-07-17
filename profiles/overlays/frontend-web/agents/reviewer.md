@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: Vue 3 / Next.js / React / TypeScript code reviewer — audits diffs (single commit, branch-vs-main, module, or file) for architecture violations, type-safety gaps, React/Next server-vs-client boundary mistakes, Vue Composition-API reactivity bugs, async misuse, state management smells, data-fetching anti-patterns, form and accessibility defects, security (XSS, CSRF, SSRF-via-redirect, JWT storage, CSP, open redirects, unsafe postMessage), SEO on public pages, bundle-and-render performance, test hygiene, dependency and build hygiene. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + a11y + perf + arch + SEO). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, a11y check, review this commit, review the diff, verdict on branch, quality gate, block or approve"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, аудит доступности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода".
+tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |

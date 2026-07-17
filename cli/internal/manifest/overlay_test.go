@@ -28,3 +28,13 @@ func TestLoadOverlayInvalidLoopTemplate(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "loop_template must be one of: dev-pipeline, exploratory")
 }
+
+// TestLoadOverlayEmptyLoopTemplateAllowed guards the base manifest case: base
+// doesn't consume loop_template (apply engine only reads it for real overlays),
+// so an empty value must be accepted rather than fail validation.
+func TestLoadOverlayEmptyLoopTemplateAllowed(t *testing.T) {
+	m, err := LoadOverlay(filepath.Join("..", "..", "testdata", "overlays", "no-loop-template.yaml"))
+	require.NoError(t, err)
+	require.Equal(t, "base", m.Name)
+	require.Equal(t, "", m.LoopTemplate)
+}

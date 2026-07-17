@@ -24,4 +24,3 @@ stack:
     format_cmd: "cargo fmt --all"
     check_cmd: "cargo check --all-targets"
     doc_cmd: "cargo doc --no-deps --document-private-items --open"
-```

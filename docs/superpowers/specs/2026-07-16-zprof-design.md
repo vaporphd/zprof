@@ -157,7 +157,7 @@ tool_agents:
 
 ### 5.4 Стандартный набор ролей overlay
 
-Все overlays поставляют одни и те же **6 stack-aware ролей**:
+Dev-pipeline overlays поставляют **7 stack-aware ролей** (RE-overlay использует другой набор — см. §12):
 
 - `architect` — знает Xcode targets / gradle modules / cargo workspace / FastAPI routes
 - `implementer` — пишет код по спеке в идиоматике стека
@@ -165,16 +165,21 @@ tool_agents:
 - `bug-hunter` — reproducer → failing test → fix, знает отладчик стека
 - `refactor-agent` — semantics-preserving трансформации со знанием ownership/типов
 - `explorer` — read-only investigation с корректным пониманием layout стека
+- `reviewer` — pre-PR ревью diff'а по стек-специфичному чеклисту (SOLID, ownership, async invariants, публичный API, тесты)
 
-Плюс **tool-агенты** (по overlay):
+Плюс опциональный **scaffolder** для fresh-project bootstrap: `init-fastapi`, `init-android`, `init-cpp`, `init-rust`. Один агент, одноразовый, работает только по пустой директории (см. `.claude/agents/init-*.md`). `ios-swift` / `frontend-web` пока без scaffolder'ов — на v2 backlog.
+
+Плюс **tool-агенты** (по overlay) — реальный ship-list v1:
 
 - **ios-swift:** `xcode-runner`, `spm-manager`, `simulator-driver`, `testflight-shipper`, `xcodegen-driver`, `swiftlint-checker`
-- **android-kotlin:** `gradle-driver`, `adb-runner`, `compose-designer`, `apk-signer`, `ktlint-checker`
-- **backend-python:** `fastapi-designer`, `pydantic-modeler`, `alembic-migrator`, `pytest-runner`, `docker-composer`, `pyright-checker`, `ruff-linter`
-- **frontend-web:** `component-designer`, `api-client-generator`, `vite-optimizer`, `playwright-runner`, `storybook-driver`, `lighthouse-checker`
-- **re-macho:** `intake-agent`, `macho-unpacker`, `dedupfind-driver`, `atos-runner`, `swift-demangler`, `hypothesizer`, `verifier`, `report-writer`
-- **systems-cpp:** `cmake-driver`, `sanitizer-runner`, `valgrind-runner`, `gdb-debugger`, `clang-format-checker`
-- **systems-rust:** `cargo-driver`, `clippy-checker`, `miri-runner`, `criterion-benchmarker`, `unsafe-auditor`, `rustsec-checker`
+- **kotlin-android:** `gradle-runner`, `adb-driver`, `emulator-driver`, `ktlint-checker`, `detekt-checker`, `init-android`
+- **backend-python:** `uv-manager`, `pytest-runner`, `alembic-manager`, `ruff-checker`, `mypy-checker`, `init-fastapi`
+- **frontend-web:** `pnpm-manager`, `vite-runner`, `vitest-runner`, `playwright-runner`, `eslint-checker`, `tsc-checker`
+- **re-macho:** `otool-runner`, `class-dump-runner`, `lldb-attach`, `frida-instrumentor`, `hopper-launcher`, `entitlements-parser` (см. §12 за lifecycle)
+- **systems-cpp:** `cmake-runner`, `conan-manager`, `clang-tidy-checker`, `sanitizer-runner`, `lldb-driver`, `init-cpp`
+- **systems-rust:** `cargo-runner`, `cargo-manager`, `clippy-checker`, `rustfmt-checker`, `miri-checker`, `init-rust`
+
+Расхождения с ранним черновиком: `pyright-checker` заменён на `mypy-checker` (более распространён в FastAPI ecosystem); `valgrind-runner`/`gdb-debugger` вырезаны из systems-cpp (macOS-first — sanitizers + lldb покрывают use case); `dedupfind-driver`/`atos-runner`/`swift-demangler` в re-macho отложены (в v1 верификация опирается на `otool` + `class-dump` + `lldb` + `frida`); `component-designer`/`storybook-driver`/`lighthouse-checker` во frontend-web — v2 backlog.
 
 ## 6. Изоляция agent-loop от main-сессии (4 уровня)
 
@@ -205,6 +210,8 @@ return_format: |
 > Никогда не выводи analysis/rationale в финальном сообщении. Полный вывод — только в `artifact`. Финальное сообщение = ТОЛЬКО схема выше.
 
 Main получает ~150 токенов на dispatch вместо 3000+.
+
+Extras разрешены — агент может добавлять дополнительные короткие поля к базовой схеме (`hypotheses_count`, `commit_sha`, `session_logs_count` и т.п.), если поля скалярные и укладываются в ≤5 токенов каждое. Orchestrator обязан парсить только базовые поля (`verdict`/`artifact`/`next`/`one_line`), extras — best-effort для UX main.
 
 ### T2 — Artifact-first storage
 
@@ -275,7 +282,9 @@ model: haiku
 - `planner`, `implementer`, `tester`, `explorer`, `docs-writer`, `plan-reviewer`, `dev-orchestrator`, `exploratory-orchestrator`
 
 **Haiku** — mechanical, tool-heavy:
-- `intake-agent`, `macho-unpacker`, `atos-runner`, `swift-demangler`, `report-writer`, `cold-look-auditor` (когда добавим)
+- `intake` (RE), `unpacker` (RE), `report-writer` (RE), checker'ы (`ruff-checker`, `mypy-checker`, `eslint-checker`, `tsc-checker`, `swiftlint-checker`, `ktlint-checker`, `detekt-checker`, `clippy-checker`, `rustfmt-checker`, `clang-tidy-checker`), `cold-look-auditor` (когда добавим)
+
+Tool-agents с нетривиальным парсингом вывода (runner'ы билд-систем, менеджеры зависимостей, live-process attach, `otool-runner`, `frida-instrumentor`, `lldb-attach`, `sanitizer-runner`, `alembic-manager`, `uv-manager`, `pnpm-manager`, `cargo-manager`, `cargo-runner`, `gradle-runner`, `cmake-runner`, `spm-manager`, `xcode-runner`, `simulator-driver` и подобные) остаются на **sonnet** — haiku теряет надёжность на длинных tool-output'ах.
 
 ### 7.4 Override
 
@@ -432,6 +441,7 @@ stack:
 - YAML-ключи в frontmatter и manifests
 - Trigger-фразы (`take next task`, `drain the queue`) — плюс русские алиасы (`следующая задача`, `дальше`)
 - Идентификаторы моделей и exact IDs
+- Frontmatter `description:` полей — потому что триггеры-фразы (RU+EN) уже смешаны там, а description потребляет main как input в SubagentTool schema — терминологическая точность бьёт стилистическое единообразие. Тело промпта агента остаётся на русском.
 
 Обоснование: LLM устойчиво следует русским prompts на моделях Opus 4.x / Sonnet 5 (проверено на openclaw и agent-team проектах Alex'а); удобство чтения для основного пользователя перевешивает marginal quality diff.
 
@@ -440,14 +450,16 @@ stack:
 `re-macho/loop.md` использует `exploratory-pipeline` template:
 
 ```
-intake (crash / dSYM / binary) 
-  → macho-unpacker
-  → explorer (Mach-O layout, load commands, sections)
+intake (crash / dSYM / binary, legal scope, вопросы)
+  → unpacker (.ipa/.app/.dmg/.pkg распаковка, lipo thin, decrypt)
+  → explorer (Mach-O layout, load commands, sections, dylib graph)
   → hypothesizer (multiple parallel hypotheses via T4 Workflow)
-  → verifier (per-hypothesis via dedupfind + atos)
+  → verifier (per-hypothesis через otool + class-dump + lldb + frida)
   → report-writer
   → OUTPUT: reports/YYYY-MM-DD-<slug>.md
 ```
+
+Lifecycle-агенты (`intake`, `unpacker`, `explorer`, `hypothesizer`, `verifier`, `report-writer`) — RE-специфичные роли; overlay-стандартные dev-роли (`architect`/`implementer`/`tester`/…) в RE не поставляются, потому что pipeline не производит код. Verifier диспатчит tool-агенты overlay'а — см. §5.4 за реальным ship-list.
 
 Особенности:
 - **Нет PR-выхода** — результат работы pipeline'а это markdown-отчёт, не merged branch

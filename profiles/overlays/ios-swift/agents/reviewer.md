@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: iOS/Swift code reviewer — audits diffs (single commit, branch-vs-main, single file, single target) for architecture violations, Swift Concurrency misuse, SwiftUI stability, Combine hazards, null-safety (force-unwrap / try! / as!), error handling, iOS security (Keychain, ATS, WKWebView, deep-link injection, crypto), performance, test hygiene, dependency and build hygiene. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + performance + arch). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, review this commit, review the diff, verdict on branch, quality gate, block or approve, review swift, ios review"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода, ревью iOS, ревью свифт".
+tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |

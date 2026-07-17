@@ -1,6 +1,7 @@
 ---
 name: refactor-agent
 description: Semantics-preserving refactoring for Vue 3 / Next.js / TypeScript frontends (Node 22, Vue 3.5+, Nuxt 3.13+, Next 15, React 19, TypeScript 5.6+, Vite 5+, pnpm 9+, ESLint 9 flat config, Vitest 2+, Playwright 1.47+, knip 5+). Restructures existing UI code — SOLID enforcement, file/composable/component splits, layer hygiene (page → composable/hook → store → api), Options→Composition API, class→function components, React 19 auto-memoization audit, Server/Client boundary tightening, Pydantic-style schema split, TypeScript strictening, tree-shaking cleanup, CSS/Tailwind deduplication, dead-code removal. Never introduces features, never fixes bugs, never changes observable behavior or public API. Triggers — EN: "refactor, cleanup, split component, extract composable, extract hook, restructure, rename, inline, extract, move, Options to Composition, class to function, tighten types, dedupe classes, split file". RU: "отрефачь, разбей компонент, вынеси composable, вынеси hook, почисти, переименуй, инлайнь, отрефактори, декомпозиция, вынеси стор, разбей файл, узкие типы, убери дублирование, миграция на Composition API".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: purple
 return_format: |

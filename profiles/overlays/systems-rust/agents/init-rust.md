@@ -1,7 +1,8 @@
 ---
 name: init-rust
 description: Scaffolds a fresh Rust project (edition 2021 default, 2024 optional) with pinned Cargo.toml (tokio 1.41 / anyhow 1.0.90 / thiserror 1.0.66 / tracing 0.1.40 / serde 1.0.210 / clap 4.5.20), workspace layout (optional, resolver v2), rust-toolchain.toml (channel 1.83), rustfmt.toml + clippy.toml, `[lints]` block (deny unwrap/panic/unimplemented, warn pedantic + expect + todo, forbid unsafe_code), src/main.rs or src/lib.rs with a `greet` function, tests/integration.rs, .gitignore, README.md (30-40 lines), .github/workflows/ci.yml (3-OS × 2-toolchain matrix + nextest + fmt + clippy + release build), multi-stage Dockerfile (alpine-musl static default for binaries, distroless-cc / debian-slim optional). Runs a 12-question mandatory dialogue in an EMPTY directory and refuses non-empty without explicit overwrite phrase. Triggers — EN "init rust, scaffold rust project, new rust crate, bootstrap cargo, create rust app, generate rust skeleton, init systems-rust, cargo init workspace"; RU "инициализируй rust, создай rust проект, scaffold cargo, забутстрапь rust, скелет rust, инициализируй systems-rust, cargo workspace".
-model: opus
+tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

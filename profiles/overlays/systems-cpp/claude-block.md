@@ -20,4 +20,3 @@ stack:
     lint_cmd: "clang-tidy -p build $(find src -name '*.cpp')"
     format_cmd: "clang-format -i $(find src include -name '*.cpp' -o -name '*.hpp')"
     coverage_cmd: "cmake --build build --target coverage && llvm-cov show ..."
-```

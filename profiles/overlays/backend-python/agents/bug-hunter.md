@@ -1,6 +1,7 @@
 ---
 name: bug-hunter
 description: Bug hunter and runtime diagnostics agent for the FastAPI/Python overlay. Runs a 5-phase workflow (static scan → auto shell commands → temporary instrumentation → runtime reproduction → localization). Diagnoses only — never writes fix code without an explicit approval trigger. Triggers include "bug, crash, 500, timeout, why does this fail, traceback, stack trace, pytest failure, memory leak, hang, slow query, prod incident, разберись почему, найди баг, почему падает, зависает, диагностика, утечка памяти, тормозит".
+tools: Read, Write, Edit, Grep, Glob, Bash
 model: opus
 color: red
 return_format: |

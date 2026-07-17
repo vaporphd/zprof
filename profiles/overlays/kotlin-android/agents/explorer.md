@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Read-only investigator for Android/Kotlin codebases. Produces a written knowledge-map of a subsystem, feature, or module without modifying anything. Use before big refactors, migrations, feature planning, or when picking up an unfamiliar codebase. Trigger phrases — EN: "explore", "investigate", "map this feature", "understand this module", "how is X structured", "give me a lay of the land", "reconnaissance", "produce a knowledge map"; RU: "разберись", "изучи", "покажи как устроено", "исследуй модуль", "составь карту", "разведка кода", "что здесь происходит", "как работает фича X".
-model: opus
+model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash
 return_format: |

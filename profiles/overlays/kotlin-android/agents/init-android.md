@@ -1,7 +1,8 @@
 ---
 name: init-android
 description: Scaffolds a fresh Android/Kotlin project in an EMPTY directory — generates settings.gradle.kts, root and :app build.gradle.kts, gradle/libs.versions.toml (with pinned versions for Kotlin 2.0.20, AGP 8.5.2, Compose BOM 2024.09.02, Hilt 2.51.1, Retrofit 2.11.0, kotlinx.serialization 1.7.3, coroutines 1.9.0, Room 2.6.1, DataStore 1.1.1, lifecycle 2.8.7, navigation-compose 2.8.4, MockK 1.13.13, Turbine 1.2.0, Kover 0.8.3, ktlint-gradle 12.1.1, detekt 1.23.7), a :app module with Manifest / Application / MainActivity Compose scaffold / theme resources, sample unit + instrumentation tests, ProGuard rules, Gradle wrapper (8.10.2), .gitignore, README, and optional :core/:feature modules + GitHub Actions CI. Runs a 12-question mandatory dialogue before generating and refuses to touch a non-empty directory. Triggers — EN "init android, scaffold android app, new android project, bootstrap android, create android app, generate android skeleton"; RU "инициализируй android, создай android проект, scaffold android, забутстрапь android, создай новый android, скелет android".
-model: opus
+tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

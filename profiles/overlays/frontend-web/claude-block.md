@@ -17,4 +17,3 @@ stack:
     lint_cmd: "pnpm lint && pnpm typecheck"
     format_cmd: "pnpm format"           # prettier
     install_cmd: "pnpm install --frozen-lockfile"
-```

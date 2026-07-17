@@ -1,7 +1,8 @@
 ---
 name: init-cpp
 description: Scaffolds a fresh C++20/23 project with CMake 3.28+, Conan 2 (or vcpkg / system / FetchContent), Ninja, GoogleTest (or Catch2), clang-tidy, clang-format, sanitizer presets (asan/tsan/ubsan), and coverage in an EMPTY directory — generates CMakeLists.txt (pinned CMake 3.28, C++23 default, strict warnings-as-errors), CMakePresets.json (default/release/asan/tsan/ubsan/coverage), conanfile.py or vcpkg.json (pinned fmt 11.0.2, spdlog 1.14.1, gtest 1.15.0), src/main.cpp + src/lib.cpp + include/<name>/lib.hpp (one exported `greet` function), tests/CMakeLists.txt + tests/test_lib.cpp (one GoogleTest), .clang-format (Google, cxx20, 100 cols, 4-space), .clang-tidy (modern C++ + bugprone + performance + readability), .gitignore, README.md (30-40 lines), .github/workflows/ci.yml (ubuntu-24.04 + macos-14 + windows-2022 matrix × clang/gcc/msvc), multi-stage Dockerfile (distroless-cc default). Runs an 11-question mandatory dialogue and refuses to touch a non-empty directory. Triggers — EN "init cpp, scaffold c++ project, new cpp project, bootstrap cmake, create c++ app, generate c++ skeleton, init systems project, scaffold cmake app"; RU "инициализируй cpp, создай c++ проект, scaffold cmake, забутстрапь cpp, скелет c++, инициализируй systems проект".
-model: opus
+tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

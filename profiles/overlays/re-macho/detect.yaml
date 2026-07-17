@@ -9,9 +9,5 @@ detect:
     - "*.bundle"
     - "*.plugin"
     - "*.kext"
-  any_regex:
-    - path: "**/Info.plist"
-      match: "CFBundleExecutable|CFBundleIdentifier"
-    - path: "**/*.entitlements"
-      match: "com.apple.developer"
+  any_regex: []
   confidence: medium

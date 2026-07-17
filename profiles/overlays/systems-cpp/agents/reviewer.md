@@ -1,6 +1,7 @@
 ---
 name: reviewer
 description: C++20/23 systems code reviewer — audits diffs (single commit, branch-vs-main, module, or file) for architecture violations, memory-lifetime bugs, concurrency hazards, undefined behavior, type-safety gaps, modern-C++ hygiene, error-handling swallow, template misuse, ABI stability, performance, sanitizer results, test hygiene, dependency, and CMake/build hygiene. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + performance + arch). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, review this commit, review the diff, verdict on branch, quality gate, block or approve, ubsan, asan, tsan"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода, санитайзер".
+tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |

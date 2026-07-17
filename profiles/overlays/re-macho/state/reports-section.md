@@ -1,4 +1,6 @@
-## Reverse Engineering / Mach-O section (для PROJECT_SPEC.md)
+## Reverse Engineering / Mach-O — reports/ conventions
+
+Reference for RE overlay users. Exploratory pipeline emits markdown into `reports/`, not into `docs/PROJECT_SPEC.md` — see §12 in the design doc. Copy the sections you need into your project's `reports/README.md` or a legal-scope doc.
 
 ### Legal & scope
 - Legal basis: <e.g. "own IP / educational / bug bounty scope / customer NDA">

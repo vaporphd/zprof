@@ -18,4 +18,3 @@ stack:
     run_cmd: "uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
     migration_cmd: "uv run alembic upgrade head"
     coverage_cmd: "uv run pytest --cov=app --cov-report=html --cov-report=term-missing"
-```

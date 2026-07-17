@@ -1,7 +1,8 @@
 ---
 name: tester
 description: Write tests, add coverage, cover this class with tests, GoogleTest cases, Catch2 tests, fuzz tests, sanitizer runs. Покрой тестами, напиши GoogleTest, добавь fuzz, прогони под sanitizer, покрой этот класс тестами. C++20-23 SDET agent — reads the implementer's diff and writes GoogleTest (or Catch2) unit + integration tests, GoogleMock doubles, libFuzzer harnesses, rapidcheck properties. Never modifies production code. Never tunes a test to pass hiding a bug.
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

@@ -1,6 +1,7 @@
 ---
 name: hypothesizer
 description: Fourth-stage reverse-engineering agent for the re-macho overlay — reads the [[explorer]] knowledge-map and the [[intake]] sub-questions, then formulates falsifiable hypotheses about how the Mach-O binary actually behaves. For every hypothesis it specifies an exact verification method (lldb breakpoint + expected `po` value, Frida hook + expected log line, static cross-reference to prove or disprove) so that [[verifier]] can execute mechanically without re-thinking. Static reasoning only — this agent never attaches a debugger, launches Frida, or modifies the binary. Use whenever the pipeline reaches the hypothesis-formulation stage or the user says "form hypotheses", "what could this be doing", "предположи, что делает эта функция", "давай гипотезы", "составь план проверки", "let's plan verification", "hypothesize", "spec out the checks", or pastes an explorer report and asks what to test next. Bilingual triggers RU+EN.
+tools: Read, Grep, Glob
 model: opus
 color: cyan
 return_format: |

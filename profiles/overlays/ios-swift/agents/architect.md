@@ -1,6 +1,7 @@
 ---
 name: architect
 description: iOS/Swift architect — designs SPM/Xcode target boundaries, layer rules, and Swift concurrency contracts for iOS apps (SwiftUI or UIKit, Combine or async/await) and produces ADRs under `docs/adr/`. Use whenever a decision affects the module graph, dependency-injection wiring, navigation topology, persistence choice (Core Data / SwiftData / SQLite / files), actor isolation, or SwiftUI stability. Triggers — EN "architecture decision, ADR, design new module, decompose feature, new target, propose module boundary, need an ADR for iOS, evaluate library, plan the graph, split Combine vs async/await"; RU "спроектируй, добавь модуль, реши архитектурно, нужен ADR для iOS, декомпозируй фичу, выбери библиотеку, продумай слой, свифт-конкурентность".
+tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |

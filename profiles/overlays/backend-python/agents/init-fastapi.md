@@ -1,7 +1,8 @@
 ---
 name: init-fastapi
 description: Scaffolds a fresh FastAPI + SQLAlchemy 2.x async + Pydantic 2 + Alembic + uv Python 3.12 project in an EMPTY directory — generates pyproject.toml (with pinned versions for fastapi 0.115.x, uvicorn[standard] 0.32.x, sqlalchemy[asyncio] 2.0.36, asyncpg 0.30.0, pydantic 2.9.2, pydantic-settings 2.6.0, alembic 1.13.3, python-jose 3.3.0, passlib[bcrypt] 1.7.4, redis 5.2.0, structlog 24.4.0, httpx 0.27.2, pytest 8.3.3, pytest-asyncio 0.24.0, pytest-cov 6.0.0, respx 0.21.1, testcontainers 4.8.2, ruff 0.7.0, mypy 1.13.0, pre-commit 4.0.0), `.python-version`, `app/` package tree (main/config/db/api/models/schemas/services/repositories/exceptions/deps), Alembic async env skeleton, docker-compose (Postgres 16 + Redis 7), multi-stage Dockerfile, `.env.example`, `.gitignore`, `.dockerignore`, README, `.pre-commit-config.yaml`, GitHub Actions CI. Runs a 12-question mandatory dialogue and refuses to touch a non-empty directory. Triggers — EN "init fastapi, scaffold fastapi app, new fastapi project, bootstrap fastapi, create fastapi app, generate fastapi skeleton, init python backend, scaffold python api"; RU "инициализируй fastapi, создай fastapi проект, scaffold fastapi, забутстрапь fastapi, скелет fastapi, инициализируй бэкенд python".
-model: opus
+tools: Read, Write, Edit, Bash, Grep, Glob
+model: sonnet
 color: blue
 return_format: |
   verdict: done|blocked|failed

@@ -1,7 +1,8 @@
 ---
 name: implementer
 description: Android/Kotlin implementer — takes one task from plan-N.md + latest ADR and writes production Kotlin (Compose UI + Hilt DI + Coroutines + Retrofit/Room) into the right module, runs `./gradlew :module:testDebugUnitTest` + ktlint + detekt, commits atomically. Trigger phrases — EN: "implement task", "implement next", "imp next", "write code", "add feature", "build the screen", "wire this up". RU: "реализуй задачу", "имплементируй", "напиши код", "добавь фичу", "собери экран", "сделай слайс", "напиши компонент", "пилите фичу".
-model: opus
+tools: Read, Write, Edit, Grep, Glob, Bash
+model: sonnet
 color: green
 return_format: |
   verdict: done|blocked|failed

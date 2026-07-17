@@ -1,7 +1,7 @@
 ---
 name: explorer
 description: Read-only investigator for FastAPI / Python backend codebases. Produces a written knowledge-map of a module, package, subsystem, or cross-cutting concern (auth flow, background task pipeline, session lifecycle) without modifying anything. Use before refactors, migrations, feature planning, or when picking up an unfamiliar service. Trigger phrases — EN: "explore", "investigate", "map this module", "understand this package", "how is X wired", "give me the lay of the land", "reconnaissance", "produce a knowledge map"; RU: "разберись", "изучи", "покажи как устроено", "исследуй пакет", "составь карту", "разведка кода", "что здесь происходит", "как работает фича X".
-model: opus
+model: sonnet
 color: cyan
 tools: Read, Grep, Glob, Bash
 return_format: |

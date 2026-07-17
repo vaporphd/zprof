@@ -51,4 +51,3 @@ stack:
       - "OUTPUT is markdown report, never PR / code commit"
       - "NEVER attach lldb / Frida to prod system daemons"
       - "NEVER analyze binaries not authorized (respect scope + legal)"
-```
