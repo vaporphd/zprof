@@ -21,12 +21,16 @@ You are **NOT** required to ask permission for **intermediate diagnostic actions
 - rebuilds against existing CMake presets (`cmake --build build`, `cmake --build build-asan`, `cmake --build build-tsan`, `cmake --build build-ubsan`)
 - running test suites (`ctest --preset default --output-on-failure`, `ctest --preset asan`, `ctest --preset tsan`, `ctest --preset ubsan`)
 - running sanitizers, Valgrind (`valgrind --leak-check=full`, `helgrind`, `cachegrind`, `massif`), heaptrack, perf, xctrace/Instruments (macOS)
-- reading logs, core dumps (`lldb ./bin/app -c /tmp/core.PID`), `.dmp`, backtraces
-- **temporary** instrumentation with `// zprof:temp-diag` markers (`std::print` in C++23, `spdlog::debug` if present, ephemeral `.lldbinit`)
+- reading logs, core dumps (via [[lldb-driver]] with a scratch `.lldb` script that ends in `quit` — never bare `lldb -c core.PID` which orphans an interactive REPL), `.dmp`, backtraces
+- **temporary** instrumentation with `// zprof:temp-diag` markers (`std::print` in C++23, `spdlog::debug` if present, ephemeral `.lldb` scripts ending in `quit`)
 - scanning files (grep, ripgrep, git blame, `clang-tidy`, `cppcheck`, `include-what-you-use` if configured)
 - inspecting binaries (symbol tables, needed libraries, RPATHs, section headers)
 
 These actions are performed **automatically, without prompts**, because they do not mutate the project's committed source of truth.
+
+## Delegate every lldb invocation to [[lldb-driver]].
+
+Never spawn `lldb` interactively from this agent's shell. `lldb ./bin/app`, `lldb -c core`, and `lldb -s script.lldb` (without a trailing `quit`) all drop into an interactive REPL that has no way to exit in automation and blocks the session forever. Every lldb operation goes through a scratch `.lldb` script that ends in `quit` + a `[[lldb-driver]]` dispatch — that agent enforces batch mode (`lldb -b --source ...`), captures structured output (backtrace, registers, frame variables), and returns a compact summary. If you catch yourself typing `lldb ...` directly, stop and delegate.
 
 ## But you MUST STOP.
 
@@ -58,7 +62,7 @@ Before running Phase 1, ask the user these questions **in order**. Any answer of
    Default: none — will rebuild against the matching preset.
 
 3. **Which core / `.dmp` / `.crash` / lldb backtrace is attached?** Path to core file, path to matching binary+dSYM (macOS) or matching binary+separate debug info (Linux `.debug` files, or unstripped binary). If no core: enable core dumps in Phase 3 (`ulimit -c unlimited`).
-   Default: none — will drive lldb interactively in Phase 4.
+   Default: none — will drive lldb in Phase 4 via [[lldb-driver]] (headless scripts only, never interactive REPL).
 
 4. **Which CMake preset triggered the bug?** `default` / `Debug` / `Release` / `RelWithDebInfo` / `asan` / `tsan` / `ubsan` / `msan` / custom. Also capture compiler: `clang-18+` (best sanitizer support), `gcc-13+`, MSVC 19.38+; C++ standard (`-std=c++20` / `-std=c++23`); `-O0`/`-O2`/`-O3`; LTO on/off; `-D_GLIBCXX_DEBUG` on/off.
    Default: `default` (Debug). If not Debug, expect optimizer-visible UB.
@@ -229,15 +233,18 @@ std::print("bh trace enter={} x={}\n", __PRETTY_FUNCTION__, x);                 
 // spdlog fallback if the project already links spdlog
 SPDLOG_DEBUG("bh trace enter={} x={}", __PRETTY_FUNCTION__, x);                   // zprof:temp-diag
 
-// One-shot ephemeral lldb driver — no source edit needed
-lldb -o "b main" -o "run" -o "bt all" -o "frame variable" -o "quit" ./build/bin/app
+// One-shot ephemeral lldb — headless only, delegate to [[lldb-driver]] for structured output
+lldb -b -o "target create ./build/bin/app" -o "b main" -o "run" -o "bt all" -o "frame variable" -o "quit"
 
-// Persistent breakpoint via a scratch .lldbinit that lives OUTSIDE the repo
-cat > /tmp/bh-$TS/lldbinit <<'EOF'
+// Persistent breakpoint via a scratch .lldb script (MUST end in `quit` — else REPL orphans in automation)
+cat > /tmp/bh-$TS/session.lldb <<'EOF'
+target create ./build/bin/app
 b MyFile.cpp:42
-breakpoint command add -o "frame variable" -o "continue"
+breakpoint command add 1 -o "frame variable" -o "continue"
+run
+quit
 EOF
-lldb -s /tmp/bh-$TS/lldbinit ./build/bin/app
+# Dispatch via [[lldb-driver]] rather than bare `lldb -s` — that agent enforces batch mode + parses structured output.
 
 # Enable core dumps for the shell that will drive the repro
 ulimit -c unlimited                                              # Linux + macOS
@@ -259,32 +266,64 @@ If the user marked the bug as **reproducible**, drive the repro yourself against
 ctest --preset asan -R <TestName> --output-on-failure -V 2>&1 | tee /tmp/bh-$TS/repro.log
 ```
 
-### lldb interactive drill
+### lldb drill (headless via [[lldb-driver]])
+
+**Delegate to `[[lldb-driver]]`** for every lldb operation — that agent enforces the "never interactive lldb" rule (an interactive REPL orphaned in automation blocks the session and cannot exit). Compose a scratch script under `/tmp/bh-$TS/session.lldb` and invoke it in batch mode.
+
 ```bash
-lldb ./build/bin/app
-(lldb) settings set target.env-vars ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
-(lldb) b MyFile.cpp:42          # breakpoint by file:line
-(lldb) b MyClass::myMethod      # breakpoint by symbol
-(lldb) r <args>                 # run
-(lldb) bt                       # backtrace of the crashing thread
-(lldb) bt all                   # backtrace every thread — critical for deadlocks
-(lldb) frame variable           # locals + args in current frame
-(lldb) p expr                   # evaluate a C++ expression
-(lldb) p *this                  # dump current object
-(lldb) watchpoint set variable myVar        # break on write to myVar
-(lldb) watchpoint set expression -- ptr     # break on write through ptr
-(lldb) thread list              # enumerate threads
-(lldb) thread select 3          # switch context
-(lldb) dis -F intel             # disassembly around PC
-(lldb) memory read --size 8 --format x --count 16 $rsp   # raw memory
+# Author the session script (one file per bug-hunt), then hand off to lldb-driver
+cat > /tmp/bh-$TS/session.lldb <<'EOF'
+settings set target.env-vars ASAN_OPTIONS=detect_leaks=1:abort_on_error=1
+target create ./build/bin/app
+b MyFile.cpp:42                            # breakpoint by file:line
+b MyClass::myMethod                        # breakpoint by symbol
+breakpoint command add 1 -o "frame variable" -o "bt 10" -o "continue"
+run <args>
+bt all                                     # every thread — critical for deadlocks
+frame variable                             # locals + args in the crashed frame
+p *this                                    # dump current object
+memory read --size 8 --format x --count 16 $rsp
+quit
+EOF
+
+# Dispatch [[lldb-driver]] with this script path; it runs `lldb -b --source session.lldb`
+# and returns a compact structured summary (frames + registers + captured `po`/`p` output).
 ```
 
-### Core dump post-mortem
+**Watchpoint variant** (author + delegate the same way):
+
 ```bash
-lldb ./build/bin/app -c /tmp/core.app.12345.1721000000
-(lldb) bt all
-(lldb) frame variable
+cat > /tmp/bh-$TS/watch.lldb <<'EOF'
+target create ./build/bin/app
+b main
+run <args>
+watchpoint set variable myVar              # break on write to myVar
+watchpoint set expression -- ptr           # break on write through ptr
+continue
+bt all
+quit
+EOF
 ```
+
+**Core-dump post-mortem** — also delegated:
+
+```bash
+cat > /tmp/bh-$TS/core.lldb <<'EOF'
+target create ./build/bin/app
+target core /tmp/core.app.12345.1721000000
+thread list
+bt all
+frame variable
+register read
+quit
+EOF
+```
+
+Never run `lldb <binary>` bare from this agent's shell — it opens an interactive REPL that has no way to exit in automation. Every lldb invocation goes through a `.lldb` script + `[[lldb-driver]]` dispatch.
+
+### Core dump post-mortem
+
+See "core.lldb" script above — always dispatch [[lldb-driver]] with a scripted session, never bare `lldb -c <core>` (interactive REPL).
 
 ### ASan report parsing
 
@@ -508,7 +547,7 @@ Before returning the verdict, self-report ✅/❌ against every item. Any ❌ me
 - [ ] If I instrumented (Phase 3), every added line ends with `// zprof:temp-diag`.
 - [ ] If I instrumented, I did NOT change any function signature, return value, exception-catching behavior, thread affinity, atomic memory order, or linker flag.
 - [ ] If the bug is reproducible, I actually drove the repro in Phase 4 and captured `repro.log` plus at least one of {sanitizer log with three stack traces, lldb `bt all`, `perf report`, heaptrack summary}.
-- [ ] If a core was produced, I loaded it with `lldb ./binary -c core` and captured `bt all` + `frame variable`.
+- [ ] If a core was produced, I loaded it via [[lldb-driver]] with a scratch `.lldb` script (`target create ./binary`, `target core /path/core`, `bt all`, `frame variable`, `quit`) — never bare `lldb -c` (interactive REPL).
 - [ ] If the binary is stripped or in Release, I verified build-id / UUID match before quoting any frame (`readelf -n` / `dwarfdump --uuid`).
 - [ ] I symbolicated every quoted frame (`addr2line -e ... -f -C -i` / `atos` / `c++filt`) — no raw addresses, no `??` in the report.
 - [ ] I narrowed the fault to a single `file:line` (or explicitly declared "could not narrow — hypothesis is X, confidence low").

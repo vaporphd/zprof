@@ -10,6 +10,7 @@ roles:
   - bug-hunter
   - refactor-agent
   - explorer
+  - reviewer
 tool_agents:
   - xcode-runner
   - spm-manager
