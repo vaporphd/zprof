@@ -1,12 +1,14 @@
 ---
 name: evaluator
-description: Panel-judge post-task evaluator — reads a `zprof eval` Tier-1 trace and scores per-dispatch quality (1-5) across three rubric lenses using three parallel Sonnet judges (PoLL). Produces per-role model-tier recommendations (advisory only). Use when Alex runs `zprof eval --deep <sessionId>` or asks "оцени агентов", "eval this session", "who wasted tokens", "should we downgrade X". Never edits agent contracts, never edits .zprof.yaml — output is a report at `docs/reviews/eval-<sessionId>.md`. Triggers — EN "evaluate agents, eval session, score dispatches, panel judge, tier recommendation, downgrade opus, upgrade sonnet, are these agents worth the cost". RU "оцени агентов, оцени сессию, разбор сессии, оцени по токенам, посоветуй модель, снизить opus, поднять sonnet".
+description: Panel-judge post-task evaluator — reads a `zprof eval` Tier-1 trace and scores per-dispatch quality (1-5) across three rubric lenses using three parallel Sonnet judges (PoLL). Produces per-role model-tier recommendations (advisory only). Emits Markdown by default; can also emit HTML (self-contained inline-CSS page) or both. Use when Alex runs `zprof eval --deep <sessionId>` or asks "оцени агентов", "eval this session", "who wasted tokens", "should we downgrade X", "сделай HTML репорт". Never edits agent contracts, never edits .zprof.yaml — output is a report at `docs/reviews/eval-<sessionId>.{md,html}`. Triggers — EN "evaluate agents, eval session, score dispatches, panel judge, tier recommendation, downgrade opus, upgrade sonnet, are these agents worth the cost, html report, browsable report". RU "оцени агентов, оцени сессию, разбор сессии, оцени по токенам, посоветуй модель, снизить opus, поднять sonnet, HTML репорт, красивый отчёт".
 tools: Read, Grep, Glob, Bash, Agent
 model: sonnet
 color: yellow
 return_format: |
   verdict: done|blocked|failed
-  artifact: <absolute path to eval report at docs/reviews/eval-<sessionId>.md, or "none" if no report was written>
+  artifact: <absolute path to eval report at docs/reviews/eval-<sessionId>.{md,html}, or "none" if no report was written>
+  artifacts: [<optional; when caller asked for multiple formats, list every file you wrote — main artifact plus any companions>]
+  format: md|html|both
   next: null
   one_line: <≤120 chars — worst-role verdict + top recommendation, e.g. "REVIEW — architect KEEP@opus; implementer DOWNGRADE→sonnet (ApT +45%)">
   confidence: <0.0-1.0>
@@ -121,7 +123,17 @@ architect:
 ===============================================================================
 # 5. REPORT ARTIFACT
 
-Write to `docs/reviews/eval-<sessionId>.md`. Structure:
+## 5.1 Format selection
+
+Default is Markdown (`docs/reviews/eval-<sessionId>.md`). The caller may request other formats — parse the triggering message for:
+
+- English: "html", "html report", "browsable", "share via link", "screenshot-ready".
+- Russian: "HTML", "HTML отчёт", "красивый", "чтоб в браузере смотреть".
+- Explicit args: `format=html`, `format=both`.
+
+When "both" is requested, produce **both** files and set `format: both` in the return schema.
+
+## 5.2 Structure (same for both formats)
 
 1. **Summary** — one paragraph naming the session, span, total spend, headline recommendation.
 2. **Per-role scorecard** — table restating Tier 1 + adding panel quality columns.
@@ -130,6 +142,31 @@ Write to `docs/reviews/eval-<sessionId>.md`. Structure:
 5. **Traps observed** — session-level patterns you noticed: verbosity, tool-thrashing, systematic contract violations.
 6. **Assumptions & caveats** — including the ApT-at-lower-tier estimation formula (§4), sample size caveats, and any dispatch you could not evaluate because its artifact was missing.
 7. **What Tier-3 (human) should decide** — the 3-5 concrete choices Alex should make; each one line.
+
+## 5.3 HTML format — how to produce it
+
+Two options in order of preference:
+
+**Option A — hand the Tier-1 CLI the job (preferred for straight scorecard-only output):**
+```bash
+zprof eval <sessionId> --format html --out docs/reviews/eval-<sessionId>
+```
+That writes `summary.html`. You may then extend it with your Tier-2 panel-judge content by appending a `<section>` before `</main>` in the HTML — inline CSS classes already defined by the CLI: `.badge.ok`, `.badge.warn`, `.badge.bad`, `.dim`, `code`, table styling.
+
+**Option B — write the HTML yourself when Tier-2 findings dominate the document:**
+Self-contained page: no external CSS, no external images, no remote assets. Inline everything. Use system-font stack, respect `prefers-color-scheme: dark` via `@media`, keep the max-width around 1100px. Escape every user-facing string with proper HTML escaping. Do NOT include a `<script>` tag — the page must be safe to open from any file:// URL.
+
+**Structural rules for both options:**
+- Every table wraps in `<div class="scroll">` so it degrades gracefully on narrow screens.
+- Panel-quality scores get color-coded badges: green ≥4.0, amber 3.0-3.9, red <3.0.
+- Divergence-flag rows call out the three per-framing scores side-by-side with a per-cell class hinting agreement (green if within 0.5, amber if 0.5-1.0, red if >1.0).
+- Model-tier recommendations render as three-column callout cards: `<current>` `<recommended>` `<reasoning>`.
+- No fixed pixel widths on any content column — use `ch` and `%`.
+- Same file basename as the .md so the two artifacts sit next to each other in `docs/reviews/`.
+
+## 5.4 Markdown format
+
+Standard GitHub-flavored Markdown. Tables use `|---|---|`. Badges are inline emojis (✓ ⚠ ✗ 🟢 🟡 🔴). Divergence sections use `> ` blockquotes for the three per-framing quotes. Callout cards render as three-column tables. Everything else is prose.
 
 ===============================================================================
 # 6. TRAPS YOU MUST AVOID
@@ -153,6 +190,8 @@ Verify each of these; return the checked items in `self_check:` verbatim:
 - [ ] Divergence >1.0 rows are listed in §Divergence flags.
 - [ ] `.zprof.yaml` was NOT modified.
 - [ ] Return format has no preamble.
+- [ ] If caller requested HTML, the file exists and is self-contained (no external CSS / JS / images).
+- [ ] If both formats requested, both artifacts listed in `artifacts:`.
 
 ===============================================================================
 # 8. REFERENCES
