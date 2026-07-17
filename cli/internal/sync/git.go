@@ -16,15 +16,22 @@ import (
 	getter "github.com/hashicorp/go-getter"
 )
 
-// EnsureRepo clones remoteURL into localDir on first run; on subsequent runs
-// it re-fetches and syncs via go-getter's idempotent client, equivalent to a
-// fetch+reset --hard to the remote's default branch.
+// EnsureRepo is the legacy no-context entry point retained for callers that
+// haven't wired context yet. New code should prefer EnsureRepoCtx so the
+// user can cancel a stalled git-fetch via Ctrl-C instead of SIGKILL.
 func EnsureRepo(remoteURL, localDir string) error {
+	return EnsureRepoCtx(context.Background(), remoteURL, localDir)
+}
+
+// EnsureRepoCtx clones remoteURL into localDir on first run; on subsequent
+// runs it re-fetches and syncs via go-getter's idempotent client. Passing
+// a cancellable ctx lets the caller enforce a timeout and honor Ctrl-C.
+func EnsureRepoCtx(ctx context.Context, remoteURL, localDir string) error {
 	if err := os.MkdirAll(filepath.Dir(localDir), 0o755); err != nil {
 		return err
 	}
 	client := &getter.Client{
-		Ctx:  context.Background(),
+		Ctx:  ctx,
 		Src:  "git::" + withDefaultRef(remoteURL),
 		Dst:  localDir,
 		Mode: getter.ClientModeAny,

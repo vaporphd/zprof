@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/vaporphd/zprof/internal/fsutil"
 	"github.com/vaporphd/zprof/internal/models"
 	"gopkg.in/yaml.v3"
 )
@@ -47,7 +48,7 @@ func (m *ProjectManifest) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fsutil.WriteFileAtomic(path, data, 0o644)
 }
 
 // ResolvedModel returns the exact model ID for a role from ModelOverrides.

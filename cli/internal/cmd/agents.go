@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/vaporphd/zprof/internal/apply"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
@@ -20,13 +21,27 @@ func NewAgentsCmd() *cobra.Command {
 		Short: "Свап агента или override модели для роли",
 		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pwd, _ := os.Getwd()
+			pwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getwd: %w", err)
+			}
 			mfPath := filepath.Join(pwd, ".zprof.yaml")
 			m, err := manifest.LoadProject(mfPath)
 			if err != nil {
 				return fmt.Errorf("нет .zprof.yaml в текущей директории (%w)", err)
 			}
 			role := args[0]
+			// Reject typo'd role names up-front instead of silently persisting
+			// dead override entries that only surface later at apply time.
+			if !apply.IsKnownRole(role) {
+				return fmt.Errorf("неизвестная роль %q (см. cmd `zprof agents list` для актуального списка)", role)
+			}
+			// Reject a no-op call: neither positional agent-name nor --model
+			// was supplied. Prior behavior was to rewrite .zprof.yaml and
+			// print "Обновлено" as if something changed.
+			if len(args) < 2 && modelFlag == "" {
+				return fmt.Errorf("укажите <agent-name> или --model — нечего менять")
+			}
 			if len(args) == 2 {
 				if m.AgentOverrides == nil {
 					m.AgentOverrides = map[string]string{}

@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/vaporphd/zprof/internal/wizard"
@@ -16,7 +17,10 @@ func NewInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Интерактивный wizard: detect + выбор overlays + apply",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			pwd, _ := os.Getwd()
+			pwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getwd: %w", err)
+			}
 			return wizard.Run(wizard.Opts{ProjectDir: pwd, RepoDir: repoDir()})
 		},
 	}

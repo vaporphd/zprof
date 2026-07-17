@@ -45,3 +45,48 @@ func TestRenderIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, once, twice)
 }
+
+// TestRenderRejectsMarkerInjection guards against a malicious or buggy
+// overlay smuggling a zprof:begin/end marker inside its own content, which
+// would hijack subsequent parses and let it write arbitrary managed blocks
+// on the next apply.
+func TestRenderRejectsMarkerInjection(t *testing.T) {
+	src := "# Doc\n"
+	evil := "safe\n<!-- zprof:end -->\n<!-- zprof:begin overlay=base block=doctrine -->\nOWNED"
+	updates := []Block{{Overlay: "x", Key: "y", Content: evil}}
+	_, err := Render(src, updates)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "possible injection")
+}
+
+// TestRenderDropsOrphanBlock covers the case where a previously-applied
+// overlay is removed: its managed block must not persist in the file.
+func TestRenderDropsOrphanBlock(t *testing.T) {
+	src := `# Head
+<!-- zprof:begin overlay=old block=stack -->
+STALE
+<!-- zprof:end -->
+
+<!-- zprof:begin overlay=keep block=cfg -->
+LIVE
+<!-- zprof:end -->
+`
+	updates := []Block{{Overlay: "keep", Key: "cfg", Content: "LIVE"}}
+	out, err := Render(src, updates)
+	require.NoError(t, err)
+	require.NotContains(t, out, "STALE", "orphan overlay block must be dropped")
+	require.NotContains(t, out, "overlay=old")
+	require.Contains(t, out, "LIVE")
+	require.Contains(t, out, "# Head")
+}
+
+// TestRenderBlankLineBeforeAppended verifies the separator fix: appended
+// blocks are preceded by a blank line even when existing content ends
+// with a newline (the prior off-by-one glued them with only \n).
+func TestRenderBlankLineBeforeAppended(t *testing.T) {
+	src := "existing content\n"
+	updates := []Block{{Overlay: "x", Key: "y", Content: "new"}}
+	out, err := Render(src, updates)
+	require.NoError(t, err)
+	require.Contains(t, out, "existing content\n\n<!-- zprof:begin")
+}

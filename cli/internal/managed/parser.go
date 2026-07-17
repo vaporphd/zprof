@@ -19,7 +19,18 @@ type Block struct {
 var (
 	beginRe = regexp.MustCompile(`^\s*<!--\s*zprof:begin\s+overlay=([\w.-]+)\s+block=([\w.-]+)\s*-->\s*$`)
 	endRe   = regexp.MustCompile(`^\s*<!--\s*zprof:end\s*-->\s*$`)
+	// markerRe matches any line looking like a zprof marker; used to reject
+	// marker-injection attempts inside overlay-supplied Block.Content.
+	markerRe = regexp.MustCompile(`(?m)^\s*<!--\s*zprof:(begin|end)\b`)
 )
+
+// ContainsMarker returns true if content includes any line that would be
+// parsed as a managed-block begin or end marker. Overlay content that
+// contains a marker cannot be safely written between other markers because
+// the injected marker would hijack subsequent parses.
+func ContainsMarker(content string) bool {
+	return markerRe.MatchString(content)
+}
 
 // ParseBlocks scans text for managed marker pairs and returns their contents.
 // Mismatched or unclosed blocks return an error.

@@ -36,7 +36,7 @@ func EnsureStateFiles(projectDir string, base *overlay.Base, minimal bool) ([]st
 		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 			return nil, err
 		}
-		if err := os.WriteFile(dest, []byte(body), 0o644); err != nil {
+		if err := writeFileAtomic(dest, []byte(body), 0o644); err != nil {
 			return nil, err
 		}
 		created = append(created, dest)

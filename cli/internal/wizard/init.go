@@ -32,6 +32,7 @@ func Run(opts Opts) error {
 		return fmt.Errorf("read overlays: %w", err)
 	}
 	var rules []*manifest.DetectRules
+	var warnings []string
 	nameByRule := map[string]string{}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -39,14 +40,21 @@ func Run(opts Opts) error {
 		}
 		r, err := manifest.LoadDetect(filepath.Join(overlaysDir, e.Name(), "detect.yaml"))
 		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("overlay %s: skipped (bad detect.yaml: %v)", e.Name(), err))
 			continue
 		}
 		rules = append(rules, r)
 		nameByRule[r.Name] = e.Name()
 	}
 
-	// 2. Scan project
-	matches := detect.Scan(opts.ProjectDir, rules)
+	// 2. Scan project — surface scanner warnings so a malformed rule
+	// doesn't silently hide its overlay from the detection UI.
+	scan := detect.ScanWithWarnings(opts.ProjectDir, rules)
+	matches := scan.Matches
+	warnings = append(warnings, scan.Warnings...)
+	for _, w := range warnings {
+		fmt.Fprintln(os.Stderr, "warn:", w)
+	}
 
 	// 3. Prompt user with detected + option to add manually
 	options := []huh.Option[string]{}

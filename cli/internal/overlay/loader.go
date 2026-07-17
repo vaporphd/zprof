@@ -53,6 +53,14 @@ func readAgents(dir string) (map[string]string, error) {
 		if err != nil || info == nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return err
 		}
+		// Reject non-regular files (symlinks, sockets, devices). A malicious
+		// overlay could plant `agents/x.md` as a symlink to /etc/passwd (or
+		// any file the running user can read) and its contents would be
+		// silently copied into the project's `.claude/agents/x.md`. Since
+		// filepath.Walk already calls Lstat we can just check Mode here.
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
@@ -103,6 +111,14 @@ func LoadOverlay(dir string) (*Overlay, error) {
 	m, err := manifest.LoadOverlay(filepath.Join(dir, "manifest.yaml"))
 	if err != nil {
 		return nil, err
+	}
+	// Enforce that the directory name matches manifest.name — otherwise
+	// namespacing (which keys off Manifest.Name) and doctor validation
+	// (which looks up by manifest name as a dir) silently disagree, and
+	// a rename ends up producing agents like architect-<dir> against a
+	// non-existent overlays/<manifest.name>/ path.
+	if base := filepath.Base(dir); base != m.Name {
+		return nil, fmt.Errorf("overlay %s: directory basename %q does not match manifest name %q", dir, base, m.Name)
 	}
 	det, err := manifest.LoadDetect(filepath.Join(dir, "detect.yaml"))
 	if err != nil {

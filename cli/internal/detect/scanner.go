@@ -1,6 +1,7 @@
 package detect
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,21 +16,37 @@ type Match struct {
 	Evidence    []string
 }
 
+// ScanResult carries matches plus non-fatal warnings (malformed rules,
+// paths that escaped the project root, regexes that failed to compile).
+// Callers should surface Warnings — the previous silent-continue behavior
+// made overlays invisible when their detect.yaml had a typo.
+type ScanResult struct {
+	Matches  []Match
+	Warnings []string
+}
+
 // Scan walks projectDir and returns a Match per rule that finds at least
-// one file/regex match.
+// one file/regex match. Kept for backwards compatibility with callers that
+// don't need warnings; new code should use ScanWithWarnings.
 func Scan(projectDir string, rules []*manifest.DetectRules) []Match {
-	var out []Match
+	return ScanWithWarnings(projectDir, rules).Matches
+}
+
+// ScanWithWarnings is Scan plus diagnostics for malformed rules.
+func ScanWithWarnings(projectDir string, rules []*manifest.DetectRules) ScanResult {
+	var res ScanResult
 	for _, r := range rules {
-		evidence := scanOne(projectDir, r)
+		evidence, warns := scanOne(projectDir, r)
+		res.Warnings = append(res.Warnings, warns...)
 		if len(evidence) > 0 {
-			out = append(out, Match{
+			res.Matches = append(res.Matches, Match{
 				OverlayName: r.Name,
 				Confidence:  r.ConfidenceLevel(),
 				Evidence:    evidence,
 			})
 		}
 	}
-	return out
+	return res
 }
 
 var skipDirs = map[string]bool{
@@ -38,8 +55,9 @@ var skipDirs = map[string]bool{
 	".git": true, ".svn": true,
 }
 
-func scanOne(dir string, r *manifest.DetectRules) []string {
+func scanOne(dir string, r *manifest.DetectRules) ([]string, []string) {
 	var evidence []string
+	var warnings []string
 	seen := make(map[string]bool)
 	patterns := r.AnyFileList()
 
@@ -57,12 +75,21 @@ func scanOne(dir string, r *manifest.DetectRules) []string {
 		}
 		name := filepath.Base(path)
 		if info.IsDir() {
-			if skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".") {
+			// Never SkipDir on the walk root itself: filepath.Walk fires
+			// the callback for `dir` first, and if the project directory's
+			// basename starts with a dot (e.g. /x/.myproj) the dot-prefix
+			// rule below would abort the entire walk before touching any
+			// children, yielding zero evidence and no overlays detected.
+			if path != dir && (skipDirs[name] || (strings.HasPrefix(name, ".") && name != ".")) {
 				return filepath.SkipDir
 			}
 		}
 		for _, pattern := range patterns {
-			m, _ := filepath.Match(pattern, name)
+			m, err := filepath.Match(pattern, name)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("overlay=%s: bad any_file pattern %q: %v", r.Name, pattern, err))
+				continue
+			}
 			if m && !seen[path] {
 				evidence = append(evidence, path)
 				seen[path] = true
@@ -72,20 +99,50 @@ func scanOne(dir string, r *manifest.DetectRules) []string {
 		return nil
 	})
 
-	// any_regex: read specified path, apply regex
+	// any_regex: read specified path, apply regex. Paths in detect.yaml
+	// come from overlays that may be pulled from an external git repo — a
+	// crafted `path: ../../../etc/passwd` (or an absolute path) would let a
+	// malicious overlay read arbitrary files and leak their presence via
+	// evidence output. Reject anything that escapes the project root or is
+	// absolute before touching the disk.
 	for _, rr := range r.AnyRegexList() {
-		p := filepath.Join(dir, rr.Path)
+		if filepath.IsAbs(rr.Path) {
+			warnings = append(warnings, fmt.Sprintf("overlay=%s: absolute any_regex path %q rejected", r.Name, rr.Path))
+			continue
+		}
+		cleaned := filepath.Clean(rr.Path)
+		if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+			warnings = append(warnings, fmt.Sprintf("overlay=%s: any_regex path %q escapes project root", r.Name, rr.Path))
+			continue
+		}
+		p := filepath.Join(dir, cleaned)
+		// Belt-and-braces: after Join, ensure the resolved path is still
+		// under dir. Handles clever inputs like `foo/../../..` that Clean
+		// collapses to something outside.
+		absDir, err := filepath.Abs(dir)
+		if err != nil {
+			continue
+		}
+		absP, err := filepath.Abs(p)
+		if err != nil {
+			continue
+		}
+		if absP != absDir && !strings.HasPrefix(absP, absDir+string(filepath.Separator)) {
+			warnings = append(warnings, fmt.Sprintf("overlay=%s: any_regex path %q resolves outside project root", r.Name, rr.Path))
+			continue
+		}
 		data, err := os.ReadFile(p)
 		if err != nil {
 			continue
 		}
 		re, err := regexp.Compile(rr.Match)
 		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("overlay=%s: any_regex %q failed to compile: %v", r.Name, rr.Match, err))
 			continue
 		}
 		if re.Match(data) {
 			evidence = append(evidence, p+"::"+rr.Match)
 		}
 	}
-	return evidence
+	return evidence, warnings
 }

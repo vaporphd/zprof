@@ -240,7 +240,7 @@ func renderManagedFile(path string, blocks []managed.Block, opts ApplyOpts) ([]m
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
+	if err := writeFileAtomic(path, []byte(out), 0o644); err != nil {
 		return nil, err
 	}
 	return conflicts, nil
@@ -266,7 +266,7 @@ func ensureGitignore(dir string) error {
 	if content != "" && !endsWithNewline(content) {
 		needAppend = "\n" + needAppend
 	}
-	return os.WriteFile(p, []byte(content+needAppend), 0o644)
+	return writeFileAtomic(p, []byte(content+needAppend), 0o644)
 }
 
 func containsLine(text, needle string) bool {

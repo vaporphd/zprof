@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 
 	"github.com/vaporphd/zprof/internal/apply"
-	"github.com/vaporphd/zprof/internal/managed"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/spf13/cobra"
@@ -19,12 +18,17 @@ func NewApplyCmd() *cobra.Command {
 		minimal   bool
 		withGates bool
 		dryRun    bool
+		mergeFlag string
 	)
 	c := &cobra.Command{
 		Use:   "apply <overlay> [<overlay>...]",
 		Short: "Применить один или несколько overlays в текущем проекте",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode, resolver, err := parseMergeFlag(mergeFlag)
+			if err != nil {
+				return err
+			}
 			repo := repoDir()
 			base, err := overlay.LoadBase(filepath.Join(repo, "base"))
 			if err != nil {
@@ -44,7 +48,10 @@ func NewApplyCmd() *cobra.Command {
 				WithGates: withGates,
 				Minimal:   minimal,
 			}
-			pwd, _ := os.Getwd()
+			pwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getwd: %w", err)
+			}
 			if dryRun {
 				fmt.Println("[dry-run] would apply overlays:", args)
 				return nil
@@ -54,7 +61,8 @@ func NewApplyCmd() *cobra.Command {
 				Base:       base,
 				Overlays:   overlays,
 				Project:    proj,
-				MergeMode:  managed.ModeOverwrite,
+				MergeMode:  mode,
+				Resolver:   resolver,
 			})
 			if err != nil {
 				return err
@@ -62,12 +70,16 @@ func NewApplyCmd() *cobra.Command {
 			fmt.Printf("Создано агентов: %d\n", len(res.CreatedAgents))
 			fmt.Printf("Обновлено файлов: %d\n", len(res.UpdatedFiles))
 			fmt.Printf("Создано state-файлов: %d\n", len(res.StateFiles))
+			if len(res.Conflicts) > 0 {
+				fmt.Printf("Конфликтов managed-блоков: %d\n", len(res.Conflicts))
+			}
 			return nil
 		},
 	}
 	c.Flags().BoolVar(&minimal, "minimal", false, "Пропустить docs/PROJECT_SPEC.md и docs/adr/")
 	c.Flags().BoolVar(&withGates, "with-gates", false, "Включить north-star-auditor / evidence-auditor / plan-reviewer")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "Только показать план, не писать файлы")
+	c.Flags().StringVar(&mergeFlag, "merge", "overwrite", "Стратегия конфликтов managed-блоков: overwrite | preserve | interactive")
 	return c
 }
 

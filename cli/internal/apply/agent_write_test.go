@@ -46,3 +46,25 @@ model: gpt-5
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown model alias")
 }
+
+// TestResolveModelInAgentLeavesBodyAlone guards H4: the rewriter must
+// only touch the YAML frontmatter, not example `model:` lines in the
+// prompt body (e.g. inside a code fence).
+func TestResolveModelInAgentLeavesBodyAlone(t *testing.T) {
+	src := "---\nname: planner\nmodel: sonnet\n---\nExample YAML in prompt body:\n\n```yaml\nmodel: opus\n```\n"
+	out, err := resolveModelInAgent(src, "")
+	require.NoError(t, err)
+	// Frontmatter got resolved:
+	require.Contains(t, out, "---\nname: planner\nmodel: claude-sonnet-5\n---")
+	// Body example unchanged:
+	require.Contains(t, out, "model: opus")
+}
+
+// TestResolveModelInAgentNoFrontmatter — a file without --- must be
+// returned verbatim even if it mentions `model:` in prose.
+func TestResolveModelInAgentNoFrontmatter(t *testing.T) {
+	src := "No frontmatter here.\nmodel: sonnet is just prose.\n"
+	out, err := resolveModelInAgent(src, "")
+	require.NoError(t, err)
+	require.Equal(t, src, out)
+}

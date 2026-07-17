@@ -7,6 +7,13 @@ import (
 	"github.com/vaporphd/zprof/internal/overlay"
 )
 
+// IsKnownRole returns true if role is a valid role or gate name — used by
+// commands like `zprof agents set` to reject typos before they persist in
+// .zprof.yaml where they'd silently misconfigure the next apply.
+func IsKnownRole(role string) bool {
+	return roleAgents[role] || gateRoles[role]
+}
+
 // roleAgents is the whitelist of agent basenames considered "roles" for the
 // Consilium (role -> agent) table. Everything else — tool-agents dispatched
 // from within a workflow rather than from the top-level router — is skipped.
