@@ -1,0 +1,25 @@
+name: frontend-web
+detect:
+  any_file:
+    - "package.json"
+    - "pnpm-lock.yaml"
+    - "package-lock.json"
+    - "yarn.lock"
+    - "bun.lockb"
+    - "vite.config.ts"
+    - "vite.config.js"
+    - "next.config.js"
+    - "next.config.mjs"
+    - "next.config.ts"
+    - "nuxt.config.ts"
+    - "svelte.config.js"
+    - "astro.config.mjs"
+    - "tsconfig.json"
+  any_regex:
+    - path: "package.json"
+      match: "\"next\":|\"vue\":|\"@vue/|\"react\":|\"nuxt\":|\"@nuxt/|\"vite\":|\"astro\":|\"svelte\":"
+    - path: "**/*.vue"
+      match: "<template>|<script setup"
+    - path: "**/*.tsx"
+      match: "import React|from 'react'|from \"react\""
+  confidence: high

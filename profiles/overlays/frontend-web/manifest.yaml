@@ -1,0 +1,20 @@
+name: frontend-web
+display_name: "Frontend / Web (Vue 3 + Next.js 15 + TypeScript + Vite + pnpm)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - pnpm-manager
+  - vite-runner
+  - vitest-runner
+  - playwright-runner
+  - eslint-checker
+  - tsc-checker
