@@ -1,0 +1,20 @@
+name: systems-rust
+display_name: "Systems / Rust (cargo + tokio + clippy + miri + nextest)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - cargo-runner
+  - cargo-manager
+  - clippy-checker
+  - rustfmt-checker
+  - miri-checker
+  - init-rust
