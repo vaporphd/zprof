@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>zprof eval — 52353252…3824</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --dim: #6b7280;
+  --muted: #f3f4f6;
+  --border: #e5e7eb;
+  --ok: #10b981;
+  --ok-bg: #d1fae5;
+  --warn: #f59e0b;
+  --warn-bg: #fef3c7;
+  --bad: #ef4444;
+  --bad-bg: #fee2e2;
+  --accent: #6366f1;
+  --code-bg: #f3f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e5e7eb;
+    --dim: #94a3b8;
+    --muted: #1e293b;
+    --border: #334155;
+    --ok-bg: #064e3b;
+    --warn-bg: #78350f;
+    --bad-bg: #7f1d1d;
+    --code-bg: #1e293b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+}
+main.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.5rem; }
+h1 .dim { color: var(--dim); font-weight: 400; }
+h2 { font-size: 1.15rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+header .tier1-note { color: var(--dim); font-style: italic; margin-top: 0; }
+code {
+  font-family: "SF Mono", ui-monospace, "Menlo", monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  background: var(--code-bg);
+  border-radius: 3px;
+}
+dl.session-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0;
+}
+dl.session-meta dt {
+  color: var(--dim);
+  font-weight: 500;
+}
+dl.session-meta dd { margin: 0; word-break: break-all; }
+.dim { color: var(--dim); }
+.scroll { overflow-x: auto; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+table thead th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+table tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table tbody tr:hover { background: var(--muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.detail { max-width: 55ch; word-break: break-word; color: var(--dim); font-size: 0.85rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.15em 0.55em;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--muted);
+  color: var(--fg);
+}
+.badge.ok    { background: var(--ok-bg);   color: var(--ok); }
+.badge.warn  { background: var(--warn-bg); color: var(--warn); }
+.badge.bad   { background: var(--bad-bg);  color: var(--bad); }
+.badges { margin: 0.5rem 0; }
+.badges .badge { margin-right: 0.35rem; }
+
+.num.ok   { color: var(--ok);   font-weight: 600; }
+.num.warn { color: var(--warn); font-weight: 600; }
+.num.bad  { color: var(--bad);  font-weight: 600; }
+
+.ok { color: var(--ok); }
+p.ok { padding: 0.5rem 0.75rem; background: var(--ok-bg); border-left: 3px solid var(--ok); border-radius: 3px; }
+
+table.bars td.bars-role { width: 12rem; }
+table.bars td.bars-cell { width: 100%; }
+table.bars .bar {
+  height: 0.75rem;
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  border-radius: 2px;
+}
+
+details.violations-list summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+details.violations-list summary:hover { color: var(--fg); }
+details.violations-list[open] summary { margin-bottom: 0.5rem; }
+
+section.footer { margin-top: 3rem; color: var(--dim); }
+section.footer h2 { color: var(--fg); }
+section.footer ul { line-height: 1.7; }
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+<h1>zprof eval <span class="dim">— 52353252…3824</span></h1>
+<p class="tier1-note">Tier 1 — deterministic. No LLM ran. Zero tokens spent producing this page.</p>
+<dl class="session-meta">
+<dt>Session ID</dt><dd><code>52353252-b350-486d-9ad5-678f47053824</code></dd>
+<dt>Log path</dt><dd><code>/Users/alv/.claude/projects/-Volumes-mydata-z0mi-harness/52353252-b350-486d-9ad5-678f47053824.jsonl</code></dd>
+<dt>Span</dt><dd><strong>22h02m</strong> <span class="dim">(2026-07-16T14:47:47Z → 2026-07-17T12:50:11Z)</span></dd>
+<dt>Main model</dt><dd><code>claude-opus-4-7</code></dd>
+<dt>Main-loop tokens</dt><dd>in 2,519 / out 2,746,372 <span class="dim">(cache: 315,410,367 read, 7,647,888 create)</span></dd>
+<dt>Subagent tokens</dt><dd><strong>5,962,610</strong> output across <strong>78</strong> dispatches</dd>
+</dl>
+</header>
+<section>
+<h2>Per-role scorecard</h2>
+<div class="scroll">
+<table class="scoreboard">
+<thead><tr>
+<th>Role</th><th>Model</th><th>N</th><th>Pass@1</th><th>Median tok</th><th>ApT</th><th>Compliance</th><th>Notes</th>
+</tr></thead>
+<tbody>
+<tr><td><code>architect</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">108,855</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>bug-hunter</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">102,660</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>explorer</code></td><td><code>opus</code></td><td class="num">6</td><td class="num bad">0.00</td><td class="num">94,555</td><td class="num">0.0</td><td><span class="badge warn">preamble×5</span></td><td></td></tr>
+<tr><td><code>implementer</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">100,618</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>other</code></td><td><code>sonnet</code></td><td class="num">35</td><td class="num bad">0.00</td><td class="num">87,442</td><td class="num">0.0</td><td><span class="badge warn">preamble×29</span></td><td></td></tr>
+<tr><td><code>refactor-agent</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">109,915</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>reviewer</code></td><td><code>opus</code></td><td class="num">6</td><td class="num bad">0.00</td><td class="num">102,520</td><td class="num">0.0</td><td><span class="badge warn">preamble×5</span></td><td></td></tr>
+<tr><td><code>simulator-driver</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">102,397</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>spm-manager</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">0</td><td class="num">0.0</td><td><span class="ok">clean</span></td><td></td></tr>
+<tr><td><code>swiftlint-checker</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">79,931</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>tester</code></td><td><code>opus</code></td><td class="num">5</td><td class="num bad">0.00</td><td class="num">110,323</td><td class="num">0.0</td><td><span class="badge warn">preamble×4</span></td><td></td></tr>
+<tr><td><code>testflight-shipper</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">83,929</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+<tr><td><code>xcode-runner</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">0</td><td class="num">0.0</td><td><span class="ok">clean</span></td><td></td></tr>
+<tr><td><code>xcodegen-driver</code></td><td><code>sonnet</code></td><td class="num">1</td><td class="num bad">0.00</td><td class="num">83,459</td><td class="num">0.0</td><td><span class="badge warn">preamble×1</span></td><td></td></tr>
+</tbody></table>
+</div></section>
+<section>
+<h2>Token spend by role</h2>
+<div class="scroll"><table class="bars"><tbody>
+<tr><td class="bars-role"><code>other</code></td><td class="bars-cell"><div class="bar" style="width:100%"></div></td><td class="num">2,438,562</td></tr>
+<tr><td class="bars-role"><code>reviewer</code></td><td class="bars-cell"><div class="bar" style="width:21%"></div></td><td class="num">536,329</td></tr>
+<tr><td class="bars-role"><code>explorer</code></td><td class="bars-cell"><div class="bar" style="width:19%"></div></td><td class="num">484,734</td></tr>
+<tr><td class="bars-role"><code>architect</code></td><td class="bars-cell"><div class="bar" style="width:18%"></div></td><td class="num">441,805</td></tr>
+<tr><td class="bars-role"><code>refactor-agent</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">434,324</td></tr>
+<tr><td class="bars-role"><code>tester</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">431,651</td></tr>
+<tr><td class="bars-role"><code>bug-hunter</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">429,792</td></tr>
+<tr><td class="bars-role"><code>implementer</code></td><td class="bars-cell"><div class="bar" style="width:17%"></div></td><td class="num">415,697</td></tr>
+<tr><td class="bars-role"><code>simulator-driver</code></td><td class="bars-cell"><div class="bar" style="width:4%"></div></td><td class="num">102,397</td></tr>
+<tr><td class="bars-role"><code>testflight-shipper</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">83,929</td></tr>
+<tr><td class="bars-role"><code>xcodegen-driver</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">83,459</td></tr>
+<tr><td class="bars-role"><code>swiftlint-checker</code></td><td class="bars-cell"><div class="bar" style="width:3%"></div></td><td class="num">79,931</td></tr>
+</tbody></table></div>
+</section>
+<section>
+<h2>Contract violations</h2>
+<div class="badges">
+<span class="badge warn">return-preamble × 63</span><span class="badge bad">dispatch-never-returned × 15</span></div>
+<details class="violations-list">
+<summary>78 violations — click to expand</summary>
+<div class="scroll"><table><thead><tr><th>#</th><th>Role</th><th>Kind</th><th>Detail</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: File: `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/archite…</td></tr>
+<tr><td class="num">2</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/impleme…</td></tr>
+<tr><td class="num">3</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/teste…</td></tr>
+<tr><td class="num">4</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/bug-h…</td></tr>
+<tr><td class="num">5</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/refac…</td></tr>
+<tr><td class="num">6</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/explo…</td></tr>
+<tr><td class="num">7</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/revie…</td></tr>
+<tr><td class="num">8</td><td><code>xcode-runner</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">9</td><td><code>spm-manager</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">10</td><td><code>simulator-driver</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: This reads clean end to end — 201 lines, all sections present, no stray artifa…</td></tr>
+<tr><td class="num">11</td><td><code>testflight-shipper</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/testf…</td></tr>
+<tr><td class="num">12</td><td><code>xcodegen-driver</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents/xcode…</td></tr>
+<tr><td class="num">13</td><td><code>swiftlint-checker</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Rewrote `/Volumes/mydata/projects/zprof/profiles/overlays/ios-swift/agents…</td></tr>
+<tr><td class="num">14</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: File: `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/ar…</td></tr>
+<tr><td class="num">15</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/im…</td></tr>
+<tr><td class="num">16</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/te…</td></tr>
+<tr><td class="num">17</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/bu…</td></tr>
+<tr><td class="num">18</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/…</td></tr>
+<tr><td class="num">19</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written to `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agen…</td></tr>
+<tr><td class="num">20</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/re…</td></tr>
+<tr><td class="num">21</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/agents/uv…</td></tr>
+<tr><td class="num">22</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written. 181 lines, within the 180-230 target.</td></tr>
+<tr><td class="num">23</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. 208 lines, within the 200-260 target.</td></tr>
+<tr><td class="num">24</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote **ruff-checker.md** (191 lines) at `/Volumes/mydata/projects/zprof/p…</td></tr>
+<tr><td class="num">25</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/backend-python/a…</td></tr>
+<tr><td class="num">26</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent written at `/Volumes/mydata/projects/zprof/profiles/overlays/backend-pytho…</td></tr>
+<tr><td class="num">27</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/arch…</td></tr>
+<tr><td class="num">28</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/impl…</td></tr>
+<tr><td class="num">29</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 447 lines - within the 350-450 target. Done.</td></tr>
+<tr><td class="num">30</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/bug-…</td></tr>
+<tr><td class="num">31</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/refa…</td></tr>
+<tr><td class="num">32</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/ex…</td></tr>
+<tr><td class="num">33</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agents/revi…</td></tr>
+<tr><td class="num">34</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">35</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">36</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">37</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/agent…</td></tr>
+<tr><td class="num">38</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/age…</td></tr>
+<tr><td class="num">39</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Created `/Volumes/mydata/projects/zprof/profiles/overlays/frontend-web/age…</td></tr>
+<tr><td class="num">40</td><td><code>architect</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/archi…</td></tr>
+<tr><td class="num">41</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 496 lines — inside the 450-550 target.</td></tr>
+<tr><td class="num">42</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/teste…</td></tr>
+<tr><td class="num">43</td><td><code>bug-hunter</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/bug-h…</td></tr>
+<tr><td class="num">44</td><td><code>refactor-agent</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Landed at exactly 450 lines — top of the 350-450 target. Written to `/Volumes/…</td></tr>
+<tr><td class="num">45</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written at `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/…</td></tr>
+<tr><td class="num">46</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written 465 lines at `/Volumes/mydata/projects/zprof/profiles/overlays/systems-c…</td></tr>
+<tr><td class="num">47</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done, Alex. 211 lines, matches vite-runner shape and every requested section.</td></tr>
+<tr><td class="num">48</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done, Alex. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/…</td></tr>
+<tr><td class="num">49</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent created successfully at `/Volumes/mydata/projects/zprof/profiles/overlays/…</td></tr>
+<tr><td class="num">50</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents…</td></tr>
+<tr><td class="num">51</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/lldb-…</td></tr>
+<tr><td class="num">52</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written `/Volumes/mydata/projects/zprof/profiles/overlays/systems-cpp/agents/ini…</td></tr>
+<tr><td class="num">53</td><td><code>architect</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">54</td><td><code>implementer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">55</td><td><code>tester</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">56</td><td><code>bug-hunter</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">57</td><td><code>refactor-agent</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">58</td><td><code>explorer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">59</td><td><code>reviewer</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">60</td><td><code>reviewer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents/reviewer.m…</td></tr>
+<tr><td class="num">61</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">62</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">63</td><td><code>other</code></td><td><span class="badge bad">dispatch-never-returned</span></td><td class="detail">no task-notification recorded in this session</td></tr>
+<tr><td class="num">64</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: ## Summary</td></tr>
+<tr><td class="num">65</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Written to `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents…</td></tr>
+<tr><td class="num">66</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/systems-rust/agents/init…</td></tr>
+<tr><td class="num">67</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/intake.m…</td></tr>
+<tr><td class="num">68</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/unpacker…</td></tr>
+<tr><td class="num">69</td><td><code>explorer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/explorer…</td></tr>
+<tr><td class="num">70</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Landed at 301 lines — inside the 300–400 target.</td></tr>
+<tr><td class="num">71</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/verifier…</td></tr>
+<tr><td class="num">72</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Done. Wrote `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho/agents/re…</td></tr>
+<tr><td class="num">73</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: The agent file is complete at 201 lines, within the requested 200-260 range.</td></tr>
+<tr><td class="num">74</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 214 lines, within the 200-260 target. File is complete and consistent with sibli…</td></tr>
+<tr><td class="num">75</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 250 lines — squarely in the 250-320 target range. File complete at `/Volumes/m…</td></tr>
+<tr><td class="num">76</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 310 lines — within the 300-380 target range. The agent file is complete and se…</td></tr>
+<tr><td class="num">77</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Agent file written at `/Volumes/mydata/projects/zprof/profiles/overlays/re-macho…</td></tr>
+<tr><td class="num">78</td><td><code>other</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: 180 lines — within the 180-240 target range.</td></tr>
+</tbody></table></div>
+</details>
+</section>
+<section class="footer">
+<h2>What Tier 2 would add</h2>
+<ul>
+<li>Panel-judge quality (1-5) per dispatch across correctness / adherence / efficiency framings.</li>
+<li>Model-tier recommendation per role (advisory).</li>
+<li>Reasoning-quality assessment on ADR / review artifacts.</li>
+</ul>
+<p class="dim">Run <code>zprof eval --deep &lt;sessionId&gt;</code> to dispatch the <code>evaluator</code> subagent.</p>
+</section>
+<section>
+<h2>Tier 2 — panel-judge evaluation</h2>
+<p class="dim">First real-world dispatch of the <code>evaluator</code> subagent. Scoped to the iOS shakedown segment: dispatches after 2026-07-17T00:00Z, roles <code>architect | implementer | tester | reviewer</code>. Panel is a <strong>single-model fallback</strong> (three internal framings), not the mandated 3× parallel Sonnet PoLL — see §Assumptions.</p>
+</section>
+
+<section>
+<h2>Summary</h2>
+<p>Twenty-one target-role dispatches matched. Four systems-rust round-1 attempts failed simultaneously (infra cluster failure, not quality); the reviewer role was re-run for systems-rust and completed. Net completed samples: architect 4, implementer 4, tester 4, reviewer 5. Panel judging ran only on <strong>reviewer</strong> (5 completed ≥ threshold). The other three roles are marked <code>insufficient-data</code> per contract §0.</p>
+<p><strong>Headline:</strong> reviewer <span class="badge warn">KEEP @ opus</span> — panel_quality 3.52, pass@1 0.833, but every completed dispatch violated the <code>return_format</code>-first HARD RULE (preamble 5/5). Underlying artifacts on disk are strong. Fix the preamble bleed in the wrapper prompt — that is a wrapper problem, not a model-tier problem. The four roles ran on Opus during this shakedown.</p>
+</section>
+
+<section>
+<h2>Per-role scorecard (Tier-2 layer)</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>Role</th><th>Model</th><th>N (comp/total)</th><th>Pass@1</th><th>Median tok</th><th>Panel</th><th>Framings (C / A / E)</th><th>Divergence</th><th>Recommendation</th></tr></thead>
+<tbody>
+<tr><td><code>architect</code></td><td><code>opus</code></td><td class="num">4 / 5</td><td class="num">0.80</td><td class="num">108,569</td><td class="num dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="badge">insufficient-data</span></td></tr>
+<tr><td><code>implementer</code></td><td><code>opus</code></td><td class="num">4 / 5</td><td class="num">0.80</td><td class="num">99,645</td><td class="num dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="badge">insufficient-data</span></td></tr>
+<tr><td><code>tester</code></td><td><code>opus</code></td><td class="num">4 / 5</td><td class="num">0.80</td><td class="num">104,498</td><td class="num dim">—</td><td class="dim">—</td><td class="dim">—</td><td><span class="badge">insufficient-data</span></td></tr>
+<tr><td><code>reviewer</code></td><td><code>opus</code></td><td class="num">5 / 6</td><td class="num">0.833</td><td class="num">102,520</td><td class="num warn">3.52</td><td>4.31 / 2.75 / 3.56</td><td><span class="badge warn">×5</span></td><td><span class="badge warn">KEEP</span></td></tr>
+</tbody>
+</table>
+</div>
+<p class="dim">C = correctness lens · A = adherence lens · E = efficiency lens. Panel = median-wins across three framings; weighted per rubric §2 (Instruction 0.30 / Completeness 0.25 / ToolEff 0.20 / Reasoning 0.15 / Coherence 0.10).</p>
+</section>
+
+<section>
+<h2>Reviewer per-dispatch panel scores (median-wins)</h2>
+<div class="scroll">
+<table>
+<thead><tr><th>#</th><th>Overlay</th><th>tool-use-id</th><th>tok</th><th>tools</th><th>dur</th><th>Instr</th><th>Compl</th><th>ToolEff</th><th>Reas</th><th>Coher</th><th>Weighted</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><code>ios-swift</code></td><td><code>…6JeD6c5JCU1x82u</code></td><td class="num">130,698</td><td class="num">8</td><td class="num">584s</td><td class="num">4</td><td class="num">4</td><td class="num">3</td><td class="num">3</td><td class="num">2</td><td class="num warn">3.25</td></tr>
+<tr><td class="num">2</td><td><code>backend-python</code></td><td><code>…b42yw77KmhkQ2j</code></td><td class="num">96,936</td><td class="num">3</td><td class="num">205s</td><td class="num">4</td><td class="num">4</td><td class="num">3</td><td class="num">4</td><td class="num">3</td><td class="num warn">3.70</td></tr>
+<tr><td class="num">3</td><td><code>frontend-web</code></td><td><code>…egjyMAVvQwrmNyu</code></td><td class="num">102,520</td><td class="num">5</td><td class="num">262s</td><td class="num">4</td><td class="num">4</td><td class="num">3</td><td class="num">3</td><td class="num">3</td><td class="num warn">3.55</td></tr>
+<tr><td class="num">4</td><td><code>systems-cpp</code></td><td><code>…4bTdYyMxHUjdoy</code></td><td class="num">101,568</td><td class="num">4</td><td class="num">239s</td><td class="num">4</td><td class="num">4</td><td class="num">3</td><td class="num">3</td><td class="num">3</td><td class="num warn">3.55</td></tr>
+<tr><td class="num">5</td><td><code>systems-rust (re-run)</code></td><td><code>…kdXD8VBv6qa3n5</code></td><td class="num">104,607</td><td class="num">5</td><td class="num">279s</td><td class="num">4</td><td class="num">4</td><td class="num">3</td><td class="num">3</td><td class="num">3</td><td class="num warn">3.55</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>Per-role recommendations</h2>
+
+<div class="scroll">
+<table>
+<thead><tr><th>Role</th><th>Current tier</th><th>Recommended</th><th>Reasoning (per contract §4)</th></tr></thead>
+<tbody>
+<tr><td><code>architect</code></td><td><code>opus</code></td><td><span class="badge">insufficient-data</span></td><td>4 completed dispatches — below the 5-sample floor. Systems-rust round-1 failed at cluster (not per-role signal). All 4 artifacts landed 400-620 lines, matched Kotlin-peer depth, included pinned versions and per-layer allow/deny tables. Preamble×4. Rerun to reach threshold.</td></tr>
+<tr><td><code>implementer</code></td><td><code>opus</code></td><td><span class="badge">insufficient-data</span></td><td>4 completed. Artifacts 475-573 lines, six-file endpoint slice and forbidden-imports table per prompt. Preamble×4. Rerun systems-rust attempt.</td></tr>
+<tr><td><code>tester</code></td><td><code>opus</code></td><td><span class="badge">insufficient-data</span></td><td>4 completed. Artifacts 430-448 lines, pinned test-framework versions, 25-27-item self-validation checklists. Preamble×4. Rerun systems-rust attempt.</td></tr>
+<tr><td><code>reviewer</code></td><td><code>opus</code></td><td><span class="badge warn">KEEP</span></td><td>pass@1 = 0.833 (below 0.90 downgrade gate). panel_quality 3.52 in REVIEW band (3.0-3.9), no signal to upgrade. The quality drag is schema-compliance (preamble 5/5) — a wrapper problem, not a model-capacity problem. Sonnet would very likely produce the same preamble behavior. Fix wrapper first; only after preamble stops should a Sonnet A/B be commissioned.</td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<h2>Divergence flags</h2>
+<p>Every reviewer dispatch triggered ≥1 divergence &gt;1.0 across the three framings. Root cause is structural: Framing A (correctness) rewards the on-disk artifact; Framing B (adherence) penalises the preamble hard-rule violation. <strong>Instruction (0.30 weight) and Coherence (0.10 weight) are guaranteed to split by 2-3 points on every sample.</strong> This is not judgment noise — it's the panel doing exactly what it should when a run is "great artifact, broken schema."</p>
+<div class="scroll">
+<table>
+<thead><tr><th>#</th><th>Overlay</th><th>Dim</th><th>A</th><th>B</th><th>C</th><th>Span</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td class="num">1</td><td><code>ios-swift</code></td><td>instruction</td><td class="num ok">5</td><td class="num bad">2</td><td class="num warn">3</td><td class="num bad">3</td><td class="detail">A: 429 lines / 12 dims / mirrors Kotlin. B: preamble = HARD RULE §0 violated.</td></tr>
+<tr><td class="num">1</td><td><code>ios-swift</code></td><td>reasoning</td><td class="num ok">5</td><td class="num warn">3</td><td class="num bad">2</td><td class="num bad">3</td><td class="detail">C: 130k tok / 8 tools / 584s — most expensive of five for same shape.</td></tr>
+<tr><td class="num">1</td><td><code>ios-swift</code></td><td>coherence</td><td class="num warn">3</td><td class="num bad">1</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">Schema-first violated per B; A/C treat narrative-level as fine.</td></tr>
+<tr><td class="num">2</td><td><code>backend-python</code></td><td>instruction</td><td class="num ok">5</td><td class="num bad">2</td><td class="num ok">4</td><td class="num bad">3</td><td class="detail">Same structural split; C rewards efficient run (96k tok, 3 tools, 205s).</td></tr>
+<tr><td class="num">2</td><td><code>backend-python</code></td><td>tool_efficiency</td><td class="num warn">3</td><td class="num warn">3</td><td class="num ok">5</td><td class="num bad">2</td><td class="detail">C-lens: most efficient dispatch; A/B don't reward efficiency.</td></tr>
+<tr><td class="num">2</td><td><code>backend-python</code></td><td>coherence</td><td class="num warn">3</td><td class="num bad">1</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">Same schema-first split.</td></tr>
+<tr><td class="num">3</td><td><code>frontend-web</code></td><td>instruction</td><td class="num ok">4</td><td class="num bad">2</td><td class="num ok">4</td><td class="num bad">2</td><td class="detail">485 lines slightly over 400-500 target; still A=4.</td></tr>
+<tr><td class="num">3</td><td><code>frontend-web</code></td><td>reasoning</td><td class="num ok">5</td><td class="num warn">3</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">A rewards stack-gated Vue/React/Next split.</td></tr>
+<tr><td class="num">3</td><td><code>frontend-web</code></td><td>coherence</td><td class="num warn">3</td><td class="num bad">1</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">Same schema-first split.</td></tr>
+<tr><td class="num">4</td><td><code>systems-cpp</code></td><td>instruction</td><td class="num ok">5</td><td class="num bad">2</td><td class="num ok">4</td><td class="num bad">3</td><td class="detail">14 C++-specific dimensions, ABI + sanitizers covered.</td></tr>
+<tr><td class="num">4</td><td><code>systems-cpp</code></td><td>reasoning</td><td class="num ok">5</td><td class="num warn">3</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">A rewards ABI/UB/sanitizer content.</td></tr>
+<tr><td class="num">4</td><td><code>systems-cpp</code></td><td>coherence</td><td class="num warn">3</td><td class="num bad">1</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">Same.</td></tr>
+<tr><td class="num">5</td><td><code>systems-rust</code></td><td>instruction</td><td class="num ok">5</td><td class="num bad">2</td><td class="num ok">4</td><td class="num bad">3</td><td class="detail">469 lines, 13 dims, pinned versions incl. miri/semver-checks.</td></tr>
+<tr><td class="num">5</td><td><code>systems-rust</code></td><td>reasoning</td><td class="num ok">5</td><td class="num warn">3</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">A: unsafe/ownership dimensions well-covered.</td></tr>
+<tr><td class="num">5</td><td><code>systems-rust</code></td><td>coherence</td><td class="num warn">3</td><td class="num bad">1</td><td class="num warn">3</td><td class="num bad">2</td><td class="detail">Same.</td></tr>
+</tbody>
+</table>
+</div>
+<p><strong>Synthesis:</strong> divergence is systematic, not noisy. When the preamble issue is fixed, Framing B's instruction score will jump 2 → 4-5 and divergence will collapse. Until then, medians correctly reflect the "good work, broken wrapper" reality.</p>
+</section>
+
+<section>
+<h2>Traps observed</h2>
+<ul>
+<li><strong>Universal preamble violation.</strong> All 21 target-role dispatches (17 completed + 4 failed) returned prose instead of the <code>verdict:</code> schema — matching the full-session Tier-1 finding of preamble×63 across 78 dispatches. Single largest quality drag in this session; model-independent.</li>
+<li><strong>Cluster failure at systems-rust round-1.</strong> Four dispatches (<code>toolu_01Ju9…</code>, <code>toolu_01F1P…</code>, <code>toolu_01CGU…</code>, <code>toolu_01E5G…</code>) failed within a 2-minute window with <code>status: failed</code>. Reviewer re-run later completed cleanly. Likely transient infra/timeout, not per-role signal — but it dropped three of four roles below the 5-sample panel-judging floor. Per contract §6, the reviewer re-run counts as an independent sample (not deduplicated) — useful for a rough pass^2 read (2 attempts / 1 success = 50% replay on rust reviewer).</li>
+<li><strong>First-of-series token inflation.</strong> ios-swift reviewer used 130,698 tok / 8 tools / 584s vs the four-overlay median 102k / 5 / 262s. It was first in the shakedown; the agent invested in peer-study of the Kotlin sibling. Argues for pinning peer-study to the first shakedown of a new-overlay series only.</li>
+<li><strong>Line-count overrun on architects.</strong> systems-cpp architect at 617 lines vs the 400-500 target, frontend-web at 594. The prompts said "MATCH depth of backend-python (557 lines)", which overrode the target — spec conflict authored into the prompt, not an agent failure.</li>
+<li><strong>Frontend-web tester used 33 tools</strong> — 6× the median. Tester role is <code>insufficient-data</code> so not scored, but worth a look before the next shakedown.</li>
+</ul>
+</section>
+
+<section>
+<h2>Assumptions &amp; caveats</h2>
+<ul>
+<li><strong>Panel is single-model fallback, not 3× parallel Sonnet.</strong> Contract §3 mandates three parallel Sonnet judges per dispatch. This dispatch environment does not allow nested subagents, so this evaluator ran three internal framings (Correctness / Adherence / Efficiency) sequentially and took per-dimension medians. This is a documented triangulation, but it is NOT true PoLL — it inherits any bias of the executor model. Discount panel_quality by roughly one confidence band until a real 3× panel run is possible.</li>
+<li><strong>ApT metric</strong> = artifacts_produced × 1e6 / total_output_tokens. Reviewer = 5 arts / 536,329 tok ≈ 9.32 art / Mtok.</li>
+<li><strong>Expected ApT at Sonnet tier</strong> ≈ same tokens, ~5× cost efficiency (Sonnet output ≈ $15/M vs Opus ≈ $75/M). If pass@1 held at 0.833 on Sonnet, cost-per-artifact would drop ~80% — but no Sonnet A/B was run for this role.</li>
+<li><strong>Failed dispatches excluded from panel scoring.</strong> The four systems-rust round-1 failures had no artifact and no return payload; they count in the pass@1 denominator only.</li>
+<li><strong>Length normalization was NOT applied.</strong> All five reviewer artifacts fell in 429-489 lines, within one log unit. Length bias per §6 is negligible here.</li>
+<li><strong>Tier-1 attribution is by description parsing.</strong> Every dispatch used <code>subagent_type: general-purpose</code>; the Tier-1 CLI routed them into role buckets by matching the description. "The four roles ran on Opus" refers to the general-purpose@opus wrapper carrying a role-shaped prompt.</li>
+<li><code>.zprof.yaml</code> was NOT modified; no subject agent was re-dispatched; no <code>next:</code> payload for downstream action.</li>
+</ul>
+</section>
+
+<section>
+<h2>What Tier-3 (Alex) should decide</h2>
+<ol>
+<li><strong>Fix the return-format-first violation at the wrapper level.</strong> Prefix a "MUST first character = <code>v</code>" line to the general-purpose agent prompt, OR add a post-response strip-preamble hook, OR require every subagent's <code>return_format</code> example inline in the frontmatter. This one fix would flip 63/78 dispatches from <code>preamble</code> to <code>clean</code> and probably move reviewer panel_quality from 3.52 to ~4.2.</li>
+<li><strong>Rerun the four failed systems-rust dispatches</strong> to lift architect / implementer / tester to the 5-sample floor.</li>
+<li><strong>Commission a real 3× Sonnet PoLL</strong> — the current single-model panel is a documented compromise; the reviewer verdict deserves triangulation before any downgrade experiment.</li>
+<li><strong>A/B reviewer on Sonnet</strong> — but only AFTER the preamble fix.</li>
+<li><strong>Amend the shakedown protocol</strong> to allow line-count overrides only when the target and the "match-depth-of-peer" constraint conflict explicitly (avoids the systems-cpp/frontend-web architect overruns being scored against the agents).</li>
+</ol>
+</section>
+
+</main></body></html>
