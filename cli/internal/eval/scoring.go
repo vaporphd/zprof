@@ -200,8 +200,27 @@ func Score(t *Trace, checkArtifactExists func(string) bool) SessionScore {
 }
 
 func isPass(verdict string) bool {
+	// The pass set spans two contract vocabularies:
+	//
+	//  * Action-oriented roles (architect / implementer / tester / bug-hunter /
+	//    refactor-agent / explorer / planner / evaluator) use `done` for
+	//    successful completion. `ok` is a synonym some contracts still use.
+	//  * Reviewer uses a review-verdict vocabulary: `approve`,
+	//    `approve-with-fixes`, `awaiting-approval`, `block`.
+	//
+	// `awaiting-approval` deserves to count as pass because reviewer §12
+	// calls it "the most common intermediate verdict" — the report is
+	// written and findings are on disk; the audit itself is complete, only
+	// the orchestrator's next-step routing is pending. Counting it as
+	// non-pass would drag every well-behaved reviewer's Pass@1 down for a
+	// contract-mandated state.
+	//
+	// `block` and `blocked` remain non-pass — a critical was found and left
+	// unfixed. `failed` is likewise non-pass. Empty string (no verdict
+	// emitted at all — the total-schema-abandonment case) is non-pass by
+	// construction.
 	switch strings.ToLower(strings.TrimSpace(verdict)) {
-	case "done", "approve", "approve-with-fixes", "ok":
+	case "done", "approve", "approve-with-fixes", "awaiting-approval", "ok":
 		return true
 	default:
 		return false

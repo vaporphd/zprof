@@ -80,11 +80,15 @@ func TestParseReturnFormatToleratesFencedBlock(t *testing.T) {
 
 func TestIsPassAcceptsReviewerVerdicts(t *testing.T) {
 	// Reviewer uses a different verdict vocabulary than architect/implementer.
-	// The scorer must recognize all approval variants.
+	// The scorer must recognize all approval variants including the routine
+	// intermediate `awaiting-approval` state (reviewer §12).
 	require.True(t, isPass("done"))
 	require.True(t, isPass("approve"))
 	require.True(t, isPass("approve-with-fixes"))
+	require.True(t, isPass("awaiting-approval"),
+		"awaiting-approval is the routine intermediate reviewer verdict; contract-compliant work")
 	require.False(t, isPass("block"))
 	require.False(t, isPass("blocked"))
-	require.False(t, isPass("awaiting-approval"))
+	require.False(t, isPass("failed"))
+	require.False(t, isPass(""), "empty verdict means the schema was never emitted")
 }

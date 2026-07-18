@@ -5,9 +5,9 @@ _Tier 1 — deterministic. No LLM ran. See `zprof eval --deep` for panel judging
 ## Session
 - Session ID: `445b990e-2263-4383-8415-a8addba72189`
 - Log path:   `/Users/alv/.claude/projects/-Volumes-mydata-z0mi-harness/445b990e-2263-4383-8415-a8addba72189.jsonl`
-- Span:       20h37m (2026-07-17T14:11:56Z → 2026-07-18T10:49:19Z)
+- Span:       21h10m (2026-07-17T14:11:56Z → 2026-07-18T11:22:43Z)
 - Main model: `claude-opus-4-7`
-- Main-loop tokens: in 2,318 / out 1,081,624 (cache read 280,867,314, create 8,131,565)
+- Main-loop tokens: in 2,362 / out 1,115,705 (cache read 292,760,005, create 8,169,530)
 - Subagent tokens (output only): 894,120 across 8 dispatches
 
 ## Per-role scorecard
@@ -16,7 +16,7 @@ _Tier 1 — deterministic. No LLM ran. See `zprof eval --deep` for panel judging
 |---|---|--:|--:|--:|--:|---|---|
 | architect | (inherited) | 2 | 1.00 | 104,112 | 1.0 | clean | avg conf 0.88 (2/2) |
 | implementer | (inherited) | 2 | 0.50 | 114,800 | 0.5 | artifact-missing×1 preamble×2 | avg conf 0.90 (1/2) |
-| reviewer | (inherited) | 2 | 0.50 | 135,541 | 0.4 | clean | avg conf 0.87 (2/2) |
+| reviewer | (inherited) | 2 | 1.00 | 135,541 | 0.8 | clean | avg conf 0.87 (2/2) |
 | tester | (inherited) | 2 | 1.00 | 126,108 | 0.9 | artifact-missing×2 preamble×1 | avg conf 0.95 (2/2) |
 
 ## Contract violations
