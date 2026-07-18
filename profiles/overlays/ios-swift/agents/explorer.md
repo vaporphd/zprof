@@ -178,9 +178,6 @@ Report VC subclasses, storyboard/XIB inventory, programmatic vs storyboard-drive
 
 ### 2.11 Async / concurrency profile (deep-dive)
 ```bash
-# Combine surface
-grep -rn -E 'AnyPublisher|@Published|PassthroughSubject|CurrentValueSubject|\.sink\b|\.assign\(to:' \
-  --include='*.swift' <feature-path> | wc -l
 # Swift Concurrency surface
 grep -rn -E 'async\s+throws|async\s+func|await\s+|Task\s*\{|actor\s+\w+|@MainActor|TaskGroup|AsyncSequence' \
   --include='*.swift' <feature-path> | wc -l
@@ -188,8 +185,11 @@ grep -rn -E 'async\s+throws|async\s+func|await\s+|Task\s*\{|actor\s+\w+|@MainAct
 grep -rn -E 'completion(Handler)?:\s*@escaping|completion:\s*\(' --include='*.swift' <feature-path> | wc -l
 # Orphan Task { } (no store, no await on cancel)
 grep -rn -E '^\s*Task\s*\{' --include='*.swift' <feature-path> | head -20
+# Combine surface (should be zero — flag any hit as a legacy violation to raise with the caller)
+grep -rn -E 'import Combine|AnyPublisher|@Published|PassthroughSubject|CurrentValueSubject|\.sink\b|\.assign\(to:|AnyCancellable' \
+  --include='*.swift' <feature-path>
 ```
-Report ratios: Combine vs async/await vs completion-handler, and count of unstored `Task {}` sites.
+Report async/await vs completion-handler ratios, count of unstored `Task {}` sites, and — separately — whether Combine surface is zero or nonzero. If nonzero, list every file:line and flag as a legacy violation.
 
 ### 2.12 DI graph
 Native / Resolver / Swinject / Factory / Needle:
@@ -306,7 +306,7 @@ _Explorer run · <YYYY-MM-DD HH:MM local> · timebox <N> min · elapsed <M> min_
 Targets & schemes table, SPM packages (local + remote pinned versions), workspace vs project, dependency-manager mix (SPM / CocoaPods / Carthage), entry points (`@main` App / AppDelegate / SceneDelegate), URL scheme + universal-link surface.
 
 ## Architecture patterns observed
-UI stack (SwiftUI / UIKit / mixed) · state pattern (MV, MVVM, TCA, Redux-ish, VIPER, Clean) · navigation (NavigationStack / Coordinator / Router) · persistence (Core Data / SwiftData / Realm / GRDB / files) · networking (URLSession / Alamofire / Moya / gRPC-Swift) · async model (Combine / async-await / completion handlers / mix). Cite file:line for each claim.
+UI stack (SwiftUI / UIKit / mixed) · state pattern (MV, MVVM, TCA, Redux-ish, Clean; flag VIPER as a legacy violation if found) · navigation (NavigationStack / Coordinator / Router) · persistence (Core Data / SwiftData / Realm / GRDB / files) · networking (URLSession / Alamofire / Moya / gRPC-Swift) · async model (async-await / completion handlers / mix; flag Combine as a legacy violation if found). Cite file:line for each claim.
 
 ## Public API
 What other targets consume from this scope. Each row: `symbol · file:line · consumers (target list)`. Flag `public` symbols consumed only inside the feature.
@@ -321,7 +321,7 @@ Fix/hotfix/regression/crash commits in the last 6 months, systemic-fix commits (
 Files >500 lines · methods >60 lines · `!` density leaders (top 10) · `try!` sites · `as!` sites · unstored `Task {}` sites · `TODO/FIXME/HACK` count. Each with file:line.
 
 ## Async / concurrency profile
-Combine surface count vs Swift Concurrency surface count vs completion-handler count · unstored `Task {}` count · `@MainActor` usage · actor count. One-line verdict (e.g. "predominantly Combine with a growing async-await migration front in `Features/Auth/`").
+Swift Concurrency surface count vs completion-handler count · unstored `Task {}` count · `@MainActor` usage · actor count · Combine surface count (this overlay expects zero; any hit is a legacy violation and must be enumerated file:line). One-line verdict (e.g. "async-await throughout Features/, one legacy completion-handler cluster in Legacy/PaymentClient/").
 
 ## Test coverage estimate
 Test-file / prod-file ratio · XCTest func count · Swift Testing `@Test` count · whether new tests are being added.
@@ -371,7 +371,7 @@ Before returning, tick every box. If any is ❌, either fix it or downgrade `ver
 - [ ] `## Recent activity` cites `git log` output span and top contributors.
 - [ ] `## Failure history` cites `git log --grep` output and calls out any systemic-fix commit.
 - [ ] `## Risk hotspots` names concrete files >500 lines, `!` leaders, all `try!` and `as!` sites, unstored `Task {}` sites.
-- [ ] `## Async / concurrency profile` gives numeric Combine vs async-await vs completion-handler counts and a one-line verdict.
+- [ ] `## Async / concurrency profile` gives numeric async-await vs completion-handler counts, Combine surface count (should be zero — otherwise list file:line), and a one-line verdict.
 - [ ] `## Test coverage estimate` gives numeric ratio plus XCTest and Swift Testing counts.
 - [ ] `## Open questions` is non-empty (there is always something the code alone cannot answer) OR explicitly notes "none — all questions answered from code".
 - [ ] `## Recommended next steps` names exactly one downstream role and a specific target.

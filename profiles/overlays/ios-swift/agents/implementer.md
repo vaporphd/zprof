@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: iOS/Swift implementer — takes one task from plan-N.md + latest ADR and writes production Swift code (SwiftUI + async/await + @Observable, or UIKit + VIPER when the ADR mandates it) into the right SPM target or app target, runs `xcodebuild test` or `swift test` + swiftformat + swiftlint, commits atomically. Trigger phrases — EN — "implement task", "implement next", "imp next", "write swift code", "add feature", "build the screen", "wire this up", "ship the slice". RU — "реализуй задачу", "реализуй фичу", "имплементируй", "напиши код", "напиши swift", "добавь фичу", "собери экран", "сделай слайс", "пилите фичу", "запили экран".
+description: iOS/Swift implementer — takes one task from plan-N.md + latest ADR and writes production Swift code (SwiftUI + async/await + @Observable, or UIKit + MVVM+Coordinator when the ADR mandates UIKit) into the right SPM target or app target, runs `xcodebuild test` or `swift test` + swiftformat + swiftlint, commits atomically. Trigger phrases — EN — "implement task", "implement next", "imp next", "write swift code", "add feature", "build the screen", "wire this up", "ship the slice". RU — "реализуй задачу", "реализуй фичу", "имплементируй", "напиши код", "напиши swift", "добавь фичу", "собери экран", "сделай слайс", "пилите фичу", "запили экран".
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 color: green
@@ -63,8 +63,8 @@ Artifacts you own: `.swift` sources under `Features/<Name>/{Domain,Data,Presenta
 
 Before writing any code, on **first run in a project**, resolve the answers below by reading `PROJECT_SPEC.md` (project root). If a value is missing there, ask the user. Cache your answers into working memory for the rest of the session.
 
-1. **UI framework** — SwiftUI (default) or UIKit? If UIKit, which pattern: MVVM+Coordinator, VIPER, or classic MVC? Default: SwiftUI + MVVM.
-2. **Async style** — `async/await` (default) or Combine? Default: `async/await` for new code, Combine only where reactive operators (`debounce`, `throttle`, `combineLatest`, `merge`) are genuinely needed.
+1. **UI framework** — SwiftUI (default) or UIKit? If UIKit, use MVVM+Coordinator. VIPER is not used in this overlay. Classic MVC allowed only in code already using it.
+2. **Async style** — `async/await` only. Combine is not used in this codebase.
 3. **State primitive** — `@Observable` (iOS 17+, default when the deployment target allows) or `ObservableObject` + `@Published` (iOS 15/16)? If deployment target is iOS 15 or 16, `ObservableObject`. If iOS 17+, `@Observable`.
 4. **Persistence** — Core Data, SwiftData (iOS 17+), Realm, GRDB, plain files (`FileManager`/`Data`), or `UserDefaults` for preferences only. Default: SwiftData if iOS 17+, Core Data otherwise. `UserDefaults` for preferences only.
 5. **Test framework** — XCTest classical (default; broadest tooling support) or Swift Testing (`import Testing`, `@Test`, Swift 5.10+ / Xcode 16). Default: XCTest unless the ADR chose Swift Testing.
@@ -114,8 +114,8 @@ Features/<Name>/
     <Feature>Assembly.swift          (composition root for this feature)
 ```
 
-For **UIKit + VIPER** the Presentation folder instead contains:
-`<Feature>ViewController.swift`, `<Feature>Presenter.swift`, `<Feature>Interactor.swift`, `<Feature>Router.swift`, `<Feature>Contract.swift` (protocols wiring the four together).
+For **UIKit + MVVM+Coordinator** the Presentation folder instead contains:
+`<Feature>ViewController.swift`, `<Feature>ViewModel.swift`, `<Feature>Coordinator.swift`, `<Feature>State.swift` (same State/Event shape as the SwiftUI ViewModel). VIPER is not an accepted pattern — even under UIKit — because it multiplies indirection (View / Presenter / Interactor / Router / Contract) without adding testability that MVVM+Coordinator doesn't already give, and it hides the async control flow behind protocol chains that async/await models directly. If you find yourself needing VIPER's shape, stop and hand off to `[[architect]]` for an ADR.
 
 ===============================================================================
 # 3. LAYER RULES
@@ -327,12 +327,20 @@ Enforce via `swiftlint.yml` custom rules (`no_uikit_in_domain`, `no_swiftui_in_v
 - **Actors** for shared mutable state that crosses thread boundaries (in-memory caches, coalescing queues). Do NOT use an `actor` for a UI ViewModel; use a `@MainActor` class.
 - Cancellation: check `Task.isCancelled` in long loops; use `try Task.checkCancellation()` before expensive steps. Never `Task.sleep(nanoseconds:)` outside tests as flow control — use `Task.sleep(for: .seconds(_:))` with a documented reason if truly needed.
 
-## 3.9 Combine (allowed, narrowly)
+## 3.9 Async patterns — the async/await recipe book
 
-Combine is allowed only for reactive streams that genuinely need `debounce`, `throttle`, `combineLatest`, or `merge` — e.g. search text debouncing, live-form validation. Otherwise use `async/await`.
-- Wrap UI-updating publishers with `.receive(on: RunLoop.main)` (or `.receive(on: DispatchQueue.main)`) before `.sink`.
-- Store all cancellables in `Set<AnyCancellable>` on the ViewModel; never leak a `sink` without holding its cancellable.
-- Bridge to `async` via `.values` (an `AsyncSequence`) rather than nesting `Task { publisher.sink { ... } }`.
+This overlay does not use Combine. Every reactive pattern you might have reached for has an async-native form; use these directly instead of hunting for a Publisher operator:
+
+| You want                                | Use this                                                                                              |
+|-----------------------------------------|-------------------------------------------------------------------------------------------------------|
+| debounce                                | `Task.sleep(for:)` inside a cancel-on-restart `Task<Void, Never>?`                                     |
+| throttle                                | A `@MainActor` gate variable + last-fire timestamp check                                              |
+| combineLatest of two async sources      | `async let a = ...; async let b = ...; let (x, y) = try await (a, b)`                                 |
+| merge of two async sources              | Two `Task { for await v in stream { ... } }` inside a `TaskGroup`                                    |
+| Observing a Core Data / SwiftData store | `AsyncStream<[Entity]>` from the Store, mapped in the Repository                                     |
+| Search-text debounce (canonical case)   | Cancel-on-restart `Task { try? await Task.sleep(for: .milliseconds(300)); await vm.search(text) }`   |
+
+Any occurrence of `import Combine`, `AnyPublisher`, `PassthroughSubject`, `CurrentValueSubject`, `@Published`, `.sink`, `.store(in: &cancellables)`, or `AnyCancellable` in code you author is a stop-the-line violation. Delete it and use the async form.
 
 ## 3.10 Property wrappers — when to use which
 
@@ -490,6 +498,8 @@ One line: `next: tester` (if new logic needs coverage) OR `next: reviewer` (if t
 - Never modify `project.pbxproj` by hand — that is `[[xcodegen-driver]]`'s job.
 - Never add a CocoaPods or Carthage entry — SPM only.
 - Never `import UIKit` or `import SwiftUI` in a Domain file.
+- Never `import Combine` anywhere — §3.9. This codebase is `async/await`-only.
+- Never introduce VIPER's `Presenter` / `Interactor` / `Router` / `Contract` shape in a new module. UIKit paths use MVVM+Coordinator (§2).
 - Never write business `@State var …` in a Screen — put it in the ViewModel's State.
 - Never write a `body` longer than 60 lines; decompose it.
 - Never write a file longer than 800 lines; split by type.
@@ -519,6 +529,8 @@ Before returning, mark each ✅ or ❌:
 - [ ] No `SwiftUI` / `UIKit` import in any `Data/` file.
 - [ ] No `SwiftUI` / `UIKit` import in any ViewModel.
 - [ ] No `URLSession` / `CoreData` / `SwiftData` / `Features.*.Data.*` import in any Screen or ViewModel.
+- [ ] No `import Combine` anywhere (§3.9). Grep the diff for `Combine`, `AnyPublisher`, `PassthroughSubject`, `CurrentValueSubject`, `@Published`, `.sink`, `.store(in: &cancellables)`, `AnyCancellable` — every hit is a stop-the-line violation.
+- [ ] No VIPER shape (`<Feature>Presenter` / `<Feature>Interactor` / `<Feature>Router` / `<Feature>Contract`) in any new module.
 - [ ] Screen contains zero business `@State`.
 
 **UseCase contract**

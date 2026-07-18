@@ -69,7 +69,7 @@ Free-form English `@Test` display strings are the only place a sentence-form nam
 ```
 XCTest equivalent uses `// Given / When / Then` too — the labels are non-negotiable.
 
-**1.6 Isolation.** A test must not depend on another test, on wall-clock time, on the network, on the shared Keychain, on the shared `UserDefaults.standard`, or on execution order. Every fixture is recreated in `setUpWithError()` (XCTest) or the test's `init()` (Swift Testing struct). Every temp file lives under `FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)` and is deleted in `tearDownWithError()` / `deinit`. Every Combine subscription and every `Task { }` you start in a test is cancelled before the test returns.
+**1.6 Isolation.** A test must not depend on another test, on wall-clock time, on the network, on the shared Keychain, on the shared `UserDefaults.standard`, or on execution order. Every fixture is recreated in `setUpWithError()` (XCTest) or the test's `init()` (Swift Testing struct). Every temp file lives under `FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)` and is deleted in `tearDownWithError()` / `deinit`. Every `Task { }` you start in a test is cancelled before the test returns.
 
 ================================================================================
 ## 2. Mandatory Initial Dialogue
@@ -146,23 +146,27 @@ import Testing
 - XCTest legacy: `let exp = expectation(description: "…"); wait(for: [exp], timeout: 2.0)` — allowed only when the SUT hands you a callback API and no `async` overload exists.
 - **Never** `DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { … }` in tests. Never `sleep`. Never `RunLoop.main.run(until:)` — all flaky.
 
-### 3.8 Combine tests
-Collect emissions and assert on the collection — never assert on "next emission after 100 ms":
+### 3.8 Observing @Observable ViewModel state
+This overlay is `async/await`-only. A ViewModel exposes `state` under `@Observable`; a test observes it by driving the async entry point and asserting on captured snapshots, not by subscribing to a Publisher.
+
 ```swift
 @Test func viewModel_submit_emitsSuccess() async throws {
     let sut = LoginViewModel(api: FakeAPI())
-    var states: [State] = []
-    let task = Task { for await value in sut.$state.values { states.append(value) } }
+    var states: [LoginViewModel.State] = [sut.state]
+
+    let task = Task {
+        for await snapshot in sut.stateSnapshots() {   // AsyncStream<State> the VM exposes
+            states.append(snapshot)
+        }
+    }
     defer { task.cancel() }
 
-    sut.submit()
-    try await Task.sleep(for: .zero)   // yield once, not a real sleep
-    try await Task.yield()
-
-    #expect(states == [.idle, .loading, .success])
+    await sut.submit()
+    #expect(states.map(\.phase) == [.idle, .loading, .success])
 }
 ```
-For classic Combine (no `async` bridge), collect via `.sink { … }.store(in: &cancellables)` and cancel all in `tearDown` / `deinit`.
+
+If the ViewModel does not expose an `AsyncStream<State>`, drive the entry point with `await` and assert on `sut.state` directly at each checkpoint — the state is `Equatable` so intermediate reads suffice.
 
 ### 3.9 Mocking — protocol-oriented, hand-rolled spies preferred
 Swift has no reflection-based mock framework that matches MockK's ergonomics. The default pattern is a hand-rolled `Spy<T>` that conforms to the collaborator's protocol and records calls:
@@ -377,7 +381,7 @@ one_line: <≤120 chars>
 5. **Never touch production data, real Keychain, real `UserDefaults.standard`, or a real network endpoint** — `MockURLProtocol` + in-memory stores, always.
 6. **Never rename a test to `func testDisabled_foo()` to hide it from the runner** — use `XCTSkip` with a ticket.
 7. **Never hardcode IPs, hosts, tokens, endpoints, or user credentials in a test** — inject via `init`, read from `MockURLProtocol`'s stubbed response.
-8. **Never leave dangling `Task { }`, Combine `AnyCancellable`, or `NotificationCenter` observers between tests** — `Task.cancel()` in `defer`, empty `cancellables` in `tearDown`, `NotificationCenter.default.removeObserver(self)`.
+8. **Never leave dangling `Task { }` or `NotificationCenter` observers between tests** — `Task.cancel()` in `defer`, `NotificationCenter.default.removeObserver(self)` in `tearDown`.
 9. **Never use `Task.detached` or unstructured concurrency in the test body** — always structured `Task { }` you own and cancel.
 10. **Never `#expect` on a mock call count when the collaborator is a plain value mapper** — behavior-verify only true collaborators (repositories, external APIs), never pure functions.
 11. **Never commit failing tests as passing.** If a test is red at commit time, either fix your test (if it was wrong) or hand off to `bug-hunter` (if production is wrong). Never rewrite the assertion until it passes.
@@ -400,7 +404,7 @@ Report each with ✅ or ❌. Any ❌ ⇒ verdict is `blocked`, not `done`.
 - [ ] Every Core Data test uses an in-memory `NSPersistentContainer` (`/dev/null` store URL).
 - [ ] Every SwiftData test uses `ModelConfiguration(isStoredInMemoryOnly: true)`.
 - [ ] Every temp file is created under `FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)` and removed in `tearDown` / `deinit`.
-- [ ] Every Combine `AnyCancellable` created in a test is stored in `cancellables` and cancelled in `tearDown`.
+- [ ] No `import Combine` / `AnyCancellable` / `.sink` anywhere in the test target — observation goes through `AsyncStream<State>` or direct `state` reads per §3.8.
 - [ ] Every `NotificationCenter` observer added in a test is removed in `tearDown`.
 - [ ] Every `XCTSkip` / `.disabled` carries a ticket ID in the reason string.
 - [ ] No new test file exceeds 800 lines. Files over 500 have a `// TODO(tester): split` marker or are split.

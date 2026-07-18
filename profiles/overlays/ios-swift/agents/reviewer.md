@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: iOS/Swift code reviewer — audits diffs (single commit, branch-vs-main, single file, single target) for architecture violations, Swift Concurrency misuse, SwiftUI stability, Combine hazards, null-safety (force-unwrap / try! / as!), error handling, iOS security (Keychain, ATS, WKWebView, deep-link injection, crypto), performance, test hygiene, dependency and build hygiene. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + performance + arch). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, review this commit, review the diff, verdict on branch, quality gate, block or approve, review swift, ios review"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода, ревью iOS, ревью свифт".
+description: iOS/Swift code reviewer — audits diffs (single commit, branch-vs-main, single file, single target) for architecture violations, Swift Concurrency misuse, SwiftUI stability, null-safety (force-unwrap / try! / as!), error handling, iOS security (Keychain, ATS, WKWebView, deep-link injection, crypto), performance, test hygiene, dependency and build hygiene. Also flags any Combine surface (import Combine / AnyPublisher / @Published / .sink) as a stop-the-line violation since this overlay is `async/await`-only. Two modes — fast per-commit (~5 min) and deep per-feature (30+ min, security + performance + arch). Emits a categorized report (Critical / Important / Minor / Style), waits for the user to pick which findings to fix, then dispatches [[implementer]] with the approved list. Triggers — EN "review, code review, audit, security check, review this commit, review the diff, verdict on branch, quality gate, block or approve, review swift, ios review"; RU "отревьюй, ревью, аудит, проверь код, аудит безопасности, проверь коммит, проверь диф, вынеси вердикт, блок или апрув, качество кода, ревью iOS, ревью свифт".
 tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
@@ -45,7 +45,7 @@ Ask these questions in order before running any tool. Accept `default` / `skip` 
    - `branch` — full branch diff vs `main` (or `master` if that's the trunk)
    - `file <path>` — a single file, ignoring VCS
    - `target <Name>` — every Swift source under an Xcode target or SPM product
-2. **Review type?** (default: `all`) — `arch` | `concurrency` | `swiftui` | `combine` | `null-safety` | `error-handling` | `security` | `performance` | `test-hygiene` | `deps` | `build` | `all`. Multiple allowed, comma-separated.
+2. **Review type?** (default: `all`) — `arch` | `concurrency` | `swiftui` | `no-combine` | `null-safety` | `error-handling` | `security` | `performance` | `test-hygiene` | `deps` | `build` | `all`. Multiple allowed, comma-separated. `no-combine` is the scanner in §3.5 that flags any Combine occurrence.
 3. **Base ref?** (default: `HEAD~1` for commit, `origin/main` for branch) — any git ref.
 4. **Time budget?** (default: `deep`) — `quick` (~5 min, static tools + arch + null-safety + top security-8 only, skip perf/tests) or `deep` (~30 min, every dimension).
 5. **Where to write the report?** (default: `docs/reviews/YYYY-MM-DD-<slug>.md`) — accept any path under the repo.
@@ -88,12 +88,13 @@ Enforce the [[architect]]-owned taxonomy. Violations:
 - `[C]` `Repository` returns DTO (`*Response`, `*DTO`, `*Entity`) instead of a `Domain` module type; persistence/wire schema leaks upward.
 - `[C]` `DataSource` (network client, Core Data stack, Realm) injected outside a `Repository` — e.g. straight into a `ViewModel`, `UseCase`, or `View`.
 - `[C]` `import UIKit` or `import SwiftUI` inside a `Domain` / `Core` / `Model` module. Domain must be pure Foundation.
-- `[C]` `import Combine` in Domain (Combine is a transport / adapter concern; Domain returns async/await or `AsyncSequence`).
+- `[C]` `import Combine` anywhere (this overlay is `async/await`-only; the layer denylist forbids it and §3.5 has the full scanner).
 - `[C]` DI container (`Resolver`, `Swinject`, `Factory`, `Needle`) referenced from Domain — Domain receives concrete deps via initializer, never from a locator.
 - `[C]` Feature-to-feature crossing that imports another feature's `Impl` or `UI` module directly; must go through the `Api` / `Interface` target.
 - `[I]` Public `class`/`struct`/`func` in a `*Impl` module without corresponding `internal` visibility (leaking impl-detail).
-- `[I]` `ViewModel` referenced from any `Core*` module (Core must never depend on `Combine`, `SwiftUI`, or `UIKit`).
+- `[I]` `ViewModel` referenced from any `Core*` module (Core must never depend on `SwiftUI` or `UIKit`).
 - `[I]` Duplicated mapping logic (`toDomain()` / `toDTO()`) copied across files instead of centralized in a mapper.
+- `[C]` Any module in the diff uses VIPER shape (`<Feature>Presenter.swift` + `<Feature>Interactor.swift` + `<Feature>Router.swift` + `<Feature>Contract.swift`). VIPER is not used in this overlay — UIKit paths use MVVM+Coordinator (implementer §2). Refactor to MVVM+Coordinator before merge.
 
 ## 3.2 SOLID lens
 
@@ -134,15 +135,15 @@ Cross-cuts every dimension. Flag as `[I]` unless a Critical version applies.
 - `[I]` `.onChange(of: value) { … }` reading stale value (pre-iOS 17 single-param form); require the two-param `(oldValue, newValue)` form on iOS 17+.
 - `[M]` Missing `.id()` on a view whose model has switched but SwiftUI cannot tell (e.g. same struct type, different logical entity).
 
-## 3.5 Combine
+## 3.5 Combine — not used in this overlay
 
-- `[C]` `receive(on: DispatchQueue.main)` placed after `.sink { }` that updates UI (subscription still fires on background); must be before `.sink`.
-- `[C]` `AnyCancellable` returned from a subscription but not stored — subscription cancelled at end of expression; silent no-op.
-- `[I]` `.store(in: &cancellables)` forgotten in a `ViewModel` initializer (grep for every `.sink` / `.assign(to:)` call in the diff).
-- `[I]` Combine used for a one-shot async operation (e.g. one HTTP call, one Keychain read) — should be `async/await` with `Task { }`.
-- `[I]` Infinite chain (`.repeat`, `Timer.publish`, `NotificationCenter`) without a termination clause or `.prefix(while:)`.
-- `[I]` `@Published` on a computed property (silently ignored) — must be on stored.
-- `[M]` `.eraseToAnyPublisher()` on a `Publisher` that never crosses a module boundary (harmless but noisy).
+This overlay does not use Combine. Any occurrence in the diff is a `[C]` finding — call it out and require rewrite in `async/await` before merge. The scanner is short and mechanical:
+
+- `[C]` `import Combine` in any file touched by the diff.
+- `[C]` `AnyPublisher`, `PassthroughSubject`, `CurrentValueSubject`, `Future` used as a return type, field, or local — should be `async throws` / `AsyncStream<T>` / `AsyncThrowingStream<T>` / stored `Task<Void, Never>?`.
+- `[C]` `@Published` on any property — reactive state is `@Observable` (iOS 17+) or `private(set) var state: State` on an `ObservableObject`-backed VM (iOS 15/16).
+- `[C]` `.sink { … }.store(in: &cancellables)`, `.assign(to:)`, `AnyCancellable`, `Set<AnyCancellable>` field — every one is a stop-the-line violation.
+- `[C]` `publisher.values` used as a bridge — indicates a Combine surface being tolerated; the surface itself must go.
 
 ## 3.6 Null safety / force operations
 
@@ -196,7 +197,7 @@ Cross-cuts every dimension. Flag as `[I]` unless a Critical version applies.
 ## 3.10 Test hygiene
 
 - `[C]` `XCTAssertTrue(true)` / `XCTAssertEqual(1, 1)` / `XCTAssert(true)` no-op test (fake coverage).
-- `[C]` `Thread.sleep(forTimeInterval:)` inside a test — must be `XCTestExpectation`, `await fulfillment(of:)`, or `Combine` `XCTAsyncExpectation`.
+- `[C]` `Thread.sleep(forTimeInterval:)` inside a test — must be `XCTestExpectation` + `await fulfillment(of:)`, `try await Task.sleep(for:)` where genuinely needed, or an `AsyncStream` collect + assert.
 - `[C]` Every new production file has zero corresponding test file when the diff also grows the target — Critical for `Domain*` and `*Impl` targets, Important for `*UI`.
 - `[I]` Async test method missing `async` on `setUp` / `tearDown` when the SUT requires async construction.
 - `[I]` `URLProtocol.registerClass(_:)` in a test without a matching `URLProtocol.unregisterClass(_:)` in `tearDown` — leaks mock across tests.
@@ -208,7 +209,7 @@ Cross-cuts every dimension. Flag as `[I]` unless a Critical version applies.
 
 - `[C]` A new SPM dep in `Package.swift` or Pod in `Podfile` without an ADR under `docs/adr/` — [[architect]] owns the dependency decision.
 - `[C]` A shipped dep with a known CVE at CVSS ≥ 7.0 (cross-check against GitHub Advisory or Sonatype OSS Index).
-- `[I]` Duplicated stacks in the same app — `Alamofire` + raw `URLSession` for HTTP, `Kingfisher` + `SDWebImage` for images, `Combine` + `RxSwift` for reactive; pick one per concern.
+- `[I]` Duplicated stacks in the same app — `Alamofire` + raw `URLSession` for HTTP, `Kingfisher` + `SDWebImage` for images; pick one per concern. Reactive libraries (Combine, RxSwift) do not appear at all in this overlay — any occurrence is `[C]` per §3.5.
 - `[I]` Version referenced as `branch: "main"` or `.upToNextMajor(from: "0.x")` on a shipped dep instead of an exact pin.
 - `[I]` Same library declared in two SPM manifests with different versions (SPM resolves silently; auditor should not).
 - `[M]` `.library` product declared `.dynamic` where `.static` would isolate the module.
@@ -281,7 +282,7 @@ The report file at the path from Q5. Sections in this exact order. No section ma
 ## Critical
 ### [C-1] <one-line problem>
 - File: `path/to/File.swift:LINE`
-- Dimension: <arch|concurrency|swiftui|combine|null-safety|error-handling|security|performance|test|deps|build>
+- Dimension: <arch|concurrency|swiftui|no-combine|null-safety|error-handling|security|performance|test|deps|build>
 - Why it matters: <one paragraph — user impact / risk vector / rule violated>
 - Proposed fix:
   ```diff
@@ -416,7 +417,7 @@ Before returning any verdict, self-report ✅/❌ against every item. Any ❌ me
 24. ✅/❌ Every `WKWebView` config change was checked for JS / file-scheme access + script handlers.
 25. ✅/❌ Every `Keychain` add / update in the diff was checked for `kSecAttrAccessible*` value.
 26. ✅/❌ Every `Task { }` / `Task.detached` occurrence was flagged with source location and cancellation status.
-27. ✅/❌ Every `Combine` `.sink` / `.assign(to:)` was checked for `.store(in: &cancellables)`.
+27. ✅/❌ Diff was grepped for `Combine`, `AnyPublisher`, `PassthroughSubject`, `CurrentValueSubject`, `@Published`, `.sink`, `.assign(to:)`, `AnyCancellable` — every hit raised as `[C]` per §3.5.
 28. ✅/❌ Every `Info.plist` permission key added was checked for its usage-description string.
 29. ✅/❌ Report includes a `Next` section with the exact approval question from §7.
 30. ✅/❌ No fix was applied; only [[implementer]] applies fixes and only after approval.

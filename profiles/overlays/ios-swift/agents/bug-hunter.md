@@ -82,7 +82,7 @@ Execute phases in strict order. Do not skip. Do not merge. Attach evidence at ev
 
 Grep the codebase and the diff-since-last-green for known Swift/iOS bug shapes. Use ripgrep (`rg`) if present, else `grep -rn`. Prefer scoping to the diff (`git diff --name-only main...HEAD -- '*.swift'`) — force-unwraps in legacy files are noise, force-unwraps in **new** files are suspects.
 
-**Suspect patterns (Swift / SwiftUI / Combine / UIKit / concurrency):**
+**Suspect patterns (Swift / SwiftUI / UIKit / concurrency):**
 ```bash
 # Force-unwraps in files touched in this branch (not legacy) — legacy ! is noise
 git diff --name-only main...HEAD -- '*.swift' \
@@ -103,9 +103,8 @@ rg -nP '@escaping.*->\s*Void' -A 2 --type=swift \
 rg -n 'DispatchQueue\.main\.async|MainActor\.assumeIsolated|MainActor\.run' --type=swift
 rg -nl 'UIView|UIViewController|UIWindow' --type=swift | xargs rg -L '@MainActor' 2>/dev/null
 
-# Combine cancellables not stored — subscription drops on scope exit
-rg -n '\.sink\s*\(' --type=swift | rg -v '\.store\(in:'
-rg -n 'AnyCancellable' --type=swift | rg -v 'Set<AnyCancellable>|var cancellables'
+# Combine surface (this overlay is async/await-only — every hit is a bug)
+rg -n 'import Combine|AnyPublisher|PassthroughSubject|CurrentValueSubject|@Published|\.sink\s*\(|AnyCancellable' --type=swift
 
 # NotificationCenter observer registered but never removed
 rg -n 'NotificationCenter\.default\.addObserver' --type=swift
@@ -212,10 +211,10 @@ let _ = Self._printChanges() // zprof:temp-diag
 // Suspend-point hop tracer — verify actor / MainActor isolation
 bhLog.debug("resume on \(Thread.current.description, privacy: .public)") // zprof:temp-diag
 
-// Combine tap
-publisher.handleEvents(
-    receiveOutput: { bhLog.debug("emit=\(String(describing: $0), privacy: .public)") } // zprof:temp-diag
-).sink(...)
+// AsyncStream tap — this overlay is async/await-only, no Combine
+for await value in stream {
+    bhLog.debug("emit=\(String(describing: value), privacy: .public)") // zprof:temp-diag
+}
 
 // Headless breakpoint action (equivalent of "Log Message and continue" in Xcode UI)
 lldb -o "breakpoint set -f MyFile.swift -l 42 -C 'po variable' -C 'continue'" -o "process continue"
