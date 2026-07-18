@@ -13,7 +13,7 @@ func TestScoreFlagsMissingArtifactAndPreamble(t *testing.T) {
 
 	// Pretend every claimed artifact is missing on disk (fixture points at
 	// /nonexistent/*), and confirm the scorer surfaces the violation.
-	alwaysMissing := func(string) bool { return false }
+	alwaysMissing := func(string, string) bool { return false }
 	score := Score(trace, alwaysMissing)
 
 	// Two completed dispatches (architect + implementer) each claimed an
@@ -47,7 +47,7 @@ func TestScoreFlagsMissingArtifactAndPreamble(t *testing.T) {
 func TestRenderSummaryProducesStableMarkdown(t *testing.T) {
 	trace, err := ParseSession("testdata/fixture-session.jsonl")
 	require.NoError(t, err)
-	score := Score(trace, func(string) bool { return false })
+	score := Score(trace, func(string, string) bool { return false })
 	md := RenderSummary(score)
 
 	// Anchor points — the report must always name these headings.

@@ -2,6 +2,7 @@ package eval
 
 import (
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -89,8 +90,10 @@ var knownRoles = map[string]bool{
 // Score runs every deterministic check and produces the Tier-1 scorecard.
 // checkArtifactExists is exposed as a parameter so tests can swap in a
 // fake — real code passes fsArtifactExists. The scorer never opens files
-// it wasn't asked to.
-func Score(t *Trace, checkArtifactExists func(string) bool) SessionScore {
+// it wasn't asked to. The check receives the artifact string AND the
+// dispatch's WorkingDir hint (extracted from the prompt) so relative
+// paths stat against the right project root instead of the eval-run cwd.
+func Score(t *Trace, checkArtifactExists func(artifact, workingDir string) bool) SessionScore {
 	if checkArtifactExists == nil {
 		checkArtifactExists = fsArtifactExists
 	}
@@ -131,7 +134,7 @@ func Score(t *Trace, checkArtifactExists func(string) bool) SessionScore {
 		}
 
 		if d.Returned.Artifact != "" && d.Returned.Artifact != "none" {
-			exists := checkArtifactExists(d.Returned.Artifact)
+			exists := checkArtifactExists(d.Returned.Artifact, d.WorkingDir)
 			if exists {
 				stats.ArtifactExists++
 			} else {
@@ -227,17 +230,24 @@ func isPass(verdict string) bool {
 	}
 }
 
-func fsArtifactExists(path string) bool {
+func fsArtifactExists(path, workingDir string) bool {
 	if path == "" {
 		return false
 	}
 	// Implementer / tester contracts encode artifact as "<commit SHA> <path>"
 	// (implementer.md return_format literally reads "<commit SHA + module
 	// path>"). The scorer wants a real path — parse out the candidates and
-	// return true if any of them exists on disk.
+	// return true if any of them exists on disk. Relative candidates are
+	// also tried against workingDir (the subagent's project root) — that
+	// matches how the agent authored them, not the eval-run's own cwd.
 	for _, cand := range artifactPathCandidates(path) {
 		if _, err := os.Stat(cand); err == nil {
 			return true
+		}
+		if workingDir != "" && !filepath.IsAbs(cand) {
+			if _, err := os.Stat(filepath.Join(workingDir, cand)); err == nil {
+				return true
+			}
 		}
 	}
 	return false

@@ -154,10 +154,27 @@ func processAssistant(line []byte, ts time.Time, meta *SessionMeta, dispatches m
 			SubagentType: in.SubagentType,
 			Model:        in.Model,
 			Prompt:       in.Prompt,
+			WorkingDir:   extractWorkingDir(in.Prompt),
 			Timestamp:    ts,
 		}
 		*order = append(*order, c.ID)
 	}
+}
+
+// workingDirRe matches a "Working directory: <path>" hint in a subagent
+// prompt. The orchestrator uses this phrasing across role prompts to tell
+// each subagent which project root it should treat as `.`. Case-insensitive,
+// tolerant of surrounding backticks and trailing punctuation.
+var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*working\\s+directory:\\s*`?([^`\\s].*?)`?\\s*$")
+
+// extractWorkingDir returns the trimmed path from the first
+// "Working directory: X" line in prompt, or empty when absent.
+func extractWorkingDir(prompt string) string {
+	m := workingDirRe.FindStringSubmatch(prompt)
+	if len(m) < 2 {
+		return ""
+	}
+	return strings.TrimRight(strings.TrimSpace(m[1]), "/")
 }
 
 // notifRe splits a queue-operation payload's <task-notification> block.

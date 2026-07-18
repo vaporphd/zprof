@@ -28,6 +28,11 @@ type Dispatch struct {
 	// judge (Tier 2) to compare intent against outcome. Empty for aborted
 	// dispatches where the tool_use had no input recorded.
 	Prompt string
+	// WorkingDir is the filesystem root the subagent worked from — parsed
+	// from a "Working directory: <path>" hint in the dispatch prompt. Used
+	// by the scorer to resolve relative artifact paths that would otherwise
+	// stat against `zprof eval`'s own cwd (a different project) and miss.
+	WorkingDir string
 	// Timestamp is when the dispatch was issued (parent tool_use).
 	Timestamp time.Time
 	// DurationMs is the wall-clock spent in the subagent, from the

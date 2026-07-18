@@ -10,7 +10,7 @@ import (
 func TestRenderHTMLProducesSelfContainedPage(t *testing.T) {
 	trace, err := ParseSession("testdata/fixture-session.jsonl")
 	require.NoError(t, err)
-	score := Score(trace, func(string) bool { return false })
+	score := Score(trace, func(string, string) bool { return false })
 	html := RenderHTML(score)
 
 	// Structural anchors — every report must have these.
