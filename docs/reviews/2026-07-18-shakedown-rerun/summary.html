@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>zprof eval — 445b990e…2189</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --dim: #6b7280;
+  --muted: #f3f4f6;
+  --border: #e5e7eb;
+  --ok: #10b981;
+  --ok-bg: #d1fae5;
+  --warn: #f59e0b;
+  --warn-bg: #fef3c7;
+  --bad: #ef4444;
+  --bad-bg: #fee2e2;
+  --accent: #6366f1;
+  --code-bg: #f3f4f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --fg: #e5e7eb;
+    --dim: #94a3b8;
+    --muted: #1e293b;
+    --border: #334155;
+    --ok-bg: #064e3b;
+    --warn-bg: #78350f;
+    --bad-bg: #7f1d1d;
+    --code-bg: #1e293b;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+}
+main.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+h1 { font-size: 1.6rem; margin: 0 0 0.5rem; }
+h1 .dim { color: var(--dim); font-weight: 400; }
+h2 { font-size: 1.15rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+header .tier1-note { color: var(--dim); font-style: italic; margin-top: 0; }
+code {
+  font-family: "SF Mono", ui-monospace, "Menlo", monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.35em;
+  background: var(--code-bg);
+  border-radius: 3px;
+}
+dl.session-meta {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0;
+}
+dl.session-meta dt {
+  color: var(--dim);
+  font-weight: 500;
+}
+dl.session-meta dd { margin: 0; word-break: break-all; }
+.dim { color: var(--dim); }
+.scroll { overflow-x: auto; }
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+table thead th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+table tbody td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table tbody tr:hover { background: var(--muted); }
+td.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.detail { max-width: 55ch; word-break: break-word; color: var(--dim); font-size: 0.85rem; }
+
+.badge {
+  display: inline-block;
+  padding: 0.15em 0.55em;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: var(--muted);
+  color: var(--fg);
+}
+.badge.ok    { background: var(--ok-bg);   color: var(--ok); }
+.badge.warn  { background: var(--warn-bg); color: var(--warn); }
+.badge.bad   { background: var(--bad-bg);  color: var(--bad); }
+.badges { margin: 0.5rem 0; }
+.badges .badge { margin-right: 0.35rem; }
+
+.num.ok   { color: var(--ok);   font-weight: 600; }
+.num.warn { color: var(--warn); font-weight: 600; }
+.num.bad  { color: var(--bad);  font-weight: 600; }
+
+.ok { color: var(--ok); }
+p.ok { padding: 0.5rem 0.75rem; background: var(--ok-bg); border-left: 3px solid var(--ok); border-radius: 3px; }
+
+table.bars td.bars-role { width: 12rem; }
+table.bars td.bars-cell { width: 100%; }
+table.bars .bar {
+  height: 0.75rem;
+  background: linear-gradient(90deg, var(--accent), #8b5cf6);
+  border-radius: 2px;
+}
+
+details.violations-list summary {
+  cursor: pointer;
+  padding: 0.35rem 0;
+  color: var(--dim);
+  font-size: 0.9rem;
+}
+details.violations-list summary:hover { color: var(--fg); }
+details.violations-list[open] summary { margin-bottom: 0.5rem; }
+
+section.footer { margin-top: 3rem; color: var(--dim); }
+section.footer h2 { color: var(--fg); }
+section.footer ul { line-height: 1.7; }
+</style>
+</head>
+<body>
+<main class="wrap">
+<header>
+<h1>zprof eval <span class="dim">— 445b990e…2189</span></h1>
+<p class="tier1-note">Tier 1 — deterministic. No LLM ran. Zero tokens spent producing this page.</p>
+<dl class="session-meta">
+<dt>Session ID</dt><dd><code>445b990e-2263-4383-8415-a8addba72189</code></dd>
+<dt>Log path</dt><dd><code>/Users/alv/.claude/projects/-Volumes-mydata-z0mi-harness/445b990e-2263-4383-8415-a8addba72189.jsonl</code></dd>
+<dt>Span</dt><dd><strong>20h37m</strong> <span class="dim">(2026-07-17T14:11:56Z → 2026-07-18T10:49:25Z)</span></dd>
+<dt>Main model</dt><dd><code>claude-opus-4-7</code></dd>
+<dt>Main-loop tokens</dt><dd>in 2,320 / out 1,082,300 <span class="dim">(cache: 281,844,316 read, 8,132,341 create)</span></dd>
+<dt>Subagent tokens</dt><dd><strong>894,120</strong> output across <strong>8</strong> dispatches</dd>
+</dl>
+</header>
+<section>
+<h2>Per-role scorecard</h2>
+<div class="scroll">
+<table class="scoreboard">
+<thead><tr>
+<th>Role</th><th>Model</th><th>N</th><th>Pass@1</th><th>Median tok</th><th>ApT</th><th>Compliance</th><th>Notes</th>
+</tr></thead>
+<tbody>
+<tr><td><code>architect</code></td><td><code>(inherited)</code></td><td class="num">2</td><td class="num ok">1.00</td><td class="num">104,112</td><td class="num">1.0</td><td><span class="ok">clean</span></td><td>avg conf <strong>0.88</strong> <span class="dim">(2/2)</span></td></tr>
+<tr><td><code>implementer</code></td><td><code>(inherited)</code></td><td class="num">2</td><td class="num bad">0.50</td><td class="num">114,800</td><td class="num">0.5</td><td><span class="badge bad">artifact-missing×1</span> <span class="badge warn">preamble×2</span></td><td>avg conf <strong>0.90</strong> <span class="dim">(1/2)</span></td></tr>
+<tr><td><code>reviewer</code></td><td><code>(inherited)</code></td><td class="num">2</td><td class="num bad">0.50</td><td class="num">135,541</td><td class="num">0.4</td><td><span class="ok">clean</span></td><td>avg conf <strong>0.87</strong> <span class="dim">(2/2)</span></td></tr>
+<tr><td><code>tester</code></td><td><code>(inherited)</code></td><td class="num">2</td><td class="num ok">1.00</td><td class="num">126,108</td><td class="num">0.9</td><td><span class="badge bad">artifact-missing×2</span> <span class="badge warn">preamble×1</span></td><td>avg conf <strong>0.95</strong> <span class="dim">(2/2)</span></td></tr>
+</tbody></table>
+</div></section>
+<section>
+<h2>Token spend by role</h2>
+<div class="scroll"><table class="bars"><tbody>
+<tr><td class="bars-role"><code>reviewer</code></td><td class="bars-cell"><div class="bar" style="width:100%"></div></td><td class="num">245,922</td></tr>
+<tr><td class="bars-role"><code>tester</code></td><td class="bars-cell"><div class="bar" style="width:94%"></div></td><td class="num">231,968</td></tr>
+<tr><td class="bars-role"><code>implementer</code></td><td class="bars-cell"><div class="bar" style="width:90%"></div></td><td class="num">221,866</td></tr>
+<tr><td class="bars-role"><code>architect</code></td><td class="bars-cell"><div class="bar" style="width:79%"></div></td><td class="num">194,364</td></tr>
+</tbody></table></div>
+</section>
+<section>
+<h2>Contract violations</h2>
+<div class="badges">
+<span class="badge bad">artifact-missing × 3</span><span class="badge warn">return-preamble × 3</span></div>
+<details class="violations-list">
+<summary>6 violations — click to expand</summary>
+<div class="scroll"><table><thead><tr><th>#</th><th>Role</th><th>Kind</th><th>Detail</th></tr></thead><tbody>
+<tr><td class="num">1</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Test target builds clean under strict concurrency. Root workspace also green.</td></tr>
+<tr><td class="num">2</td><td><code>tester</code></td><td><span class="badge bad">artifact-missing</span></td><td class="detail">claimed artifact not found on disk: no-git (working dir has no git); test files under /Volumes/mydata/zprof-test-ios-3/Packages/FeatureMoodJournal/Tests/MoodJournalInterfaceTests/ — MoodScoreTests.swift, MoodEntryTests.swift, MoodEntryDraftTests.swift, MoodJournalRouteTests.swift, MoodJournalViewStateTests.swift, MoodJournalEventTests.swift, StreakNudgePolicyTests.swift; stub MoodJournalInterfaceTests.swift deleted</td></tr>
+<tr><td class="num">3</td><td><code>implementer</code></td><td><span class="badge bad">artifact-missing</span></td><td class="detail">claimed artifact not found on disk: no-git; module `Packages/FeatureMoodJournal/Sources/MoodJournalImpl/` (added `StreakCalculatorImpl.swift` + test skeleton, updated `Package.swift`)</td></tr>
+<tr><td class="num">4</td><td><code>implementer</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: Build is green. Returning result.</td></tr>
+<tr><td class="num">5</td><td><code>tester</code></td><td><span class="badge bad">artifact-missing</span></td><td class="detail">claimed artifact not found on disk: (no git repo — files written) Packages/FeatureMoodJournal/Tests/MoodJournalImplTests/StreakCalculatorImplTests.swift, Packages/FeatureMoodJournal/Tests/MoodJournalImplTests/Fixtures/MoodEntryFixtures.swift, Packages/FeatureMoodJournal/Package.swift (test-target dep addition only)</td></tr>
+<tr><td class="num">6</td><td><code>tester</code></td><td><span class="badge warn">return-preamble</span></td><td class="detail">first line was not `verdict:` — got: All 11 new tests pass, plus the pre-existing skeleton test.</td></tr>
+</tbody></table></div>
+</details>
+</section>
+<section class="footer">
+<h2>What Tier 2 would add</h2>
+<ul>
+<li>Panel-judge quality (1-5) per dispatch across correctness / adherence / efficiency framings.</li>
+<li>Model-tier recommendation per role (advisory).</li>
+<li>Reasoning-quality assessment on ADR / review artifacts.</li>
+</ul>
+<p class="dim">Run <code>zprof eval --deep &lt;sessionId&gt;</code> to dispatch the <code>evaluator</code> subagent.</p>
+</section>
+</main></body></html>
