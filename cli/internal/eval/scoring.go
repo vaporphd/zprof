@@ -231,8 +231,75 @@ func fsArtifactExists(path string) bool {
 	if path == "" {
 		return false
 	}
-	_, err := os.Stat(path)
-	return err == nil
+	// Implementer / tester contracts encode artifact as "<commit SHA> <path>"
+	// (implementer.md return_format literally reads "<commit SHA + module
+	// path>"). The scorer wants a real path — parse out the candidates and
+	// return true if any of them exists on disk.
+	for _, cand := range artifactPathCandidates(path) {
+		if _, err := os.Stat(cand); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// shaPrefixRe matches a leading 7-40 char hex SHA followed by whitespace
+// or an em-dash separator. Implementer / tester agents commonly write
+// `artifact: <sha> <path>` or `artifact: <sha> — <path>` per contract.
+var shaPrefixRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}\s+(?:—\s+|-\s+)?`)
+
+// artifactPathCandidates yields plausible on-disk path candidates from
+// a subagent's `artifact:` string. It tolerates SHA prefixes, semicolon-
+// and comma-separated multi-file returns, and brace-expansion
+// (`{a.swift, b.swift}`). Returned paths are stripped and non-empty.
+func artifactPathCandidates(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	// Strip a leading commit SHA (with optional em-dash separator).
+	if loc := shaPrefixRe.FindStringIndex(raw); loc != nil {
+		raw = strings.TrimSpace(raw[loc[1]:])
+	}
+	// Expand brace groups like "path/{a.swift, b.swift}" into
+	// "path/a.swift" + "path/b.swift" — implementer occasionally uses
+	// shell-brace shorthand for co-located files.
+	var expanded []string
+	if openIdx := strings.Index(raw, "{"); openIdx >= 0 {
+		if closeIdx := strings.Index(raw[openIdx:], "}"); closeIdx > 0 {
+			prefix := raw[:openIdx]
+			inner := raw[openIdx+1 : openIdx+closeIdx]
+			suffix := raw[openIdx+closeIdx+1:]
+			for _, piece := range strings.Split(inner, ",") {
+				piece = strings.TrimSpace(piece)
+				if piece == "" {
+					continue
+				}
+				expanded = append(expanded, strings.TrimSpace(prefix+piece+suffix))
+			}
+		}
+	}
+	if expanded == nil {
+		expanded = []string{raw}
+	}
+	var out []string
+	for _, chunk := range expanded {
+		// Split on semicolons and commas so multi-artifact returns
+		// each get their own stat call.
+		fields := strings.FieldsFunc(chunk, func(r rune) bool {
+			return r == ';' || r == ','
+		})
+		for _, f := range fields {
+			f = strings.TrimSpace(f)
+			// Drop wrapping quotes.
+			f = strings.Trim(f, `"'`)
+			if f == "" || f == "none" {
+				continue
+			}
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 func medianTokens(all []Dispatch, role string) int {

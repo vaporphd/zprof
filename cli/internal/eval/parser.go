@@ -72,6 +72,12 @@ func parseSessionReader(r io.Reader, path string) (*Trace, error) {
 			processAssistant(line, ts, &meta, dispatches, &order)
 		case "queue-operation":
 			processQueueOp(line, dispatches)
+		case "user":
+			// Newer session format: Agent returns arrive as `user`
+			// messages carrying a `tool_result` content block plus a
+			// top-level `toolUseResult` with typed usage — no
+			// task-notification wrapper on the queue path.
+			processUserToolResult(line, dispatches)
 		case "system":
 			processSystem(line, &meta)
 		}
@@ -204,6 +210,73 @@ func processQueueOp(line []byte, dispatches map[string]*Dispatch) {
 	}
 	if s := resultRe.FindStringSubmatch(body); len(s) > 1 {
 		d.Returned = parseReturnFormat(s[1])
+	}
+}
+
+// processUserToolResult handles the newer Agent return shape: a `user`
+// message with a `tool_result` content block that carries the subagent's
+// verdict text, plus a top-level `toolUseResult` object with typed usage
+// (status, totalTokens, totalToolUseCount, totalDurationMs, agentType,
+// resolvedModel). This replaces the older queue-operation notification
+// path — both formats coexist across sessions, so we keep both readers.
+func processUserToolResult(line []byte, dispatches map[string]*Dispatch) {
+	var env struct {
+		Message struct {
+			Content []struct {
+				Type       string `json:"type"`
+				ToolUseID  string `json:"tool_use_id"`
+				IsError    bool   `json:"is_error"`
+				Content    []struct {
+					Type string `json:"type"`
+					Text string `json:"text"`
+				} `json:"content"`
+			} `json:"content"`
+		} `json:"message"`
+		ToolUseResult struct {
+			Status             string `json:"status"`
+			AgentType          string `json:"agentType"`
+			ResolvedModel      string `json:"resolvedModel"`
+			TotalDurationMs    int64  `json:"totalDurationMs"`
+			TotalTokens        int    `json:"totalTokens"`
+			TotalToolUseCount  int    `json:"totalToolUseCount"`
+		} `json:"toolUseResult"`
+	}
+	if err := json.Unmarshal(line, &env); err != nil {
+		return
+	}
+	for _, c := range env.Message.Content {
+		if c.Type != "tool_result" || c.ToolUseID == "" {
+			continue
+		}
+		d, ok := dispatches[c.ToolUseID]
+		if !ok {
+			continue
+		}
+		if env.ToolUseResult.Status != "" {
+			d.Status = env.ToolUseResult.Status
+		}
+		if env.ToolUseResult.TotalTokens > 0 {
+			d.SubagentTokens = env.ToolUseResult.TotalTokens
+		}
+		if env.ToolUseResult.TotalToolUseCount > 0 {
+			d.ToolUses = env.ToolUseResult.TotalToolUseCount
+		}
+		if env.ToolUseResult.TotalDurationMs > 0 {
+			d.DurationMs = env.ToolUseResult.TotalDurationMs
+		}
+		if d.Model == "" && env.ToolUseResult.ResolvedModel != "" {
+			d.Model = env.ToolUseResult.ResolvedModel
+		}
+		// The subagent's return text is the FIRST text block of the
+		// tool_result. Trailing blocks carry harness bookkeeping (agentId
+		// hint, `<usage>` plaintext) — parseReturnFormat wants only the
+		// verdict-and-schema payload.
+		for _, x := range c.Content {
+			if x.Type == "text" && strings.TrimSpace(x.Text) != "" {
+				d.Returned = parseReturnFormat(x.Text)
+				break
+			}
+		}
 	}
 }
 
