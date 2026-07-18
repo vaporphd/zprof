@@ -132,8 +132,8 @@ Inside `commonMain/kotlin/<pkg>/feature/<name>/` the layers are:
 - **`domain/`** — pure Kotlin.
   - `model/` — value objects. `data class` with `val` fields only. No annotations except `kotlinx.serialization.Serializable` when the model IS a wire contract (rare — DTOs usually mediate).
   - `error/` — sealed error hierarchy: `sealed class <Feature>Error : Exception()`. Data-object cases for parameter-free variants (`InvalidCredentials`), data-class cases when a cause needs carrying (`NetworkError(val cause: Throwable)`).
-  - `usecase/` — one action per class. `class <Feature><Action>UseCase(private val repository: ...)` with a single `suspend fun execute(params): Result<T>` (or `Result<Flow<T>>` for streams — see implementer §3.4). Never `operator fun invoke`.
-  - `repository/` — concrete class (NO interface unless the ADR justifies), constructor-injects `RemoteDataSource` + `LocalDataSource` + `Mapper`. Returns domain models. Wraps `withContext(dispatcher)` when needed; catches nothing — errors propagate to UseCase.
+  - `usecase/` — one action per class. `open class <Feature><Action>UseCase(private val repository: ...)` with a single `suspend fun execute(params): Result<T>` (or `Result<Flow<T>>` for streams — see implementer §3.4). Never `operator fun invoke`. `open` is mandatory because Mokkery cannot mock final Kotlin classes; the tester needs a mockable UseCase for Component tests.
+  - `repository/` — concrete `open class` (NO interface unless the ADR justifies; `open` is mandatory because Mokkery — the KMP-native mock library — cannot mock final Kotlin classes), constructor-injects `RemoteDataSource` + `LocalDataSource` + `Mapper`. Returns domain models. Wraps `withContext(dispatcher)` when needed; catches nothing — errors propagate to UseCase.
 - **`data/`** — DTOs, DataSources, Mappers.
   - `dto/` — `@Serializable data class` with snake_case handled via `@SerialName("...")`. DTOs never leave `data/`.
   - `datasource/` — `<Feature>RemoteDataSource` (extends the shared `ApiService` base class from `core/network`), `<Feature>LocalDataSource` (wraps SQLDelight queries). Neither knows about domain models.

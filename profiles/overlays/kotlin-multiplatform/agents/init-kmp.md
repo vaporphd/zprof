@@ -69,6 +69,7 @@ If the user answers `default` to all eight, note "answers defaulted per init-kmp
       gradle-wrapper.jar
   gradlew
   gradlew.bat
+  detekt.yml                    ← starter detekt config (see §3.8). Without this, detekt reports NO-SOURCE and the gate is vacuous.
 
   shared/
     build.gradle.kts           ← kotlin("multiplatform") + targets + Compose MP + Decompose + Koin + Ktor + SQLDelight
@@ -244,13 +245,14 @@ mokkery = { id = "dev.mokkery", version.ref = "mokkery" }
 plugins {
     alias(libs.plugins.kotlin.multiplatform)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.android.library)
     alias(libs.plugins.compose.multiplatform)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.sqldelight)
     alias(libs.plugins.ktlint)
     alias(libs.plugins.detekt)
-    alias(libs.plugins.mokkery)
+    alias(libs.plugins.mokkery)                // KMP-native — ALWAYS active regardless of target subset
+    // Android-only plugin. If Q3 excludes `android`, comment this line ONLY (do NOT touch the other plugins).
+    alias(libs.plugins.android.library)
 }
 
 kotlin {
@@ -433,6 +435,98 @@ struct iosAppApp: App {
 
 (If Q6 = React, emit `react` + `react-dom` + `@vitejs/plugin-react` instead; App.tsx replaces App.vue. If Q6 = Angular, emit an Angular CLI project — do NOT try to squeeze Angular into Vite.)
 
+## 3.8 `detekt.yml` (mandatory — the detekt gate is vacuous without it)
+
+Emit at project root. **Without this file, `./gradlew detekt` reports `NO-SOURCE` and passes on an empty scan** — every downstream contract that promises "detekt clean before commit" is vacuous. Shakedown-2 (2026-07-18) surfaced this hole; the fix is to always emit a starter config on scaffold.
+
+```yaml
+# detekt.yml — starter config for KMP projects (init-kmp seed)
+# Runs against every :shared and :composeApp source set. Extend per-project as the codebase grows.
+
+config:
+  validation: true
+  warningsAsErrors: false      # switch to true once the project's baseline is clean
+  checkExhaustiveness: true
+
+processors:
+  active: true
+
+console-reports:
+  active: true
+
+output-reports:
+  active: true
+
+complexity:
+  active: true
+  LongMethod:
+    active: true
+    threshold: 100             # matches implementer §7 method cap
+  LongParameterList:
+    active: true
+    functionThreshold: 6
+    constructorThreshold: 8
+  TooManyFunctions:
+    active: true
+    thresholdInFiles: 15
+    thresholdInClasses: 15
+
+exceptions:
+  active: true
+  TooGenericExceptionCaught:
+    active: true               # aligns with implementer §0.7 (catch concrete types)
+  SwallowedException:
+    active: true
+    ignoredExceptionTypes:
+      - CancellationException  # coroutine cancellation is legitimately re-thrown
+  ThrowingExceptionsWithoutMessageOrCause:
+    active: true
+
+naming:
+  active: true
+  FunctionNaming:
+    active: true
+    ignoreAnnotated:
+      - Composable             # Compose composables use PascalCase
+
+style:
+  active: true
+  ForbiddenComment:
+    active: true
+    comments:
+      - reason: 'TODO/FIXME/HACK banned per implementer §8'
+        value: 'TODO:'
+      - reason: 'FIXME banned per implementer §8'
+        value: 'FIXME:'
+      - reason: 'HACK banned per implementer §8'
+        value: 'HACK:'
+  MagicNumber:
+    active: true
+    ignoreNumbers: ['-1', '0', '1', '2', '100', '1000']
+  MaxLineLength:
+    active: true
+    maxLineLength: 140
+  ReturnCount:
+    active: true
+    max: 3
+  WildcardImport:
+    active: true
+
+potential-bugs:
+  active: true
+  UnnecessaryNotNullOperator:
+    active: true
+  UnsafeCallOnNullableType:
+    active: true               # aligns with implementer §0.6 (no !!)
+
+# Exclusions — generated code is not our style problem.
+exclude:
+  - '**/build/generated/**'
+  - '**/build/tmp/**'
+  - '**/*Queries.kt'           # SQLDelight-generated
+  - '**/*.g.kt'                # Kotlin/Native cinterop-generated
+```
+
 ===============================================================================
 # 4. WORKFLOW
 
@@ -446,14 +540,14 @@ Execute in order:
    - Check `xcodebuild -version` for iOS target. If Q3 includes `ios` and Xcode/macOS is absent, disable iOS and note in README-BOOTSTRAP.
    - Check `node --version` >= 20 for Web target. If Q3 includes `web` and Node is absent, disable Web and note in README-BOOTSTRAP.
 2. **Ask §1 dialogue.** Batch into one message, wait, then apply defaults.
-3. **Emit `.gitignore` + `README-BOOTSTRAP.md`.**
+3. **Emit `.gitignore` + `README-BOOTSTRAP.md` + `detekt.yml`** (the last per §3.8; without it detekt runs `NO-SOURCE` and gates nothing).
 4. **Emit `gradle/libs.versions.toml` + `gradle.properties`.**
 5. **Emit `settings.gradle.kts`** listing `shared`, `composeApp`, `webApp` (skip `webApp` if Q3 excludes web).
 6. **Emit `shared/build.gradle.kts` and every `shared/src/*Main/**` file** per §2.
 7. **Emit `composeApp/build.gradle.kts` and `composeApp/src/*/**` files.**
 8. **Emit `iosApp/` skeleton via `xcodegen` when available, else write the `iosApp.xcodeproj` bundle by hand.** Include `Podfile` if Q8 = Pods.
 9. **Emit `webApp/`** with `package.json` + `vite.config.ts` + `tsconfig.json` + `index.html` + `src/main.ts` + `src/App.vue`.
-10. **Doctor pass** (§0 hard rule) — run `./gradlew help`, `:shared:compileCommonMainKotlinMetadata`, `ktlintCheck detekt`. If Android SDK present: `:composeApp:assembleDebug`. If iOS present + Xcode target enabled: `linkPodDebugFrameworkIosSimulatorArm64`.
+10. **Doctor pass** (§0 hard rule) — run `./gradlew help`, `:shared:compileCommonMainKotlinMetadata`, `ktlintCheck detekt`. If Android SDK present: `:composeApp:assembleDebug`. If iOS present + Xcode target enabled: `linkPodDebugFrameworkIosSimulatorArm64`. **Detekt gate check:** grep the detekt output for `NO-SOURCE` — if detekt reports NO-SOURCE on `:shared`, the config file was not picked up (usually because `detekt.yml` was emitted at the wrong path or `detekt { config.setFrom(...) }` was not wired in `shared/build.gradle.kts`). Fix and re-run. A vacuous "detekt clean" is a §0 hard-rule violation.
 11. **Commit** initial skeleton via `git commit -m "chore(bootstrap): scaffold KMP project (init-kmp)"`.
 12. **Return** with `verdict: done`, `artifact: <project root abs path>`, `next: architect` (so the architect can bootstrap PROJECT_SPEC.md + ADR-0001 on the freshly-scaffolded skeleton).
 
@@ -464,6 +558,8 @@ Execute in order:
 - Never install a toolchain automatically.
 - Never emit `TODO()` in any generated Kotlin file — use `error("not yet implemented")` if unavoidable.
 - Never emit `@ThreadLocal`, `@SharedImmutable`, or `freeze()` — these are Kotlin/Native legacy and banned by the overlay.
+- Never skip emitting `detekt.yml` (§3.8). Without it, detekt scans nothing and every downstream contract that promises "detekt clean" is vacuous. Shakedown-2 (2026-07-18) surfaced this hole.
+- Never comment out `alias(libs.plugins.mokkery)` when disabling Android. Mokkery is KMP-native (works on iOS/Desktop/JS/JVM); it is decoupled from the Android target. When Q3 excludes `android`, comment ONLY the Android-specific lines: `alias(libs.plugins.android.library)`, `androidTarget { }`, `android { }`, `androidMain`/`androidUnitTest`/`androidInstrumentedTest` dependency blocks. Every other plugin — Mokkery, ktlint, detekt, sqldelight, compose — stays active. **Reason:** shakedown-2 (2026-07-18) discovered `init-kmp` commented out Mokkery along with Android because they lived on adjacent lines; the tester's `commonTest` compile then failed because `mock<T>()` calls could not resolve. The template above at §3.2 explicitly separates them; do not re-cluster.
 - Never generate a `viewModel<T>()` / `hiltViewModel()` / `@HiltViewModel` reference — Android ViewModel is out of scope; Decompose Component is the state owner.
 - Never generate `retrofit2.*`, `okhttp3.*` (except the Ktor OkHttp engine transitively), `androidx.room.*`, `com.squareup.moshi.*`, `com.google.gson.*` — all banned.
 - Never generate more than one `Json { … }` instance across the shared module — see §3.5.

@@ -222,8 +222,10 @@ Per-platform UI is a THIN adapter over the Component. It reads `component.viewSt
 
 One action per class. Exactly one public method: `suspend fun execute(params: <Name>Params): Result<T>` (or `Result<Flow<T>>` when the action naturally streams — see the sub-section below). Not `operator fun invoke`; not `callAsFunction`. `execute` is greppable.
 
+**Class must be `open`.** Mokkery (the KMP-native mock library — tester §3.8) cannot mock final Kotlin classes; it fails at compile-time with `FINAL_TYPE_CANNOT_BE_INTERCEPTED`. Because the tester's Component test needs to mock the UseCase, every concrete UseCase class MUST be declared `open class`. This is a `must` rule, not a preference — a UseCase authored without `open` breaks the entire feature's test suite. The alternative — introducing an interface for every UseCase — was considered and rejected as ceremony that adds no value (each UseCase has exactly one implementation).
+
 ```kotlin
-class LoadProfileUseCase(
+open class LoadProfileUseCase(
     private val repository: ProfileRepository,
 ) {
     suspend fun execute(userId: UserId): Result<Profile> = try {
@@ -268,10 +270,12 @@ Callers unwrap once: `useCase.execute(id).onSuccess { flow -> scope.launch { flo
 
 ## 3.4 `data/repository/` — Repository
 
-**Concrete class by default.** Interface only when the ADR requires it (typically for a `core/` shared repository consumed by multiple features). Repository composes DataSources, applies mapping via `Mapper`, exposes **domain models** upward. Repository returns raw values or `Flow<Domain>` — never DTOs, never `Result<T>` (throw instead — the UseCase wraps).
+**Concrete `open class` by default.** Interface only when the ADR requires it (typically for a `core/` shared repository consumed by multiple features). Repository composes DataSources, applies mapping via `Mapper`, exposes **domain models** upward. Repository returns raw values or `Flow<Domain>` — never DTOs, never `Result<T>` (throw instead — the UseCase wraps).
+
+**`open` is mandatory.** Same reason as UseCases (§3.3) — Mokkery cannot mock final Kotlin classes. Every concrete Repository MUST be declared `open class`. Interfaces are the ONLY accepted alternative and only when the ADR justifies them (rare — one feature, one impl usually holds).
 
 ```kotlin
-class ProfileRepository(
+open class ProfileRepository(
     private val remote: ProfileRemoteDataSource,
     private val local: ProfileLocalDataSource,
     private val mapper: ProfileMapper,
@@ -605,10 +609,11 @@ Before returning, mark each ✅ or ❌:
 - [ ] `execute` is not an `operator fun invoke`.
 - [ ] `execute` returns `Result<T>` or `Result<Flow<T>>`.
 - [ ] Streaming UseCases return `Result<Flow<T>>` (setup errors typed), never `Flow<Result<T>>` (§3.3).
+- [ ] Every UseCase class is declared `open class` (Mokkery requirement — §3.3).
 - [ ] All `try`/`catch` for domain error mapping lives inside `execute`.
 
 **Repository contract**
-- [ ] Repository is a concrete class (no interface) unless ADR says otherwise.
+- [ ] Repository is a concrete `open class` (no interface) unless ADR says otherwise (§3.4).
 - [ ] Repository returns domain models or `Flow<Domain>`, never `Result<T>` and never DTO/Entity.
 - [ ] Repository does not depend on another feature's Repository or DataSource.
 - [ ] Repository has exactly one Remote and/or one Local DataSource injected.

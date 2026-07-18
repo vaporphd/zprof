@@ -91,6 +91,7 @@ Enforce the [[architect]]-owned source-set + layer taxonomy. Violations:
 - `[C]` Compose `@Composable` function contains business logic (network call, DB write, Result construction) — must live in Decompose Component/UseCase.
 - `[C]` UseCase returns raw domain type instead of `Result<T>` / `Result<Flow<T>>` or a sealed error type; caller has no way to represent failure.
 - `[C]` UseCase returns `Flow<Result<T>>` for a streaming action instead of `Result<Flow<T>>` — hides subscribe-time errors as first-emission failures (implementer §3.3).
+- `[C]` UseCase class declared without `open` — Mokkery (tester §3.8) cannot mock final Kotlin classes; the feature's Component test cannot compile. Same finding on Repository class without `open` (implementer §3.3/§3.4).
 - `[C]` Repository returns DTO (`*Dto`, `*Entity`) instead of a domain type from `feature/<name>/domain/model/`; wire/persistence schema leaks upward.
 - `[C]` DataSource injected outside a Repository (e.g. into a Component, UseCase, or Composable).
 - `[C]` `android.content.Context`, `Foundation.*`, `UIKit.*`, `platform.darwin.*`, or `java.io.File` referenced from `commonMain/**/feature/*/domain/`, `feature/*/data/`, `feature/*/presentation/`, or any `commonMain/**/core/model/` file — commonMain is platform-free (implementer §0.11).
