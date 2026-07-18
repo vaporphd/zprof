@@ -5,6 +5,8 @@ tools: Read, Grep, Glob, Bash, Agent
 model: sonnet
 color: yellow
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <absolute path to eval report at docs/reviews/eval-<sessionId>.{md,html}, or "none" if no report was written>
   artifacts: [<optional; when caller asked for multiple formats, list every file you wrote — main artifact plus any companions>]

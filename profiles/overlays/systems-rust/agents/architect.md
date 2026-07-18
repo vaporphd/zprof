@@ -5,6 +5,8 @@ tools: Read, Write, Edit, Grep, Glob
 model: opus
 color: cyan
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <absolute path to docs/adr/NNNN-<slug>.md>
   next: implementer | planner | null

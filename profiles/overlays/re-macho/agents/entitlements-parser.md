@@ -5,6 +5,8 @@ model: sonnet
 color: cyan
 tools: Bash, Read, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | failed
   team_id: <10-char team identifier, or "unsigned"/"ad-hoc">
   hardened_runtime: <true | false>

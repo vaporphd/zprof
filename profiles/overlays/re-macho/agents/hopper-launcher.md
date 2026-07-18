@@ -5,6 +5,8 @@ model: sonnet
 color: blue
 tools: Bash, Read, Write
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | blocked-missing-tool | failed
   tool: <Hopper | Ghidra | IDA Pro | Binary Ninja + version string>
   workspace: <absolute path to analysis/<slug>-<tool>/>

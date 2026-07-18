@@ -4,6 +4,8 @@ description: Обновляет README.md, CLAUDE.md кастомные секц
 tools: Read, Write, Edit, Grep, Glob
 model: sonnet
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <path обновлённого файла>
   next: null

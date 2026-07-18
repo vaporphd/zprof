@@ -5,6 +5,8 @@ model: haiku
 color: cyan
 tools: Bash, Read, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: clean|errors|error
   error_count: <int>
   top_code: <code | null>

@@ -5,6 +5,8 @@ model: sonnet
 color: red
 tools: Bash, Read, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: clean|ub|error|not-installed
   ub_count: <int>
   top_ub_type: <UB kind | null>

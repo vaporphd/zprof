@@ -5,6 +5,8 @@ tools: Read, Grep, Glob
 model: haiku
 color: blue
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked-legal|blocked-scope|failed
   artifact: <absolute workspace path>, <absolute questions.md path>
   sub_questions_count: <N>

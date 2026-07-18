@@ -4,6 +4,8 @@ description: Декомпозирует задачу в todo.md и plan-<N>.md. 
 tools: Read, Write, Edit, Grep, Glob
 model: sonnet
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <path к plan-<N>.md>
   next: architect | null

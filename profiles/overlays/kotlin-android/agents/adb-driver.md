@@ -5,6 +5,8 @@ model: sonnet
 color: blue
 tools: Bash, Read
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   device: <serial + model + api>
   artifact: <path to any captured file | null>

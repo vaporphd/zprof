@@ -5,6 +5,8 @@ model: sonnet
 color: red
 tools: Bash, Read, Write, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | blocked-frida-detected | failed
   target: <process name / bundle-id / package> @ <device> (pid <N>)
   hooks_count: <N>

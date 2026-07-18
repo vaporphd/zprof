@@ -5,6 +5,8 @@ tools: Bash, Read, Grep
 model: sonnet
 color: blue
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | blocked-missing-tool | failed
   command: <exact otool/nm/lipo/strings invocation run>
   artifact: <absolute path to full dump file, or null if output was already short>

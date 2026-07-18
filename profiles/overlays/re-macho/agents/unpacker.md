@@ -5,6 +5,8 @@ tools: Read, Write, Bash, Grep
 model: haiku
 color: cyan
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | blocked-encrypted | blocked-missing-tool | failed
   artifact: <absolute path to main Mach-O binary in unpacked/<slug>/>
   encryption: encrypted | decrypted | not-encrypted | unknown

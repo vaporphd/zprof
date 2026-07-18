@@ -5,6 +5,8 @@ tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: block|approve-with-fixes|approve|awaiting-approval
   artifact: <absolute path to review report under docs/reviews/YYYY-MM-DD-<slug>.md>
   next: implementer (with approved fix list) | null

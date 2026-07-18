@@ -5,6 +5,8 @@ model: sonnet
 color: red
 tools: Bash, Read, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|crashed|timeout|blocked|failed
   action: <run|breakpoint|coredump|attach|watchpoint|expression>
   frames_captured: <int>

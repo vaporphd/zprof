@@ -5,6 +5,8 @@ tools: Task, Read, Write, Grep
 model: opus
 color: red
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|partial|blocked
   artifact: <absolute path to reports/<slug>-<YYYY-MM-DD>-verify.md>
   hypotheses_confirmed: <N>

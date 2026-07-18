@@ -5,6 +5,8 @@ tools: Read, Grep, Glob
 model: opus
 color: cyan
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked
   artifact: <absolute path to reports/<slug>-<YYYY-MM-DD>-hypotheses.md>
   hypotheses_count: <N>

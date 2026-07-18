@@ -5,6 +5,8 @@ model: sonnet
 color: orange
 tools: Bash, Read, Write
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|awaiting-approval|blocked|failed
   stage: <preflight|version|archive|export|upload|processing>
   build_number: <int | null>

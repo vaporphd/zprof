@@ -4,6 +4,8 @@ description: Пропускает binary/crash/APK через exploratory-pipeli
 tools: Task, Read, Write, Bash
 model: sonnet
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <path к reports/YYYY-MM-DD-*.md>
   next: null

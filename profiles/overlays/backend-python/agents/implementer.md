@@ -5,6 +5,8 @@ tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 color: green
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done|blocked|failed
   artifact: <commit SHA + slice path>
   next: tester | reviewer | null

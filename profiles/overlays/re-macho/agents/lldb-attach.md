@@ -5,6 +5,8 @@ model: sonnet
 color: red
 tools: Bash, Read, Grep
 return_format: |
+  # CRITICAL: your entire response begins with `verdict:` — no preamble,
+  # no code fence, no greeting. Commentary belongs in `notes:` only.
   verdict: done | blocked-sip | blocked-entitlement | crashed | failed
   process: <name + pid + platform (macOS local | iOS Simulator UDID | iOS device UDID)>
   breakpoints_hit: <int — 0 if none>
