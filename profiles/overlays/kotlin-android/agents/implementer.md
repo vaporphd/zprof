@@ -48,7 +48,9 @@ Artifacts you own: `.kt` sources under `feature/<name>/{data,domain,presentation
 
 0.9 **Kotlinx.serialization only** for new JSON. Never introduce Gson or Moshi into new code. If the project already uses Moshi in older modules, you may leave that alone — but new DTOs are `@Serializable`.
 
-0.10 **File names match the primary declaration** in PascalCase. One public type per file. No god-files.
+0.10 **Single `Json` instance for the whole app, provided via DI.** Never write `Json { ignoreUnknownKeys = true; … }` inside a `RemoteDataSource`, `Repository`, `Mapper`, `ViewModel`, or test helper. The one instance lives in `core/network/di/NetworkModule.kt` as `@Provides @Singleton fun provideJson(): Json = Json { … }` and is injected everywhere it's needed. A second `Json { … }` block anywhere in the codebase is a review-blocker: same-app JSON parsing MUST use consistent settings, otherwise `ignoreUnknownKeys` divergence, `explicitNulls` divergence, and `SerializersModule` drift silently break round-trips.
+
+0.11 **File names match the primary declaration** in PascalCase. One public type per file. No god-files.
 
 ===============================================================================
 # 1. MANDATORY INITIAL DIALOGUE
@@ -167,7 +169,7 @@ fun onEvent(event: ProfileEvent) { … }
 
 Rules:
 
-- One public event entry point: `fun onEvent(event: <Name>Event)`.
+- One public event entry point: `fun onEvent(event: <Name>Event)`. `fun obtainEvent(event: <Name>Event)` is an accepted synonym — codebases seeded from Decompose/MVI backgrounds tend to use this name, and both are equally greppable + equally single-entry-point. Pick ONE per project and stay consistent; do not mix the two names across ViewModels in the same feature module (that IS a review-blocker). If PROJECT_SPEC.md names one, use that; otherwise default to `onEvent`.
 - All coroutines launched on `viewModelScope`. `Dispatchers.IO` for I/O work is passed *into* the UseCase or Repository via constructor injection (`@IoDispatcher CoroutineDispatcher`); do NOT sprinkle `withContext(Dispatchers.IO)` inside the ViewModel.
 - No suspend `public` functions on the ViewModel. `onEvent` returns `Unit`; work is `viewModelScope.launch { … }`ed inside.
 - No knowledge of `Context`, no `android.*` imports, no Compose imports (a ViewModel that mentions `@Composable` or `Modifier` is a lint-blocker).
@@ -199,6 +201,26 @@ class LoadProfileUseCase @Inject constructor(
 
 **UseCase may depend on:** its feature's Repository, its feature's `Error`, its feature's `model/`, injected `CoroutineDispatcher`, other UseCases from the same feature (rare, only for composition).
 **UseCase MUST NOT depend on:** DTOs, Entities, DataSources, Retrofit types (`Response<T>`, `HttpException` may only appear *inside* the `catch` block, never in a signature), Room, ViewModel, Compose, `Context`, `android.*`.
+
+**Streaming variant — `Result<Flow<T>>`.** When the action returns a live stream (Room observation, WebSocket subscription, live query), the return type is `Result<Flow<T>>`, NOT `Flow<Result<T>>`. The outer `Result` wraps the *setup* of the stream (permissions, initial handshake, subscription registration) so subscribe-time failures are typed; the inner `Flow<T>` carries only successful values. Errors that occur mid-stream are recovered inside the `Flow` operator chain via `.catch { emit(fallback) }` at the Repository level — they do NOT escape as thrown exceptions to `collect`.
+
+```kotlin
+class ObserveProfilesUseCase @Inject constructor(
+    private val repository: ProfileRepository,
+) {
+    fun execute(userId: UserId): Result<Flow<List<Profile>>> = runCatching {
+        repository.observeProfiles(userId)   // returns Flow<List<Profile>>; setup may throw
+    }.recoverCatching { throwable ->
+        throw when (throwable) {
+            is SecurityException -> ProfileError.PermissionDenied
+            is IOException       -> ProfileError.Network(throwable)
+            else                 -> ProfileError.Unknown(throwable)
+        }
+    }
+}
+```
+
+Callers unwrap once: `useCase.execute(id).onSuccess { flow -> viewModelScope.launch { flow.collect { … } } }`. Never `Flow<Result<T>>` — it forces every collector to `when`-branch on failure per emission, which is ergonomically hostile and hides subscribe-time errors as first-emission failures.
 
 ## 3.5 `data/repository/` — Repository
 
@@ -334,6 +356,17 @@ Concrete classes annotated with `@Inject constructor(...)` are auto-wired — do
 - **FORBIDDEN inside a `@Composable`**: `remember { mutableStateOf(someBusinessThing) }` where "some business thing" is anything the ViewModel could and should own (form fields, selections, loading flags, errors). If in doubt, it belongs in `UiState`.
 - Prefer `Text(text = state.title)` over `state.title.let { Text(it) }`. Prefer `Modifier.testTag("profile.name")` on any element `tester` will need to reach.
 
+## 6.1 Common-component hoisting threshold
+
+Any Composable used in **5 or more** call sites across the app MUST be hoisted to `core:ui:common` (or the project's design-system module) at file `core/ui/common/<ComponentName>.kt`. Below the threshold, the Composable stays private to the feature that owns it — do not pre-emptively hoist a two-call-site widget "in case someone else needs it later"; that is design-by-hypothetical.
+
+Count call sites with `grep -rn "<ComponentName>(" --include='*.kt' .` before deciding. Hoisting rules:
+
+- The hoisted Composable takes state + event lambdas by parameter — no `hiltViewModel()`, no feature imports, no `stringResource(...)` for feature-specific copy (strings arrive as `String` parameters or from the design-system theme).
+- Hoisted Composables live under `core/ui/common/`, are `internal` if the module is fine-grained enough to keep them so, `public` otherwise.
+- Adding to `core/ui/common/` is scope-expanding — if your task didn't declare that reach, stop and hand off to `[[architect]]` (per §0.2) unless the current task explicitly asks for the hoist.
+- Deleting from `core/ui/common/` (a component's callers drop below threshold) is `[[refactor-agent]]`'s job, not yours.
+
 ===============================================================================
 # 7. FILE-SIZE / ONE-TYPE-PER-FILE
 
@@ -435,6 +468,7 @@ Before returning, mark each ✅ or ❌:
 - [ ] Every UseCase has exactly one public function named `execute`.
 - [ ] `execute` is not an `operator fun invoke`.
 - [ ] `execute` returns `Result<T>` or `Result<Flow<T>>`.
+- [ ] Streaming UseCases return `Result<Flow<T>>` (setup errors typed), never `Flow<Result<T>>` (§3.4).
 - [ ] All `try`/`catch` for domain error mapping lives inside `execute`.
 
 **Repository contract**
@@ -450,7 +484,7 @@ Before returning, mark each ✅ or ❌:
 
 **ViewModel contract**
 - [ ] `@HiltViewModel` present; constructor uses `@Inject`.
-- [ ] Exactly one public `onEvent(event: <Feature>Event)` entry point.
+- [ ] Exactly one public event entry point named `onEvent` OR `obtainEvent` (§3.3). Both are accepted; do not mix within a single feature module.
 - [ ] State exposed as `StateFlow<UiState>` (read-only); effects as `Flow<Effect>` from a `Channel`.
 - [ ] All coroutines on `viewModelScope`; no `GlobalScope`, no `runBlocking`.
 
@@ -466,6 +500,11 @@ Before returning, mark each ✅ or ❌:
 - [ ] No `TODO()` / `FIXME` / stubs shipped in touched files.
 - [ ] No `println`; logging via Timber or `android.util.Log`.
 - [ ] Kotlinx.serialization used for any new DTO.
+- [ ] Zero second `Json { … }` instance introduced. `grep -rn "Json\s*{" --include='*.kt' <touched-module>` returns only the injected instance's declaration in `core/network/di/` (§0.10).
+
+**Compose common-ui hygiene**
+- [ ] Any Composable I authored that appears in ≥5 call sites is hoisted to `core/ui/common/<Name>.kt` (§6.1). Verified via `grep -rn "<Name>(" --include='*.kt' .`.
+- [ ] No feature-scoped hoist «just in case» — every hoisted Composable already meets the 5-callsite threshold in code that exists.
 
 **Build & tests**
 - [ ] `./gradlew :<module>:assembleDebug` succeeds.
@@ -497,6 +536,8 @@ Before returning, mark each ✅ or ❌:
 - Never use `Dispatchers.IO`/`Dispatchers.Default` hard-coded; inject them.
 - Never suppress a lint warning (`@Suppress(...)`, `//noinspection`, `ktlint-disable`) without a same-line comment explaining the reason.
 - Never introduce Gson or Moshi into new code; kotlinx.serialization only.
+- Never construct a second `Json { … }` instance anywhere in the app (§0.10). Inject the one from `core/network/di/`.
+- Never hoist a Composable to `core/ui/common/` before it has 5 call sites in existing code (§6.1). No design-by-hypothetical.
 - Never write `remember { mutableStateOf(...) }` in a Composable for business state — put it in the ViewModel's UiState.
 - Never write a `@Composable` longer than 100 lines; decompose it.
 - Never write a file longer than 1000 lines; split by class.
