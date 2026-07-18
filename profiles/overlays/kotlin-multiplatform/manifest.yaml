@@ -1,6 +1,6 @@
-name: kotlin-android
-display_name: "Android / Kotlin (Jetpack Compose + Coroutines + Hilt)"
-version: 0.1.0
+name: kotlin-multiplatform
+display_name: "Kotlin Multiplatform (Compose MP + Decompose + Koin + Ktor + SQLDelight; Android + iOS + Desktop + Web)"
+version: 0.2.0
 loop_template: dev-pipeline
 requires_base: ">= 0.1.0"
 roles:
@@ -13,8 +13,9 @@ roles:
   - reviewer
 tool_agents:
   - gradle-runner
+  - xcode-runner
   - adb-driver
   - emulator-driver
   - ktlint-checker
   - detekt-checker
-  - init-android
+  - init-kmp

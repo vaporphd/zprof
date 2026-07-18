@@ -1,0 +1,19 @@
+name: kotlin-multiplatform
+detect:
+  any_file:
+    - "build.gradle.kts"
+    - "settings.gradle.kts"
+    - "gradle/libs.versions.toml"
+    - "shared/build.gradle.kts"
+    - "composeApp/build.gradle.kts"
+    - "iosApp/iosApp.xcodeproj"
+  any_regex:
+    - path: "build.gradle.kts"
+      match: "kotlin\\(\"multiplatform\"\\)|id\\(\"org\\.jetbrains\\.kotlin\\.multiplatform\"\\)"
+    - path: "shared/build.gradle.kts"
+      match: "kotlin\\(\"multiplatform\"\\)"
+    - path: "gradle/libs.versions.toml"
+      match: "compose-multiplatform|decompose|ktor|sqldelight|koin"
+    - path: "settings.gradle.kts"
+      match: "iosApp|composeApp|shared"
+  confidence: high
