@@ -222,6 +222,8 @@ Per-platform UI is a THIN adapter over the Component. It reads `component.viewSt
 
 One action per class. Exactly one public method: `suspend fun execute(params: <Name>Params): Result<T>` (or `Result<Flow<T>>` when the action naturally streams — see the sub-section below). Not `operator fun invoke`; not `callAsFunction`. `execute` is greppable.
 
+**`runCatching { }` is BANNED in suspend code (F-15).** `runCatching` catches every `Throwable` including `kotlin.coroutines.cancellation.CancellationException` — that silently converts scope cancellation into `Result.failure(CancellationException)`, breaks structured concurrency, and makes cancelled operations look like they failed to the caller. Use `try { … } catch (specific: Exception1) { … } catch (specific: Exception2) { … }` with typed exception classes (see template below) — the exact exceptions your Repository can throw, no `catch (Throwable)`, no `catch (Exception)` as the FIRST clause. If a very last catch-all is needed, place it as the LAST clause AND rethrow CE: `catch (e: Exception) { if (e is CancellationException) throw e; Result.failure(<Error>.Unknown(e)) }`. Reviewer greps `runCatching\s*\{` in `feature/**/domain/**` and reports every hit as `[C]`. Shakedown-7 F-15 caught the anti-pattern shipping in `LogMoodEntryUseCase` + `DeleteMoodEntryUseCase`.
+
 **Class must be `open`.** Mokkery (the KMP-native mock library — tester §3.8) cannot mock final Kotlin classes; it fails at compile-time with `FINAL_TYPE_CANNOT_BE_INTERCEPTED`. Because the tester's Component test needs to mock the UseCase, every concrete UseCase class MUST be declared `open class`. This is a `must` rule, not a preference — a UseCase authored without `open` breaks the entire feature's test suite. The alternative — introducing an interface for every UseCase — was considered and rejected as ceremony that adds no value (each UseCase has exactly one implementation).
 
 ```kotlin
@@ -271,6 +273,8 @@ Callers unwrap once: `useCase.execute(id).onSuccess { flow -> scope.launch { flo
 ## 3.4 `data/repository/` — Repository
 
 **Concrete `open class` by default.** Interface only when the ADR requires it (typically for a `core/` shared repository consumed by multiple features). Repository composes DataSources, applies mapping via `Mapper`, exposes **domain models** upward. Repository returns raw values or `Flow<Domain>` — never DTOs, never `Result<T>` (throw instead — the UseCase wraps).
+
+**Single error idiom — throw at Repository, `Result<T>` at UseCase (F-17).** The domain error model is a one-way funnel: Repository translates infrastructure failures into typed `<Feature>Error` subclasses and **throws** them; UseCase catches those typed exceptions in an explicit `try/catch` chain and wraps them into `Result.failure(<Feature>Error.Xxx(cause))`. **NEVER layer both** — a Repository that both throws AND wraps in `runCatching` and a UseCase that also `runCatching`'s over it produces double wrapping, obscures the true cause, and (per F-15 ban) also risks swallowing CE. Reviewer greps `runCatching\s*\{` in `feature/**/data/**` and reports every hit as `[C]`. Shakedown-7 F-17 caught `MoodJournalRepository` using `runCatching` while its UseCases also `runCatching`'d — two idioms in one feature.
 
 **`open` is mandatory.** Same reason as UseCases (§3.3) — Mokkery cannot mock final Kotlin classes. Every concrete Repository MUST be declared `open class`. Interfaces are the ONLY accepted alternative and only when the ADR justifies them (rare — one feature, one impl usually holds).
 
@@ -626,11 +630,13 @@ Before returning, mark each ✅ or ❌:
 
 **Compose Multiplatform hygiene** (Android + Desktop targets)
 - [ ] `ViewState` marked `@Immutable`. List fields use `ImmutableList` where applicable.
+- [ ] **Domain-layer models do NOT import `androidx.compose.*` (F-14).** `@Immutable` is a Compose stability marker — it belongs on presentation `ViewState`, not on `domain/model/**` data classes. Domain must be framework-agnostic so SwiftUI (iOS), Vue/React (Web), and headless surfaces can consume it. Reviewer greps `^import androidx\.compose\.` in `feature/**/domain/**` and reports every hit as `[I]`. Compose infers stability for a `data class` of stable primitives automatically — no annotation needed on the domain type.
 - [ ] Every `LaunchedEffect`/`DisposableEffect` has explicit keys tied to what it depends on.
 - [ ] No `!!` anywhere in touched files.
 - [ ] Modifier ordering is size → padding → background → border → clip → clickable → semantics.
 - [ ] No hard-coded user-facing strings; all via `StringProvider` / `stringResource`.
 - [ ] Every `() -> Unit` / `(T) -> Unit` callback parameter on a Composable is attached to a real UI action (§13.5). No `consume(onClick) = Unit`, no `@Suppress("UnusedParameter")` stubs, no unused-local silencers. If a param is truly unused, remove it from the signature.
+- [ ] **`runCatching { }` count in `feature/**/domain/**` and `feature/**/data/**` is ZERO (F-15 + F-17).** Every error path uses explicit `try/catch` with typed exception classes; the catch-all `Exception` fallback (if present) is the LAST clause and rethrows `CancellationException` first.
 
 **Per-platform UI hygiene** (§13)
 - [ ] Android/Desktop `<Feature>Screen.kt` is a thin adapter: `viewState by component.viewState.collectAsState()`, delegates to `<Feature>View`.
