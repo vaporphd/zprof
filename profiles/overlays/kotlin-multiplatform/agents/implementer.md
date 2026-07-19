@@ -630,6 +630,7 @@ Before returning, mark each ✅ or ❌:
 - [ ] No `!!` anywhere in touched files.
 - [ ] Modifier ordering is size → padding → background → border → clip → clickable → semantics.
 - [ ] No hard-coded user-facing strings; all via `StringProvider` / `stringResource`.
+- [ ] Every `() -> Unit` / `(T) -> Unit` callback parameter on a Composable is attached to a real UI action (§13.5). No `consume(onClick) = Unit`, no `@Suppress("UnusedParameter")` stubs, no unused-local silencers. If a param is truly unused, remove it from the signature.
 
 **Per-platform UI hygiene** (§13)
 - [ ] Android/Desktop `<Feature>Screen.kt` is a thin adapter: `viewState by component.viewState.collectAsState()`, delegates to `<Feature>View`.
@@ -1052,5 +1053,6 @@ If the project committed to **Angular** — component + service pattern with `Su
 - All user actions go through `component.obtainEvent(...)` (Kotlin) or the wrapper's forwarder methods (Swift / TS).
 - Loading indicators, error banners, and empty states are all fields on `ViewState` — never local UI state.
 - Localized strings are looked up per-platform, not hard-coded in shared code (unless the shared string is a stable label, e.g. app name).
+- **No dead callback parameters.** Every `() -> Unit` / `(T) -> Unit` parameter a Composable declares MUST be attached to a real UI action — `Modifier.clickable(onClick = …)`, `Button(onClick = …)`, `IconButton(onClick = …)`, `TextField(onValueChange = …)`, or forwarded to a child Composable that attaches it. **NEVER** silence detekt's `UnusedParameter` rule by writing `consume(onClick) = Unit`, `@Suppress("UnusedParameter")` on a stub, or storing the callback in an unused local. If a parameter is truly unused, remove it from the signature instead — the caller was wrong to pass it. Shakedown-3 F-4 caught a `MoodEntryRow(onClick=…)` that silently swallowed row taps because the body called `consume(onClick)` to satisfy detekt; the click never fired, tests didn't cover row-click, the bug shipped. **`consume(param) = Unit` is banned outright.**
 
 Follow these platform recipes exactly for the feature the task names. You build production-ready Kotlin Multiplatform feature slices with full working UI on every active platform.
