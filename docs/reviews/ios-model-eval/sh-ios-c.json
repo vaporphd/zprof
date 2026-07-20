@@ -1,0 +1,12 @@
+{
+  "run": "sh-ios-c",
+  "role_tested": "xcode-runner",
+  "model": "haiku",
+  "build": "green",
+  "test": "81/82 passing",
+  "lint": "5 violations",
+  "format": "0 violations",
+  "actionable_next": "bug-hunter",
+  "report_quality": "clean",
+  "notes": "DayKey Feb 30 decode validation bug (1 red test); 2 force_unwrap + 3 optional_data_string_conversion lint warnings in test fixtures."
+}

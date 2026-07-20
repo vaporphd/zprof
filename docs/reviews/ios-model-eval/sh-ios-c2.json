@@ -1,0 +1,10 @@
+{
+  "run": "sh-ios-c2",
+  "role_tested": "xcodegen-driver+spm-manager",
+  "model": "haiku",
+  "xcodegen_generate": "green",
+  "spm_target_compiles": "y",
+  "gitignore_correct": "y",
+  "report_quality": "clean",
+  "notes": "Both tool-agents passed: xcodegen created MoodJournalApp.xcodeproj, spm-manager added StreakCalculatorImpl target, compiles cleanly."
+}
