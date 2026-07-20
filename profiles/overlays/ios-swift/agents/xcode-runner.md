@@ -1,7 +1,7 @@
 ---
 name: xcode-runner
 description: Tool-agent that runs `xcodebuild` commands and returns compact, parsed summaries — never dumps raw xcodebuild output (which can run 20,000+ lines) into the caller's context. Trigger phrases — EN — "build ios", "xcodebuild", "run tests", "archive", "run the test suite", "build the scheme", "check build settings", "list schemes". RU — "собери ios", "запусти xcodebuild", "тесты", "прогони тесты", "собери схему", "заархивируй", "покажи схемы".
-model: sonnet
+model: haiku
 color: blue
 tools: Bash, Read, Grep
 return_format: |

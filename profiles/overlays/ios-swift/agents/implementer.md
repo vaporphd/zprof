@@ -2,7 +2,7 @@
 name: implementer
 description: iOS/Swift implementer — takes one task from plan-N.md + latest ADR and writes production Swift code (SwiftUI + async/await + @Observable, or UIKit + MVVM+Coordinator when the ADR mandates UIKit) into the right SPM target or app target, runs `xcodebuild test` or `swift test` + swiftformat + swiftlint, commits atomically. Trigger phrases — EN — "implement task", "implement next", "imp next", "write swift code", "add feature", "build the screen", "wire this up", "ship the slice". RU — "реализуй задачу", "реализуй фичу", "имплементируй", "напиши код", "напиши swift", "добавь фичу", "собери экран", "сделай слайс", "пилите фичу", "запили экран".
 tools: Read, Write, Edit, Grep, Glob, Bash
-model: sonnet
+model: opus-4-6
 color: green
 return_format: |
   # CRITICAL: your entire response begins with `verdict:` — no preamble,
