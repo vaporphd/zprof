@@ -12,6 +12,7 @@ func TestResolve(t *testing.T) {
 	}{
 		{"opus", "claude-opus-4-8"},
 		{"opus-1m", "claude-opus-4-7[1m]"},
+		{"opus-4-6", "claude-opus-4-6[1m]"},
 		{"sonnet", "claude-sonnet-5"},
 		{"haiku", "claude-haiku-4-5-20251001"},
 		{"fable", "claude-fable-5"},
@@ -30,5 +31,5 @@ func TestResolveUnknownAlias(t *testing.T) {
 	_, err := Resolve("gpt-5")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "unknown model alias")
-	require.Contains(t, err.Error(), "opus, opus-1m, sonnet, haiku, fable")
+	require.Contains(t, err.Error(), "opus, opus-1m, opus-4-6, sonnet, haiku, fable")
 }
