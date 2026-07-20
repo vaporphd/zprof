@@ -1,0 +1,13 @@
+{
+  "run": "sh-ios-prod2",
+  "role_tested": "xcode-runner",
+  "model": "haiku",
+  "build": "red",
+  "test": "1/1 passing",
+  "lint": "50 violations (4 in source, 28 in .build/, 18 other)",
+  "format": "12 violations",
+  "xcodebuild": "red",
+  "actionable_next": "xcodegen-driver",
+  "preamble_leak": "n",
+  "notes": "xcodebuild blocked by missing Info.plist in build output; swiftlint/format violations in source code and test files require remediation before re-validation"
+}
