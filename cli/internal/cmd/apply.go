@@ -57,15 +57,18 @@ func NewApplyCmd() *cobra.Command {
 				}
 				overlays = append(overlays, o)
 			}
+			pwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("getwd: %w", err)
+			}
 			proj := &manifest.ProjectManifest{
 				Overlays:  args,
 				Language:  "ru",
 				WithGates: withGates,
 				Minimal:   minimal,
 			}
-			pwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("getwd: %w", err)
+			if existing, err := manifest.LoadProject(filepath.Join(pwd, ".zprof.yaml")); err == nil {
+				proj.ModelOverrides = existing.ModelOverrides
 			}
 			if dryRun {
 				fmt.Println("[dry-run] would apply overlays:", args)
