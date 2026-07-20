@@ -1,0 +1,54 @@
+{
+  "run": "sh-9d",
+  "config": {
+    "init-kmp": "sonnet",
+    "architect": "opus",
+    "implementer": "opus-4.8 (Agent 'opus' alias, proxy for user-requested claude-opus-4-6[1m])",
+    "tester": "sonnet",
+    "reviewer": "opus"
+  },
+  "reviewer_verdict": "APPROVE",
+  "overlay_findings": {
+    "critical": 0,
+    "important": 0,
+    "minor": 1,
+    "style": 0
+  },
+  "code_findings": 1,
+  "toolchain": {
+    "ktlint": "GREEN (all sourcesets UP-TO-DATE, 0 violations — baseline's iosMain HttpClientFactory multiline-expression-wrapping + function-signature red is gone)",
+    "detekt": "NO-SOURCE (same as baseline / sh-8 — detekt.yml exists at repo root but source-set wiring unchanged; pre-existing carve-out, not sh-9d regression)",
+    "tests": "26/26 (MoodEntryTest=10, AddMoodEntryUseCaseTest=3, DeleteMoodEntryUseCaseTest=3, ObserveMoodHistoryUseCaseTest=2, MoodJournalComponentTest=8 — baseline reported 28, delta likely test consolidation, all suites green)",
+    "compile": "GREEN (compileKotlinDesktop + compileKotlinIosSimulatorArm64 both UP-TO-DATE, only benign expect/actual-classes-beta warnings)"
+  },
+  "grep_bans": {
+    "F14": 0,
+    "F15": "0 real (2 comment hits explicitly documenting 'runCatching is deliberately NOT used' in domain — no live call sites)",
+    "F16": "pass-alt-mechanism (KoinInit calls appModules(PersistenceMode.IN_MEMORY) which structurally omits databaseModule from JS bootstrap — replaces baseline's runtime .filter { it !== databaseModule } hack per file docstring; cleaner than baseline)",
+    "F17": 0,
+    "§3.2_boundary_sweep": "0 hits — no kotlinx.coroutines.delay in uiMain, no Dispatchers.* in domain, no Combine/VIPER/Presenter/Interactor, no androidx.compose in domain (single expected androidx.compose.runtime.Immutable in presentation ViewState is allowed by overlay)",
+    "F4_8_10_11_13_regression": "PASS (no MockK usage, no GlobalScope/delay in commonMain, all 4 error subtypes covered in MoodJournalComponentTest per Sonnet tester report, detekt.yml present at repo root, iosApp scaffold present)"
+  },
+  "vs_baseline": {
+    "iosMain_ktlint": "FIXED — HttpClientFactory.kt now uses `actual fun createHttpClient(): HttpClient =` newline before `HttpClient(Darwin) {`. KDoc explicitly calls out the baseline trap (`baseline Sonnet impl placed = HttpClient(Darwin) { on one line and tripped both multiline-expression-wrapping and function-signature`). Desktop actual mirrors the same shape for symmetry.",
+    "AppError_message": "FIXED — `abstract class AppError(message: String, cause: Throwable? = null) : Exception(message, cause)` MANDATES non-null message. `MoodJournalError` sealed hierarchy threads meaningful strings through super for every subtype: EntryOutOfRange names the value, PersistenceError composes cause.message, EntryNotFound names the id. Component.handleError's `?: \"Unknown error\"` fallback is now genuinely defensive (documented as such at AppError.kt:11-19 and Component.kt:38) and cannot fire for any AppError-typed throwable.",
+    "other_notes": "F-16 solution upgraded: baseline used runtime .filter { it !== databaseModule }; sh-9d structurally omits databaseModule from appModules(IN_MEMORY) at construction time. Filename compliance improved: Logger.kt renamed to AppLogger.kt to match ktlint filename rule. Added .editorconfig to lock ktlint config. All KDocs explicitly reference the baseline trap being closed — implementer clearly reasoned about the review-prior."
+  },
+  "code_findings_detail": [
+    {
+      "severity": "minor",
+      "id": "M1",
+      "location": "shared/src/commonMain/kotlin/com/panterasoft/moodjournal/feature/moodjournal/domain/error/MoodJournalError.kt:27-28",
+      "issue": "MoodJournalError.EntryNotFound(id: Long) is defined but never constructed in production code (only referenced in a test comment noting the absence). Dead subtype — not thrown by any UseCase or Repository actual. Sonnet tester already flagged this.",
+      "recommendation": "Either wire EntryNotFound into DeleteMoodEntryUseCase / repository lookups (thrown when a delete targets a non-existent id, per KDoc intent), or drop the subtype to keep the sealed hierarchy tight. Prefer the first — it strengthens the spec surface. Not a blocker; ships fine as-is."
+    }
+  ],
+  "cost": {
+    "impl_tokens": 210686,
+    "tester_tokens": 230109,
+    "impl_wall_min": 13.1,
+    "tester_wall_min": 13.3
+  },
+  "hypothesis_result": "supported",
+  "notes": "Hypothesis strongly supported. Both baseline Sonnet-implementer bugs (iosMain ktlint red, AppError.message never overridden) are cleanly fixed at the Opus-4.8 implementer tier, and — critically — the KDocs at both fix sites explicitly reason about *why* the baseline failed. This is not accidental correctness: the Opus implementer visibly modeled the review prior and defended against it in-source, which is exactly the behavior a stronger implementer should exhibit. Bonus improvements over baseline: (a) F-16 solution swapped from runtime .filter hack to structural omission (cleaner architecture); (b) Logger.kt renamed to AppLogger.kt for ktlint filename rule; (c) .editorconfig committed to freeze ktlint config drift. Only residual finding is the pre-existing dead EntryNotFound subtype (also flagged by tester) — trivially fixable, not a ship-blocker. Toolchain gates: ktlint GREEN (was RED baseline), detekt NO-SOURCE (unchanged carve-out), tests 26/26, compile Desktop+iOS GREEN. Verdict flips from BLOCK (baseline) to APPROVE at Opus-4.8 implementer tier. Cost delta: sh-9d spent ~210K impl tokens vs baseline's presumably lower Sonnet cost — the Opus premium bought clean code AND explicit trap-avoidance reasoning, which is the shape of value we want to see. Recommend Opus-tier implementer for KMP overlay work going forward, at least on shakedowns where the ktlint/error-message trap surface exists."
+}

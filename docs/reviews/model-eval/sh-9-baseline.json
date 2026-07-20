@@ -1,0 +1,31 @@
+{
+  "run": "sh-9-baseline",
+  "config": {
+    "init-kmp": "sonnet",
+    "architect": "opus",
+    "implementer": "sonnet",
+    "tester": "sonnet",
+    "gradle-runner": "sonnet",
+    "reviewer": "opus"
+  },
+  "reviewer_verdict": "BLOCK",
+  "overlay_findings": {
+    "critical": 0,
+    "important": 2,
+    "minor": 0,
+    "style": 1
+  },
+  "code_findings": 3,
+  "toolchain": {
+    "ktlint": "FAILED (2 violations in shared/src/iosMain/kotlin/.../core/network/HttpClientFactory.kt:7 — standard:multiline-expression-wrapping + standard:function-signature)",
+    "detekt": "clean (NO-SOURCE, same as sh-8 — detekt.yml exists but source-set unwired)",
+    "tests": "28/28"
+  },
+  "grep_bans": {
+    "F14": 0,
+    "F15": 0,
+    "F16": "pass-alt-mechanism",
+    "F17": 0
+  },
+  "notes": "Regression vs sh-8 APPROVE 0/0/0/0 baseline despite identical model config (implementer/tester/init/runner=sonnet, architect/reviewer=opus, ktlint/detekt=haiku). Deltas: (1) implementer introduced a ktlint violation in iosMain HttpClientFactory.kt actual — expression body on same line as function signature — sh-8 was clean here; (2) two Important findings surface on close audit that were passed through as tester follow-ups in sh-8: I1 = the ktlint-red aggregate itself (§0.5 auto-Important), I2 = AppError.message never overridden so all typed errors surface as 'Unknown error' fallback in MoodJournalComponent.handleError. Follow-ups (not findings): open-class member-funcs are final blocking Mokkery mock generation per ADR-0001 D-1 intent — tester worked around with real fixtures; pre-existing carve-outs from implementer brief (jsCompile Compose plugin scope; App.kt casing) unchanged. All F-14/15/16/17 boundary greps clean; §3.2 KMP boundary sweep 0-hit across all 8 scanners; F-4/8/10/11/13 regression sweep PASS. Wall-time ~4min gradle gates + greps + audit; token budget under 60K."
+}

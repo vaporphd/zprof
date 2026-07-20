@@ -1,0 +1,61 @@
+{
+  "run": "sh-9b",
+  "config": {
+    "init-kmp": "sonnet (baseline artifact)",
+    "architect": "opus (baseline artifact)",
+    "implementer": "sonnet (baseline artifact)",
+    "tester": "haiku",
+    "reviewer": "opus"
+  },
+  "reviewer_verdict": "BLOCK",
+  "overlay_findings": {
+    "critical": 0,
+    "important": 2,
+    "minor": 1,
+    "style": 1
+  },
+  "code_findings": 4,
+  "toolchain": {
+    "ktlint": "FAILED (2 violations in shared/src/iosMain/kotlin/.../core/network/HttpClientFactory.kt:7 — standard:multiline-expression-wrapping + standard:function-signature — identical to sh-9-baseline, implementer-caused, tester's new files clean)",
+    "detekt": "clean (NO-SOURCE, same as baseline — detekt.yml exists but source-set unwired)",
+    "tests": "32/32 (5 MoodEntryTest + 5 AddMoodEntryUseCaseTest + 5 DeleteMoodEntryUseCaseTest + 5 ObserveMoodEntriesUseCaseTest + 12 MoodJournalComponentTest, all pass, 0 failures/errors/skipped per desktopTest XML)"
+  },
+  "grep_bans": {
+    "F14": 0,
+    "F15": 0,
+    "F16": "pass-alt-mechanism (KoinInit.kt passes PersistenceMode.IN_MEMORY at startup; no runtime `.filter { it !== databaseModule }` needed — same design as baseline)",
+    "F17": 0
+  },
+  "kmp_boundary_sweep": {
+    "commonMain_android_imports": 0,
+    "commonMain_platform_apple_imports": 0,
+    "commonMain_java_imports": 0,
+    "commonMain_dispatchers_io_refs": "0 real (2 hits are KDoc-only in core/util/IoDispatcher.kt + DispatcherProvider.kt describing the injected mechanism)",
+    "expect_outside_core": 0,
+    "iosMain_okhttp_engine": 0,
+    "legacy_native_markers": 0
+  },
+  "compile_targets": {
+    "desktop": "SUCCESS (compileKotlinDesktop UP-TO-DATE)",
+    "iosSimulatorArm64": "SUCCESS (only KT-61573 beta warning for expect/actual classes, pre-existing)"
+  },
+  "vs_baseline": {
+    "test_count_delta": "+4 (28 → 32)",
+    "delta_location": "MoodJournalComponentTest: 8 → 12 tests (6 event variants × base + distinct-effect pair)",
+    "coverage_win": "Haiku added 6 distinct-effect tests (F-10 pattern) — one per sealed ViewEvent variant (LevelSelected, NoteChanged, TagsChanged, SubmitEntry, DeleteEntry, PeriodChanged). Baseline's tester had shallower F-10 coverage.",
+    "quality_regression": "Two test-smells not present in a Sonnet-5-quality suite: (a) MoodJournalComponentTest uses `kotlinx.coroutines.delay(50)` real-time waits inside `runTest` with a StandardTestDispatcher — should be `testScheduler.advanceUntilIdle()` / `runCurrent()`; adds 100-150ms wall-time and is flaky under CI load; (b) `onEvent_deleteEntry_succeeds` calls `awaitItem()` then `cancelAndIgnoreRemainingEvents()` with NO actual assertion — passes trivially without verifying delete behaviour.",
+    "coverage_gaps": "No error-path tests: SubmitEntry with null selectedLevel, AddMoodEntry with repository throwing AppError.NetworkUnavailable, DeleteMoodEntry with invalid id — all could have been added since InMemoryMoodEntryLocalDataSource has no failure mode, but no failing-repository mock was constructed.",
+    "verdict_equivalence": "Same BLOCK verdict as baseline — both surviving Important findings (I-1 ktlint, I-2 AppError.message null) come from reused implementer artifacts, unchanged. Haiku's tester introduces no new Critical/Important findings."
+  },
+  "findings_detail": {
+    "I-1": "shared/src/iosMain/kotlin/.../HttpClientFactory.kt:7 — ktlint red (standard:multiline-expression-wrapping + standard:function-signature). §0.5 auto-Important. IDENTICAL to sh-9-baseline. Implementer-caused, reused artifact.",
+    "I-2": "shared/src/commonMain/.../core/error/AppError.kt:15 — `abstract class AppError : Exception()` with no `message` override; all typed subtypes (NetworkUnavailable, HttpError, SerializationError, UnknownError) inherit null message → UI's `MoodJournalComponent.handleError` fallback surfaces 'Unknown error' for every case. IDENTICAL to sh-9-baseline. Implementer-caused, reused artifact.",
+    "M-1": "MoodJournalComponentTest uses `kotlinx.coroutines.delay(50)` inside `runTest`+StandardTestDispatcher blocks (lines 123, 144, 148) — should be `advanceUntilIdle()`. Tester-caused, Haiku-specific quality regression vs Sonnet 5 baseline. Test-hygiene §3.11.",
+    "S-1": "onEvent_deleteEntry_succeeds (line 134) — empty assertion body: awaits item then cancels without checking state. Trivial pass. Tester-caused, Haiku-specific."
+  },
+  "cost": {
+    "tester_tokens": 131372,
+    "tester_wall_min": 9.3
+  },
+  "notes": "Regression sweep F-4/8/10/11/13 PASS. §3.2 KMP boundary sweep 0-hit across all 8 scanners. Both baseline Importants (I-1 ktlint iosMain, I-2 AppError.message null) survive verbatim because implementer artifacts are reused. Haiku's own tester output is ktlint-clean, compiles clean, all 32 tests pass. Coverage delta +4 tests, driven by F-10 distinct-effect pattern applied uniformly across all 6 sealed ViewEvent variants — a real improvement. But quality micro-regressions: real-time `kotlinx.coroutines.delay()` inside `runTest` (M-1) and an empty-assertion test (S-1) are shape-of-Haiku signatures a Sonnet-5 tester avoided. Net: Haiku is FUNCTIONALLY equivalent — verdict-preserving, gates-preserving, count-improving — but test-hygiene is slightly softer. For a shakedown eval this is a passable substitution; for a production overlay it needs one review pass to swap delay→advanceUntilIdle and add the missing assertion. Wall-time ~5min gradle gates + greps + audit; token budget under 30K."
+}

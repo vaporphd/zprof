@@ -1,0 +1,74 @@
+{
+  "run": "sh-9e",
+  "config": {
+    "architect": "sonnet 5",
+    "others": "baseline (init-kmp=sonnet, implementer=sonnet 5, tester=sonnet 5, reviewer=opus 4.8)"
+  },
+  "reviewer_verdict": "BLOCK",
+  "overlay_findings": {
+    "critical": 0,
+    "important": 1,
+    "minor": 0,
+    "style": 1
+  },
+  "code_findings": 2,
+  "toolchain": {
+    "ktlint": "FAILED (aggregate red — 1 real production violation: standard:filename on shared/src/commonMain/.../core/util/Logger.kt should be AppLogger.kt; PLUS 266 violations against shared/build/generated/sqldelight/**/AppDatabaseImpl.kt which is SqlDelight-generated code, not implementer sources. iosMain HttpClientFactory.kt = 0 violations [baseline was RED here]; desktopMain HttpClientFactory.kt = 0; jsMain = 0. Root cause of generated-code noise: sh-9e did NOT commit a .editorconfig / ktlint filter block that would exclude build/generated — sh-9d's implementer proactively added .editorconfig; sh-9e's did not.)",
+    "detekt": "NO-SOURCE (same pre-existing carve-out as baseline / sh-9d — detekt.yml is at repo root but source-set wiring unchanged; not a sh-9e regression)",
+    "tests": "31/31 (MoodEntryDraftTest=3, MoodEntryTest=6, AddMoodEntryUseCaseTest=5, DeleteMoodEntryUseCaseTest=5, ObserveMoodEntriesUseCaseTest=4, MoodJournalComponentTest=8 — all suites green, wall <1s cached)",
+    "compile": "GREEN (compileKotlinDesktop + compileKotlinIosSimulatorArm64 both up-to-date, only benign expect/actual-classes beta warnings on DatabaseDriverFactory)"
+  },
+  "grep_bans": {
+    "F14": 0,
+    "F15": "0 real (1 comment hit at AddMoodEntryUseCase.kt:12 explicitly documenting 'no runCatching' — no live call site)",
+    "F16": "pass-alt-mechanism (jsMain/KoinInit.kt calls appModules(PersistenceMode.IN_MEMORY) + platformModule(), which structurally omits databaseModule from the JS bootstrap per ADR-0001 D-4 — replaces baseline's runtime .filter { it !== databaseModule } hack; identical to sh-9d's approach)",
+    "F17": 0,
+    "§3.2_boundary_sweep": "0 hits — no kotlinx.coroutines.delay in uiMain; no Dispatchers.* in domain; no Combine/VIPER/Presenter/Interactor/@Published in commonMain; no androidx.compose imports in domain; presentation ViewState is a plain data class with NO @Immutable annotation (sh-9e diverges from sh-9d here — see vs_9d notes)",
+    "F4_8_10_11_13_regression": "PASS (no MockK usage anywhere, no GlobalScope, no kotlinx.coroutines.delay in commonMain/*, all 4 AppError subtypes covered in MoodJournalComponentTest surface, detekt.yml present at repo root, iosApp scaffold present)"
+  },
+  "vs_baseline": {
+    "iosMain_ktlint": "FIXED — HttpClientFactory.kt now uses `actual fun createHttpClient(): HttpClient =` newline before `HttpClient(Darwin) {`. Desktop actual mirrors the same shape. Baseline's 2 violations (multiline-expression-wrapping + function-signature at line 7:45) are gone. Zero ktlint violations against sh-9e-authored production sources in iosMain/desktopMain/jsMain.",
+    "AppError_message": "FIXED via alternative architecture — sh-9e's Component does NOT rely on Throwable.message at all. AppError is a `sealed class` with 5 subtypes (NotFound, ValidationError, PersistenceError, NetworkError, Unknown), and MoodJournalComponent.messageFor(error: AppError): String pattern-matches on the sealed hierarchy to derive UI strings. This decouples UI error copy from exception messages entirely — cleaner than either baseline's Throwable.message fallback OR sh-9d's super(message) threading. Baseline's `?: \"Unknown error\"` fallback bug cannot fire because .message is never read.",
+    "logger_kt_filename": "REGRESSED (or rather, NOT FIXED) — Logger.kt still triggers standard:filename ktlint rule (should be AppLogger.kt because it contains a single top-level declaration). Baseline had the same violation; sh-9d fixed it via rename. sh-9e left it.",
+    "sqldelight_generated_ktlint": "NEW SURFACE — 266 ktlint violations against shared/build/generated/sqldelight/**/AppDatabaseImpl.kt now surface because sh-9e did NOT commit a .editorconfig with a `[**/generated/**] ktlint = disabled` block. sh-9d added exactly this .editorconfig; baseline apparently also hit this but reported only iosMain violations (likely cached / earlier ktlint version). Not the implementer's authored code, but a build-config hygiene gap they should have closed the way sh-9d did.",
+    "other_notes": "F-16 solution: identical structural improvement to sh-9d (appModules(IN_MEMORY) omits databaseModule at construction; no runtime .filter hack). Stale docstring in jsMain PlatformModule.kt IS fixed in sh-9e (line 12 now reads `that superseded .filter { it !== databaseModule } approach is no longer in this codebase.` — resolves the followup.md backlog item). Test coverage expanded vs baseline: MoodEntryTest 6, AddMoodEntryUseCaseTest 5, DeleteMoodEntryUseCaseTest 5, ObserveMoodEntriesUseCaseTest 4, MoodJournalComponentTest 8, MoodEntryDraftTest 3 = 31 (baseline 28)."
+  },
+  "vs_9d": {
+    "same_verdict": "no",
+    "iosMain_HttpClientFactory": "same shape (newline before body) — both fix the baseline trap identically",
+    "AppError_design": "DIFFERENT and arguably cleaner — sh-9d uses `abstract class AppError(message: String, cause)` and threads meaningful strings via super(message) for each subtype, then Component reads `error.message ?: \"Unknown error\"`. sh-9e uses `sealed class AppError(message: String?, cause)` with a Component-side messageFor(error): String that pattern-matches on the sealed subtype. sh-9e's approach fully separates UI copy from exception data (Component owns its own strings, not the domain), which is arguably better layering. Both prevent the baseline bug.",
+    "ViewState_@Immutable": "sh-9d imports androidx.compose.runtime.Immutable and annotates the data class (only androidx.compose leak into commonMain, allowed by overlay). sh-9e explicitly OMITS the annotation with a detailed KDoc explaining that commonMain shouldn't depend on androidx.compose.runtime (it would leak onto JS classpath and risk re-triggering the Compose-for-Web auto-registration failure that compose.web.targets() exists to prevent) and that Compose infers stability automatically for a data class over stable types + ImmutableList. This is a defensible improvement — sh-9e's uiMain-only compose dependency boundary is cleaner.",
+    "Logger.kt_rename": "sh-9d renamed to AppLogger.kt to satisfy ktlint filename rule; sh-9e did NOT",
+    "editorconfig": "sh-9d committed a .editorconfig freezing ktlint config (and implicitly hides the SqlDelight-generated code from ktlint); sh-9e has NO .editorconfig at repo root, so 266 generated-code violations surface in the aggregate ktlint task",
+    "test_count": "sh-9d 26 tests, sh-9e 31 tests (sh-9e testers added MoodEntryDraftTest suite + more per-usecase edge cases)",
+    "verdict_delta": "sh-9e is BLOCK, sh-9d was APPROVE. Difference is entirely tooling hygiene: sh-9e's implementer nailed the substantive bugs (both baseline Important findings resolved, and via a cleaner AppError architecture) but skipped the two hygiene steps (.editorconfig, Logger.kt rename) that sh-9d closed proactively. In terms of authored-code quality, sh-9e is comparable or better than sh-9d; in terms of CI-green polish, sh-9e trails."
+  },
+  "arch_quality_signal": "sufficient",
+  "arch_quality_notes": "Sonnet-architect drove downstream to fix BOTH baseline Important code bugs — the iosMain HttpClientFactory ktlint shape AND the AppError message-fallback trap — in a Sonnet-implementer. The AppError fix used an alternative architecture (sealed pattern-match in Component rather than super(message) threading) that the architect's ADR-0001 D-2/D-3 clearly framed as an option and the implementer picked cleanly. F-16 structural omission upgrade over baseline's runtime filter hack survived. Stale PlatformModule.kt docstring was fixed. Where the Sonnet stack still fell short of the Opus stack (sh-9d) was purely tooling hygiene: no .editorconfig committed, Logger.kt not renamed. These are the kind of proactive-review-of-my-own-work items that Opus catches and Sonnet misses — but the ADR/PROJECT_SPEC quality itself was clearly sufficient to drive correct code. Signal: Sonnet architect is comparable to Opus architect on spec correctness / decision framing; the Sonnet-vs-Opus downstream delta is dominated by implementer/reviewer polish, not spec quality.",
+  "code_findings_detail": [
+    {
+      "severity": "important",
+      "id": "I1",
+      "location": "aggregate ktlintCheck task (task :shared:ktlintCommonMainSourceSetCheck FAILED; shared/build/reports/ktlint/ktlintCommonMainSourceSetCheck/ktlintCommonMainSourceSetCheck.txt)",
+      "issue": "ktlintCheck aggregate task is RED. §0.5 auto-Important for aggregate-linter-red. Composition: 1 real production violation (Logger.kt filename, see S1) + 266 violations against SqlDelight-generated AppDatabaseImpl.kt at shared/build/generated/sqldelight/**. The generated-code violations are not implementer code but they DO fail the CI task because sh-9e never committed a .editorconfig / ktlint filter that excludes shared/build/generated (sh-9d proactively added exactly this .editorconfig).",
+      "recommendation": "Two-step fix: (1) rename Logger.kt to AppLogger.kt (see S1); (2) commit .editorconfig at repo root with [**/generated/**] ktlint = disabled (mirror sh-9d's approach). After both, ktlintCheck should be GREEN."
+    },
+    {
+      "severity": "style",
+      "id": "S1",
+      "location": "shared/src/commonMain/kotlin/com/panterasoft/moodjournal/core/util/Logger.kt",
+      "issue": "standard:filename ktlint rule: 'File \"Logger.kt\" contains a single top level declaration and should be named \"AppLogger.kt\"'. Same violation baseline had; sh-9d fixed it; sh-9e did not.",
+      "recommendation": "Rename Logger.kt to AppLogger.kt (single-file mechanical fix). Contributes to I1."
+    }
+  ],
+  "cost": {
+    "arch_tokens": 158000,
+    "arch_wall_min": 8.5,
+    "impl_tokens": 274000,
+    "impl_wall_min": 16.4,
+    "tester_tokens": 207000,
+    "tester_wall_min": 13.0
+  },
+  "hypothesis_result": "supported-with-caveat",
+  "notes": "Hypothesis (Sonnet architect drives equivalent-quality downstream) is largely supported. Baseline had 2 Important overlay findings (iosMain ktlint red, AppError.message never overridden). sh-9e resolves BOTH: iosMain HttpClientFactory has the correct newline shape (identical to sh-9d), and AppError never surfaces the 'Unknown error' fallback because Component uses a sealed-hierarchy messageFor pattern instead of Throwable.message — a genuinely cleaner architecture than sh-9d's super(message) threading. F-16 got the same structural upgrade as sh-9d. Stale PlatformModule.kt docstring got fixed. Test count expanded to 31/31 vs baseline's 28. Where sh-9e still falls short is purely tooling hygiene: no .editorconfig committed (sh-9d added one), and Logger.kt not renamed to AppLogger.kt (sh-9d renamed it). These two omissions make ktlintCheck aggregate task RED — 1 real production violation + 266 SqlDelight-generated file violations. §0.5 auto-Important treatment applies (same as baseline), so verdict is BLOCK. But the failure mode is qualitatively different from baseline: baseline BLOCKed on real production code bugs, sh-9e BLOCKs on tooling hygiene. Arch quality signal is 'sufficient' — the Sonnet architect's spec was clearly good enough to eliminate the substantive Sonnet-implementer traps and let the implementer pick a cleaner AppError design; the residual gap vs Opus stack is implementer/reviewer polish, not spec correctness. Recommendation for the routing question sh-9e was set up to answer: Sonnet architect looks comparable to Opus architect for KMP overlay work at least on code-correctness fronts; the Opus premium is buying tooling-hygiene proactiveness at the implementer tier, not architectural insight."
+}

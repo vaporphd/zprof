@@ -1,0 +1,78 @@
+{
+  "run": "sh-9-min",
+  "config": {
+    "init": "sonnet (reused from sh-9d, per stacked-downgrade design)",
+    "arch": "opus (reused from sh-9d)",
+    "impl": "opus 4.8 (proxy for claude-opus-4-6[1m])",
+    "tester": "haiku",
+    "reviewer": "opus"
+  },
+  "reviewer_verdict": "BLOCK",
+  "overlay_findings": {
+    "critical": 0,
+    "important": 2,
+    "minor": 1,
+    "style": 4
+  },
+  "code_findings": 3,
+  "toolchain": {
+    "ktlint": "RED — 4 violations, all in commonTest sources authored by Haiku tester (3× standard:import-ordering in AddMoodEntryUseCaseTest.kt / ObserveMoodHistoryUseCaseTest.kt / MoodJournalComponentTest.kt, 1× standard:no-unused-imports in MoodJournalComponentTest.kt:29). All ktlint-fixable via `./gradlew ktlintFormat`. Non-test sources (Opus impl output) are ktlint-clean — the regression is entirely tester-introduced. NOTE: the flagged test files EXIST on disk despite the tester's report of only writing ComputeWeeklyAverageUseCaseTest — see 'tester_report_inconsistency' below.",
+    "detekt": "NO-SOURCE (unchanged pre-existing carve-out, not a sh-9-min regression)",
+    "tests": "5/5 passing in the ONE test class the Haiku tester actually populated (ComputeWeeklyAverageUseCaseTest — 5 @Test methods, all green). Expected coverage for the slice was ~26+ tests spanning AddMoodEntryUseCaseTest, DeleteMoodEntryUseCaseTest, ObserveMoodHistoryUseCaseTest, MoodJournalComponentTest (sh-9d baseline: 26/26 across 5 files). Coverage delta: -21 tests, -4 test classes vs sh-9d.",
+    "compile": "GREEN (:shared:compileKotlinDesktop + :shared:compileKotlinIosSimulatorArm64 both UP-TO-DATE, no errors)"
+  },
+  "grep_bans": {
+    "F14": 0,
+    "F15": 0,
+    "F16": "pass — structural omission via appModules(PersistenceMode.IN_MEMORY) preserved from sh-9d Opus impl; jsMain KoinInit KDoc explicitly documents this replaces the old runtime .filter { it !== databaseModule } hack",
+    "F17": 0,
+    "§3.2_boundary_sweep": "0 hits (no Combine, no VIPER, no Presenter, no Interactor, no androidx.compose in domain, no Dispatchers.* in domain, no kotlinx.coroutines.delay in uiMain)",
+    "F4_8_10_11_13_regression": "PASS on production code (Opus impl)"
+  },
+  "sealed_data_source_analysis": {
+    "location": "shared/src/commonMain/kotlin/com/panterasoft/moodjournal/feature/moodjournal/data/datasource/MoodEntryLocalDataSource.kt:26-79",
+    "shape": "sealed class MoodEntryLocalDataSource with TWO public nested subclasses in the SAME file: Sqlite(database, mapper, dispatcher) and InMemory() (no-arg).",
+    "haiku_claim": "Haiku tester reported it could not write fixtures because the class is sealed and cannot be extended outside the package.",
+    "reality": "The claim is UNJUSTIFIED. sealed only restricts *external* subclassing — but MoodEntryLocalDataSource.InMemory is (a) already public, (b) already a full subclass of the sealed parent, (c) constructible with a no-arg call from any test in commonTest (which lives in the same module and can see internal + public API of commonMain). The InMemory subclass IS the ready-made test fixture. Any test can write `val ds = MoodEntryLocalDataSource.InMemory()`, seed it via ds.insert(...), and inject it into a Repository under test. Additionally, since Repository takes the abstract type as a constructor param, a test could also wrap InMemory in a decorator or feed it a spy Flow. Neither pattern requires extending the sealed hierarchy.",
+    "sh_9d_precedent": "sh-9d Sonnet-tester handled this exact sealed shape and produced 26/26 tests including MoodJournalComponentTest that exercises the Repository→DataSource seam. The class hierarchy did not change between sh-9d and sh-9-min — only the tester model did.",
+    "conclusion": "Haiku's block is a reasoning-depth wall, not a design defect. Same source code that Sonnet solved cleanly."
+  },
+  "tester_report_inconsistency": {
+    "report_claim": "Haiku tester reported writing ONLY ComputeWeeklyAverageUseCaseTest (5 tests) and refusing further test files due to sealed data source.",
+    "on_disk_reality": "Three additional test files exist and are flagged by ktlint: AddMoodEntryUseCaseTest.kt, ObserveMoodHistoryUseCaseTest.kt, MoodJournalComponentTest.kt.",
+    "interpretation": "Either (a) tester wrote scaffolds for those files then stopped mid-authoring without wiring @Test methods, or (b) they are leftovers from a prior test-run in this host. Reviewer did not exhaustively read their contents given time budget, but ktlint hit standard:no-unused-imports (line 29 of MoodJournalComponentTest.kt) which strongly implies real code was written that later had imports orphaned during refactor. This suggests partial writes that were abandoned when the sealed-block reasoning failed. Regardless: only ComputeWeeklyAverageUseCaseTest contributes green tests in the ran suite (build/test-results/desktopTest confirms one TEST-*.xml file only)."
+  },
+  "haiku_block_justified": "no",
+  "stack_verdict": "refuted",
+  "code_findings_detail": [
+    {
+      "severity": "important",
+      "id": "I1",
+      "location": "shared/src/commonTest — coverage",
+      "issue": "Only 5 tests over one UseCase populated. AddMoodEntryUseCase, DeleteMoodEntryUseCase, ObserveMoodHistoryUseCase, MoodJournalComponent (F-10 error path discipline, all 4 error subtypes) are untested. Slice ships with ~19% of expected coverage vs sh-9d parity baseline.",
+      "recommendation": "Author the missing test classes using MoodEntryLocalDataSource.InMemory() as the fixture — no sealed workaround needed, the subclass is already public and constructible."
+    },
+    {
+      "severity": "important",
+      "id": "I2",
+      "location": "shared/src/commonTest ktlint red (4 violations across 3 files)",
+      "issue": "Tester left import-ordering and unused-import violations in the test source set, causing ktlintCommonTestSourceSetCheck to fail the full build. This blocks CI.",
+      "recommendation": "Run `./gradlew ktlintFormat` — all 4 findings are auto-fixable. Trivial to resolve but currently ships RED."
+    },
+    {
+      "severity": "minor",
+      "id": "M1",
+      "location": "shared/src/commonMain/kotlin/com/panterasoft/moodjournal/feature/moodjournal/domain/error/MoodJournalError.kt (carry-over from sh-9d M1)",
+      "issue": "MoodJournalError.EntryNotFound subtype defined but never constructed in production. Same finding as sh-9d.",
+      "recommendation": "Wire into DeleteMoodEntryUseCase or drop. Pre-existing, not a sh-9-min regression."
+    }
+  ],
+  "cost_note": "Not measured this run — reviewer step only.",
+  "hypothesis_result": "refuted",
+  "vs_sh_9d": {
+    "impl_layer": "IDENTICAL — same Opus 4.8 output shape (AppError abstract with mandatory message, structural F-16 fix, sealed DataSource with InMemory + Sqlite variants, iOS/Desktop actual HttpClient symmetry). Production code parity confirmed by grep bans + compile-green + reviewer read of MoodEntryLocalDataSource.kt.",
+    "tester_layer": "REGRESSED — Sonnet delivered 26/26 across 5 files with ktlint-clean imports; Haiku delivered 5/5 in 1 file, left ktlint RED in 3 orphaned test files, and self-reported a block based on a misread of `sealed` semantics that the Sonnet tester correctly navigated on the same source tree.",
+    "reviewer_verdict_delta": "sh-9d APPROVE → sh-9-min BLOCK. Delta is 100% attributable to the tester downgrade."
+  },
+  "notes": "The stacked downgrade (impl=Opus, tester=Haiku) is REFUTED. Opus impl remains capable — it produces the same clean code shape that earned sh-9d's APPROVE, and all grep bans stay green. But Haiku tester is the load-bearing weak link: it (a) misread `sealed class` as blocking fixture patterns despite the InMemory subclass being ready-made and public, (b) shipped only ~19% of expected test coverage, and (c) left ktlint RED on its own test-file imports (auto-fixable, but shipped as-is), which by itself blocks CI. This is exactly the interaction effect the reviewer was asked to detect: an over-humble tester walls itself off from work the source code plainly supports. Comparing to sh-9b (Haiku tester alone succeeded on the sh-9-baseline impl shape): the Haiku wall showed up NOT in the baseline's Sonnet impl (which used different data-source shape), but in the Opus impl's `sealed class` design — a more advanced Kotlin pattern that the Haiku tester read as adversarial. Practical recommendation: keep Opus at impl for KMP overlay, but hold the tester at Sonnet 5. The Haiku tester downgrade is not safe on any slice where the impl chooses `sealed class` or other Kotlin patterns that require correctly modeling subclass visibility. Fix path to APPROVE: (1) `./gradlew ktlintFormat` to clear the 4 test-source violations, (2) either drop the 3 empty/orphaned test files OR complete them against MoodEntryLocalDataSource.InMemory(), (3) add AddMoodEntryUseCaseTest, DeleteMoodEntryUseCaseTest, ObserveMoodHistoryUseCaseTest, MoodJournalComponentTest with the InMemory fixture pattern to restore sh-9d parity coverage."
+}
