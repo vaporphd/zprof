@@ -1,0 +1,79 @@
+{
+  "run": "sh-ios-prod",
+  "role_tested": "xcode-runner",
+  "model": "haiku",
+  "timestamp": "2026-07-20T19:30:48Z",
+  "build": "green",
+  "test": "58/59 passing",
+  "lint": "1 violation (source), 24 generated",
+  "format": "115 violations",
+  "xcodebuild_app": "skipped",
+  "actionable_next": "fix_streak_invariant",
+  "notes": "Streak invariant test failing; biconditional not fully enforced in init(from:). Build and most tests green. Formatting needs pass.",
+  "detailed_results": {
+    "swift_build": {
+      "status": "pass",
+      "warnings": 0,
+      "errors": 0,
+      "packages": ["CoreModel", "FeatureMoodJournal", "AppCore"],
+      "duration_seconds": 0
+    },
+    "swift_test": {
+      "status": "fail",
+      "total_tests": 59,
+      "passing": 58,
+      "failing": 1,
+      "failing_test_name": "decode — zero/zero streak with a non-nil lastLoggedDay throws dataCorrupted",
+      "failing_test_location": "Packages/CoreModel/Tests/CoreModelTests/StreakTests.swift:139",
+      "issue_type": "invariant_violation",
+      "critical": true
+    },
+    "swiftlint": {
+      "status": "pass",
+      "violations_source": 1,
+      "violations_generated": 24,
+      "violations_total": 25,
+      "severity": "info",
+      "source_violations": [
+        {
+          "file": "Packages/CoreModel/Tests/CoreModelTests/MoodEntryTests.swift",
+          "line": 56,
+          "rule": "line_length",
+          "message": "Line should be 120 characters or less; currently it has 137 characters"
+        }
+      ]
+    },
+    "swiftformat": {
+      "status": "fail",
+      "violations": 115,
+      "categories": {
+        "import_sorting": 12,
+        "documentation_comments": 56,
+        "force_unwrap_in_tests": 2,
+        "swift_testing_syntax": 4,
+        "redundant_attributes": 4,
+        "other": 37
+      },
+      "auto_fixable": true,
+      "fix_command": "swiftformat --write Sources/ Packages/"
+    },
+    "xcodebuild": {
+      "status": "skipped",
+      "reason": "setup_requirement",
+      "blocking_issue": "requires_development_team_signing",
+      "note": "Project resolves and dependency graph computes correctly"
+    }
+  },
+  "recommendations": {
+    "critical": [
+      "Fix Streak invariant: enforce (current==0 && longest==0) => lastLoggedDay==nil in init(from:)"
+    ],
+    "high_priority": [
+      "Wrap line 56 in MoodEntryTests.swift under 120 chars",
+      "Run swiftformat --write to normalize 115 format violations"
+    ],
+    "low_priority": [
+      "Migrate 2 force-unwraps to #require() macro pattern"
+    ]
+  }
+}
