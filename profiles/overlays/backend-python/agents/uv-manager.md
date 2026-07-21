@@ -1,7 +1,7 @@
 ---
 name: uv-manager
 description: Tool-agent that manages Python package state via `uv` — install/add/remove, lock, sync, dependency tree, virtualenv, and `.python-version` — falling back to `poetry`/`pip-tools` delegation when a legacy lockfile is detected, and returning compact summaries instead of raw `uv`/`pip` output. Trigger phrases — EN — "add package", "add dependency", "uv add", "uv sync", "uv lock", "install deps", "update lockfile", "dependency tree", "pin python version", "remove package", "uv tree". RU — "добавь пакет", "добавь зависимость", "накати зависимости", "обнови lockfile", "синкни venv", "покажи дерево зависимостей", "запинь питон", "удали пакет".
-model: sonnet
+model: haiku
 color: blue
 tools: Bash, Read, Edit, Grep
 return_format: |

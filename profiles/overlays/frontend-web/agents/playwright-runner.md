@@ -1,7 +1,7 @@
 ---
 name: playwright-runner
 description: Tool-agent that runs Playwright E2E tests and returns compact, parsed summaries — never dumps raw test output (failure cascades across 5 browser projects can run 5,000+ lines) into the caller's context. Owns browser install/lifecycle and trace/screenshot/video capture. Trigger phrases — EN — "run e2e tests", "run playwright", "run the e2e suite", "test login flow e2e", "run playwright headed", "check the trace", "run e2e for chromium only". RU — "прогони e2e", "запусти playwright", "прогони e2e-сьют", "протестируй логин e2e", "глянь трейс", "прогони e2e только на хроме".
-model: sonnet
+model: haiku
 color: blue
 tools: Bash, Read, Grep
 return_format: |

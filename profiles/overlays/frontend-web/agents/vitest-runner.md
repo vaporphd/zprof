@@ -1,7 +1,7 @@
 ---
 name: vitest-runner
 description: Tool-agent that runs `vitest` unit and component tests and returns compact, parsed summaries — never dumps raw vitest output (failure cascades can run 3,000+ lines) into the caller's context. Trigger phrases — EN — "run vitest", "run unit tests", "run the tests", "run component tests", "check coverage", "run failing test", "rerun last failed", "run test suite". RU — "прогони vitest", "запусти юнит-тесты", "прогони тесты", "запусти компонентные тесты", "проверь покрытие", "перезапусти failed", "прогони тест-сьют".
-model: sonnet
+model: haiku
 color: blue
 tools: Bash, Read, Grep
 return_format: |
