@@ -403,10 +403,11 @@ successfully exercised the full loop:
 
 ## 6. Follow-ups
 
-- **Re-run variants C/D/E/G in an environment with real subagent
-  dispatch** to upgrade their verdicts from "inherited" to "empirical".
-  Ideal: workflow harness that exposes the `Task` tool to the driver
-  subagent (this session's workflow did not).
+- ~~**Re-run variants C/D/E/G in an environment with real subagent
+  dispatch** to upgrade their verdicts from "inherited" to "empirical".~~
+  **DONE 2026-07-21 evening** — see §7 empirical upgrades below. Main
+  session dispatched general-purpose agents with `model` param override
+  (Agent tool exposes this even when Workflow harness does not).
 - **Extend scope to issue #d–#f** (Ktor routes + Exposed persistence +
   MoodJournalIT against Testcontainers Postgres) to validate H-JVM-premium
   meaningfully. Issue #a's pure-domain scope is too easy to see a
@@ -421,4 +422,234 @@ successfully exercised the full loop:
   memory entry documenting this shakedown's caveats + real findings
   (H-JVM-1 rejected, new signature #5, overlay contract gaps).
 - **Delete disposable GitHub repo** once RESULTS is stable:
-  `gh repo delete vaporphd/zprof-shakedown-ktjvm-2026-07-21 --yes`.
+  `gh repo delete vaporphd/zprof-shakedown-ktjvm-2026-07-21 --yes`
+  (requires `delete_repo` scope — run `gh auth refresh -h github.com -s delete_repo`
+  first if the current token lacks it).
+
+## 7. Empirical upgrades (2026-07-21 evening — real Agent-tool dispatch)
+
+Main session re-ran Variants C/D/E/G with real subagent dispatch via the
+Agent tool (`subagent_type: general-purpose` + `model` param override).
+The `-real` host suffix distinguishes these from the inline workflow
+runs. Every claim independently verified via `git status`, `gradle`
+re-run, and grep — no fabrication.
+
+### Variant C-real — Haiku init-kotlin-jvm
+
+**Verdict: PASSED empirically. Contradicts pyweb H3 inheritance.**
+
+- 14 files created cleanly at `/Volumes/mydata/zprof-test-ktjvm-C-real/`.
+- `./gradlew build` — BUILD SUCCESSFUL in 2s.
+- HelloTest passes (1 test / 0 failures).
+- All 4 §4 boundary scanners at 0: no fabricated dep versions (all
+  pinned versions verified against Maven Central), no wrong plugin
+  coordinates, no missing subproject includes, no malformed
+  `libs.versions.toml` alias references.
+- Zero preamble leakage (schema-conformant JSON returned).
+- Multi-module wiring correct: `settings.gradle.kts` `include(...)`
+  matches actual `core-model/`, `api-server/`, `runner/` directories.
+- `integrationTest` source set registered correctly on `api-server`
+  with proper configuration inheritance from root `subprojects { }`.
+
+**H-JVM-init verdict UPGRADE**: from `INHERITED-REJECTED` to
+**PARTIAL-VALIDATED** (n=1 empirical pass on Kotlin JVM scaffolding).
+The pyweb Haiku init-fastapi bug (`[project.optional-dependencies]`
+Python-packaging idiom foot-gun) did NOT port to the Kotlin JVM
+equivalent (`libs.versions.toml` + subproject wiring). Scaffolding
+appears to be a template-heavy surface Haiku handles competently on
+this stack.
+
+**But do NOT downgrade default to Haiku yet**:
+- n=1 is very small statistical basis
+- Haiku signature #5 (fabrication) remains a risk — one pass proving
+  correct output doesn't mean subsequent passes won't fabricate
+- The cost of keeping `sonnet` default is trivial (init runs once per
+  project)
+- Reserve Haiku for repeat/pattern scaffolds after ≥3 independent
+  passes validate
+
+### Variant D-real — Haiku tester
+
+**Verdict: PASSED empirically. Genuine competence at pure-domain test writing.**
+
+- 98 tests written across 4 test classes (DayKeyTest 31, MoodValueTest
+  20, MoodNoteTest 20, MoodErrorTest 27).
+- `./gradlew :core-model:test` — all 98 passing.
+- Independent verification (grep + Read on the actual test files):
+  - Zero `!!` in Haiku's test files (baseline HelloTest.kt uses
+    backtick DSL naming but Haiku's own tests use JUnit5
+    `methodName_condition_expectedResult` convention consistently).
+  - Zero empty `catch { }` blocks.
+  - Zero `Thread.sleep`.
+  - Consistent AAA structure with inline `// Arrange` / `// Act` /
+    `// Assert` markers.
+- **CRITICAL spec-adherence check**: FEATURE-SPEC §1.2 mandates
+  `MoodNote.of` round-trip preserves pre-strip text exactly. Haiku
+  wrote `moodNoteOf_leadingTrailingWhitespace_succeeds` with the
+  assertion `note.raw shouldBe "  hello world  "` (with surrounding
+  spaces intact). If the baseline impl were buggy (stored trimmed
+  value — the Variant B failure mode), this test would fail. It
+  passes → impl is correct AND Haiku tester correctly encoded the
+  spec invariant, not the implementation.
+
+Caveat on return format: Haiku returned a Markdown prose summary
+instead of the requested JSON schema — subtle preamble violation
+(~200 words before/around the metrics vs the expected JSON block).
+Content was accurate, format wasn't. **New micro-signature**: Haiku
+sometimes reformats the requested return schema into a "friendly
+narrative" — the CONTENT is correct but the CONTRACT is loosened.
+Caller must reject non-schema returns to enforce the contract.
+
+**H-JVM-tester verdict UPGRADE**: from `UNMEASURED` to
+**PARTIAL-VALIDATED at issue #a scope**. Haiku tester wrote 98
+correct, non-fabricated, spec-conforming tests including the critical
+biconditional-adjacent pre-strip preservation check.
+
+**But do NOT downgrade default to Haiku yet**:
+- Scope was pure-domain tests (data classes, value classes,
+  enums, sealed hierarchies). Complex tests not exercised: Ktor
+  `testApplication { }`, Testcontainers IT, MockK-heavy Repository
+  collaborator tests, Turbine Flow assertions.
+- Return-format contract violation shows the "friendly narrative"
+  regression risk — cost of keeping sonnet is a stricter contract.
+
+### Variant E-real — Sonnet architect
+
+**Verdict: CONFIRMED empirically. Sonnet architect produces implementable ADRs.**
+
+- Two ADRs written: `docs/adr/0001-record-architecture-decisions.md`
+  (Nygard bootstrap) + `docs/adr/0002-choose-exposed-over-jooq.md` (4
+  alternatives: Exposed 0.55.0 / jOOQ 3.19.15 / Ktorm 4.1.1 / raw JDBC).
+- Every alternative pinned to exact version — no "latest"/"current"
+  vague phrasing.
+- Empirical validation citation present in ADR-0002 Context (verified
+  Maven Central 200 for `exposed-core:0.55.0`).
+- 6 grep patterns listed in Consequences for reviewer drift detection.
+- `docs/PROJECT_SPEC.md § Decisions Log` updated with link.
+- Zero fabricated pins (5 raw hits on "latest/current/recent" keyword
+  grep were false positives on inspection: one explicit negation, four
+  contextual — "current shakedown approach" etc. Sonnet self-audited
+  these in `notes`).
+- **Genuine tradeoff surprise flagged**: jOOQ's Postgres support is
+  actually OSS/free (commercial license only gates closed-source
+  dialects like Oracle/DB2). The real Exposed-vs-jOOQ tradeoff isn't
+  licensing but jOOQ's code-gen-needs-live-migrated-DB requirement,
+  which collides with the spec's `SchemaUtils.create()`-at-startup
+  shortcut. Sonnet reasoned to this crux instead of parroting the
+  common "jOOQ costs money" misconception.
+- **Non-obvious API seam flagged**: `exposed-java-time` module works
+  with `java.time.Instant` while `core-model` domain uses
+  `kotlinx.datetime.Instant`. Mapper layer carries a real conversion
+  responsibility — flagged as Negative consequence + cross-referenced
+  in Open Questions.
+- Left three items genuinely open (migration tool choice, whether to
+  centralize the Instant conversion, DAO vs DSL mode) rather than
+  fabricating decisions — per the no-TODO/mark-Proposed-with-open-
+  questions rule.
+
+**H-JVM-arch verdict UPGRADE**: from `UNMEASURED` to
+**CONFIRMED empirically**. Sonnet architect at least on this domain +
+this decision space produces high-quality tradeoff analysis with
+genuine domain reasoning.
+
+**Recommendation**: Sonnet architect is safe — but the baseline `opus`
+default remains recommended because architectural decisions have
+long-tail risk (a bad ADR compounds over months). The `sonnet`
+Variant E did NOT fabricate on this problem; whether it would on a
+harder problem (e.g., multi-cross-cutting concerns, distributed
+systems architecture) is untested. Keep opus as the SAFETY floor;
+route architect to sonnet only for well-scoped ADRs where the search
+space is bounded (like "pick a persistence library").
+
+### Variant G-real — Haiku gradle-runner
+
+**Verdict: PASSED empirically. Adaptive recovery on invalid config observed.**
+
+- 4 Gradle invocations exercised (`--version`, `projects`,
+  `:core-model:build test ktlintCheck`, `dependencies`).
+- All correctly parsed into compact summaries per the runner's own §3
+  output truncation strategy.
+- All logs saved to `/tmp/gradle-*-<ts>.log` with paths referenced
+  in returns.
+- Zero raw log dumps in reply (44.7 KB dep tree correctly truncated
+  by-reference).
+- All 5 boundary scanners at 0: no raw log dump, no invented task
+  names, no clean run without ask, no missing `--console=plain`, no
+  wrong verdict classification.
+- **Adaptive recovery**: initial invocation 4
+  (`./gradlew dependencies --configuration runtimeClasspath`) failed
+  because that configuration only exists on subprojects, not the root.
+  Haiku CORRECTLY narrowed to `:core-model:dependencies` and retried —
+  reported both attempts + the correction in notes rather than
+  fabricating success. This is exactly the behavior the runner's
+  `first_error` field is designed for.
+
+**H-JVM-tools verdict UPGRADE**: from `INHERITED-MIXED` to
+**PARTIAL-VALIDATED at moderate output surface**. Haiku gradle-runner
+correctly parses simple-to-moderate Gradle outputs AND adapts to
+configuration errors without fabricating.
+
+**But do NOT downgrade default to Haiku yet**:
+- Output surfaces tested were mostly happy-path (BUILD SUCCESSFUL).
+- The scary case — parsing a red integrationTest run with
+  Testcontainers container-log noise + Ktor server startup errors +
+  100+ line assertion failure stacks — is where the pyweb tools-haiku
+  MIXED finding originated, and this shakedown did NOT exercise it.
+- Keep sonnet default as safety for red-output parsing. Reserve
+  Haiku for green/simple runs (linter checks, dep queries) after
+  further validation.
+
+### Summary of empirical upgrades
+
+| Hypothesis      | Prior verdict     | Upgraded verdict          | Evidence source                    |
+|-----------------|-------------------|---------------------------|------------------------------------|
+| H-JVM-1         | REJECTED (Variant B) | REJECTED (unchanged)  | Workflow B; still stack-independent |
+| H-JVM-init      | INHERITED-REJECTED | **PARTIAL-VALIDATED (n=1)** | C-real real Haiku dispatch |
+| H-JVM-tester    | UNMEASURED         | **PARTIAL-VALIDATED (n=1 domain scope)** | D-real, 98 tests, spec-conforming |
+| H-JVM-arch      | UNMEASURED         | **CONFIRMED**             | E-real, real Sonnet, genuine reasoning |
+| H-JVM-premium   | PARTIAL            | PARTIAL (unchanged)       | F was inline; not re-run          |
+| H-JVM-tools     | INHERITED-MIXED    | **PARTIAL-VALIDATED (moderate surface)** | G-real, adaptive recovery |
+
+### Tier map: recommendation UNCHANGED after upgrades
+
+Despite four empirical upgrades in Haiku's favor, the shipped tier
+map (implementer/tester/init/gradle-runner all `sonnet`, ktlint-checker
+`haiku`) stays as-is because:
+
+1. **Fabrication risk (Signature #5) is documented and empirical** —
+   the Variant B failure was catastrophic and non-greppable. One
+   variant proving Haiku CAN produce correct output doesn't invalidate
+   the observation that Haiku CAN also silently fabricate.
+2. **n=1 per empirical variant** — statistical basis is thin. Three
+   independent passes per (agent, tier) would be the minimum before
+   a downgrade recommendation.
+3. **Scope was small** — issue #a is pure domain. Complex work
+   (integration, mocking-heavy tests, red-output parsing) is where
+   Haiku's tier-viability line traditionally shows.
+4. **Cost of sonnet default is small** — token differential vs the
+   compounding cost of a Haiku fabrication that lands in production
+   is not close.
+
+**Consider Haiku downgrade after** collecting 3+ additional empirical
+passes on each agent + validating on issue #d–#f scope (Ktor routes +
+Exposed + Testcontainers). Until then, `sonnet` floor stands.
+
+### New micro-signature #6: return-format schema drift
+
+Variant D-real (Haiku tester) returned Markdown prose instead of the
+requested JSON schema. Content was accurate; format was loose. This is
+NOT a fabrication (no fake claims), but IS a contract violation:
+downstream automated aggregation expects the schema. **Micro-signature**
+— Haiku sometimes reformats the requested return schema into a
+"friendly narrative" summary when the content is correct-but-substantial.
+Detection: parse the return; reject non-schema; re-request with stricter
+instruction. Now noted in the [[haiku-shortcut-signatures]] memory
+alongside #5.
+
+### Process-side updates
+
+- The `-real` variant hosts are at `/Volumes/mydata/zprof-test-ktjvm-{C,D,E}-real/`
+  and can be inspected for the actual generated artifacts. Variant G
+  ran against the baseline dir (no separate `-real` for G).
+- No PRs were opened for `-real` variants (scope was code-side only —
+  full process pipeline was baseline's responsibility).
