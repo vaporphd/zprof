@@ -1,0 +1,39 @@
+name: backend-kotlin-jvm
+display_name: "Kotlin JVM backend / library (Gradle multi-module, JUnit5 + Kotest, ktlint)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+
+# Server-side / library / CLI Kotlin on the JVM. Single-target — no KMP source-set
+# graph, no expect/actual, no Android, no iOS. If the project is Compose MP or
+# Kotlin/Native, use kotlin-multiplatform instead. If the project is Spring Boot
+# server-side, this overlay works as-is (Ktor/Spring/plain-Gradle all covered);
+# a dedicated kotlin-spring-boot overlay may layer specific idioms on top later.
+#
+# Baseline assumptions the agents encode:
+#   Kotlin 2.0.20+ / JDK 21 toolchain
+#   Gradle 8.9+ / Kotlin DSL (build.gradle.kts + settings.gradle.kts)
+#   JUnit5 (Jupiter) + Kotest-assertions-core (kotest DSL for assertions only)
+#   MockK 1.13.x for Kotlin mocking (MockK is JVM-only — safe here, unlike KMP)
+#   Turbine 1.1.0 for Flow assertions when coroutines are in scope
+#   ktlint 12.x via jlleitschuh/ktlint-gradle plugin
+#   detekt OPTIONAL — enabled only if the project already applies it
+#   Optional integrationTest source set (per-project — the overlay supports it
+#   but does not require it; if present, exercised via ./gradlew integrationTest)
+#
+# The 7 role agents mirror the kmp/ios lineup so a caller who moves between
+# stacks finds the same slots. Tool-agents are the JVM-specific runners.
+
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+
+tool_agents:
+  - gradle-runner
+  - ktlint-checker
+  - init-kotlin-jvm

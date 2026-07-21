@@ -1,0 +1,19 @@
+name: issue-loop-github-strict
+detect:
+  # Process-only overlay — does not detect from a stack file. Detects the
+  # GitHub-driven convention: gh CLI usable + a repo with GitHub remote + the
+  # project's PROJECT_SPEC.md/AGENT_LOOP.md/CLAUDE.md convention that this
+  # overlay's pipeline extends. Detection is deliberately weak — this overlay
+  # is applied via explicit user intent (composite `zprof apply <stack> issue-loop-github-strict`),
+  # not by auto-detection.
+  any_file:
+    - "AGENT_LOOP.md"
+    - "docs/PROJECT_SPEC.md"
+    - "tasks/todo.md"
+    - "followup.md"
+  any_regex:
+    - path: "CLAUDE.md"
+      match: "ISSUE_TRACKER:\\s*GitHub|AUTO_MERGE|MERGE_GATE|INTEGRATION_SCOPE"
+    - path: "AGENT_LOOP.md"
+      match: "plan-reviewer|pr-shepherd|integration-tester|spec-maintainer"
+  confidence: medium

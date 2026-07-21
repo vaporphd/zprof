@@ -1,0 +1,54 @@
+name: issue-loop-github-strict
+display_name: "GitHub issue-driven PR pipeline (planner → gates → integration-tester → wiki → reviewer → pr-shepherd)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+
+# Process-only overlay. Language- and stack-agnostic — layers on top of any
+# stack overlay (backend-kotlin-jvm, backend-python, systems-rust, ...). Wires
+# the strict issue-driven pipeline extracted from the hft_moex reference
+# project (see docs/reviews/*-eval/ for the empirical validation methodology).
+#
+# The pipeline:
+#   backlog empty  → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR, gh issue create)
+#   issue picked   → main-session dispatches architect (if ADR-trigger=yes) → implementer
+#   PR opened      → integration-gate (if in <INTEGRATION_SCOPE>) → wiki-keeper → reviewer
+#   approved       → pr-shepherd (if AUTO_MERGE=on) → merge, delete branch, stamp
+#   post-merge     → spec-maintainer, docs-writer
+#
+# Base overlay already carries the upstream gates as agents/gates/:
+#   - north-star-auditor (before dispatch — does this task move the project forward?)
+#   - plan-reviewer (after planner DRAFT — is the decomposition sane?)
+#   - evidence-auditor (before quantitative conclusion — is the number real?)
+# This overlay does NOT redefine them; it references them by name in handoffs.
+#
+# Configuration the pipeline reads from the project's docs/PROJECT_SPEC.md or
+# CLAUDE.md (each project owns these values):
+#   DEFAULT_BRANCH       — e.g. "main"
+#   INTEGRATION_SCOPE    — files/paths whose PRs must exercise the real gate
+#   INTEGRATION_GATE     — the exact command that runs the real-system gate
+#                          (e.g. "./gradlew integrationTest", "pytest tests/integration/",
+#                           "cargo test --test integration")
+#   BUILD_CMD / TEST_CMD / LINT_CMD / FORMAT_CMD
+#   MERGE_GATE           — "local-green" (local hooks are the gate) | "CI-green"
+#   AUTO_MERGE           — "on" (pr-shepherd auto-merges approved+green) | "off"
+#   ISSUE_TRACKER        — "GitHub (gh CLI)" (this overlay assumes gh; a GitLab
+#                          variant would be a separate overlay)
+#   TYPE_LABELS          — e.g. feat, fix, refactor, docs, chore, test, perf
+#   AREA_LABELS          — project-specific bounded contexts
+#   MILESTONES           — the milestone list this planner grooms toward
+#
+# This overlay has NO stack-specific ktlint/ruff/gofmt/cargo dependencies — the
+# language-side tools live in the stack overlay (backend-kotlin-jvm etc.), and
+# integration-gate.md accepts INTEGRATION_GATE as a parameterized command.
+
+roles: []                    # this overlay is process-only — no code-writing roles
+
+tool_agents:
+  - planner
+  - spec-maintainer
+  - wiki-keeper
+  - docs-writer
+  - ci-devops
+  - pr-shepherd
+  - integration-gate

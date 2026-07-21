@@ -1,0 +1,21 @@
+name: backend-kotlin-jvm
+detect:
+  any_file:
+    - "build.gradle.kts"
+    - "settings.gradle.kts"
+    - "gradle/libs.versions.toml"
+    - "gradlew"
+  any_regex:
+    # Kotlin JVM plugin — NOT multiplatform. Presence of `kotlin("multiplatform")`
+    # in any build.gradle.kts pushes the caller toward kotlin-multiplatform instead.
+    - path: "build.gradle.kts"
+      match: "kotlin\\(\"jvm\"\\)|id\\(\"org\\.jetbrains\\.kotlin\\.jvm\"\\)"
+    - path: "gradle/libs.versions.toml"
+      match: "kotlin\\s*=|junit-jupiter|kotest|mockk"
+  exclude_regex:
+    # If the project is KMP, use the kotlin-multiplatform overlay, not this one.
+    - path: "build.gradle.kts"
+      match: "kotlin\\(\"multiplatform\"\\)"
+    - path: "shared/build.gradle.kts"
+      match: "kotlin\\(\"multiplatform\"\\)"
+  confidence: high
