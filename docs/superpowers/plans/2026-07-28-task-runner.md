@@ -10,6 +10,8 @@
 
 **Спека:** `docs/superpowers/specs/2026-07-28-task-runner-design.md`
 
+**Исполнение:** задачи 1–7 выполняются сабагентами. Задачи 0 и 8 — ручные: требуют живой интерактивной сессии Claude Code в другом проекте с применённым zprof, сабагенту это недоступно. Их делает Alex.
+
 ## Global Constraints
 
 - **Все коммиты делаются из корня репозитория, в родительский репо `vaporphd/zprof`.** Каталог `profiles/` содержит `.git` — пустой клон `vaporphd/zprof-profiles` без единого коммита. Содержимое `profiles/` трекается родительским репо (174 файла). Команда `cd profiles && git commit` отправит работу в репозиторий-призрак. Никогда не выполняй git-команды с `-C profiles` или из этого каталога.
@@ -28,6 +30,7 @@
 
 | Путь | Ответственность |
 |---|---|
+| `cli/internal/agents/retired.go` | Единственный источник правды: имена агентов, которые zprof больше не поставляет |
 | `cli/internal/apply/prune.go` | Удаление агентов, которых zprof больше не поставляет |
 | `cli/internal/apply/prune_test.go` | Тесты удаления |
 | `cli/testdata/overlays/with-stop-list.yaml` | Фикстура манифеста со `stop_list` |
@@ -95,6 +98,7 @@ git commit -m "docs(reviews): baseline замер main-контекста до t
 Без этого апгрейд оставляет рабочий `dev-orchestrator.md` в `.claude/agents/`, main его дёргает, и утечка сохраняется ровно там, где мы её чиним.
 
 **Files:**
+- Create: `cli/internal/agents/retired.go`
 - Modify: `cli/internal/manifest/project.go:20-27`
 - Create: `cli/internal/apply/prune.go`
 - Create: `cli/internal/apply/prune_test.go`
@@ -102,7 +106,7 @@ git commit -m "docs(reviews): baseline замер main-контекста до t
 
 **Interfaces:**
 - Consumes: `managed.BackupBeforeWrite(path string) (string, error)`, `manifest.ProjectManifest`
-- Produces: `apply.PruneOrphanAgents(agentDir string, previous, current []string) ([]string, error)`; поле `ProjectManifest.ManagedAgents []string`; поле `ApplyResult.RemovedAgents []string`
+- Produces: `agents.Retired []string` (потребляется также Task 7); `apply.PruneOrphanAgents(agentDir string, previous, current []string) ([]string, error)`; поле `ProjectManifest.ManagedAgents []string`; поле `ApplyResult.RemovedAgents []string`
 
 - [ ] **Step 1: Написать падающий тест**
 
@@ -196,7 +200,27 @@ func TestPruneSkipsMissingFile(t *testing.T) {
 Run: `cd cli && go test ./internal/apply/ -run TestPrune -v`
 Expected: FAIL — `undefined: PruneOrphanAgents`
 
-- [ ] **Step 3: Реализовать `PruneOrphanAgents`**
+- [ ] **Step 3: Создать общий пакет с упразднёнными именами**
+
+Список нужен двум пакетам — `apply` (удаляет файлы) и `doctor` (диагностирует уцелевшие). Две копии разъедутся, поэтому источник один.
+
+Создай `cli/internal/agents/retired.go`:
+
+```go
+// Package agents holds facts about zprof's agent roster that more than one
+// subsystem needs to agree on.
+package agents
+
+// Retired lists agent names zprof shipped in earlier versions and has since
+// removed. They were never user-authored, so `apply` prunes them even in
+// projects applied before `managed_agents` existed — there the tracking
+// list is empty and the general orphan rule can never fire, which would
+// leave a working dev-orchestrator behind for main to dispatch, preserving
+// the exact leak this change closes. `doctor` reports any that survive.
+var Retired = []string{"dev-orchestrator", "exploratory-orchestrator"}
+```
+
+- [ ] **Step 3.5: Реализовать `PruneOrphanAgents`**
 
 Создай `cli/internal/apply/prune.go`:
 
@@ -207,15 +231,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/vaporphd/zprof/internal/agents"
 	"github.com/vaporphd/zprof/internal/managed"
 )
-
-// retiredAgents are agent names zprof shipped in earlier versions and has
-// since removed. They were never user-authored, so they are pruned even in
-// projects applied before managed_agents existed — there the tracking list
-// is empty and the general rule below can never fire, which would leave a
-// working dev-orchestrator behind for main to dispatch.
-var retiredAgents = []string{"dev-orchestrator", "exploratory-orchestrator"}
 
 // PruneOrphanAgents removes agent files zprof wrote on a previous apply
 // that the current sources no longer provide. `previous` is the
@@ -230,7 +248,7 @@ func PruneOrphanAgents(agentDir string, previous, current []string) ([]string, e
 
 	seen := map[string]bool{}
 	var doomed []string
-	for _, n := range append(append([]string(nil), previous...), retiredAgents...) {
+	for _, n := range append(append([]string(nil), previous...), agents.Retired...) {
 		if n == "" || live[n] || seen[n] {
 			continue
 		}
@@ -308,7 +326,9 @@ Expected: PASS. Если `engine_test.go` или `e2e_test.go` сравнива�
 - [ ] **Step 8: Commit**
 
 ```bash
-git add cli/internal/apply/prune.go cli/internal/apply/prune_test.go cli/internal/apply/engine.go cli/internal/manifest/project.go
+git add cli/internal/agents/retired.go cli/internal/apply/prune.go \
+        cli/internal/apply/prune_test.go cli/internal/apply/engine.go \
+        cli/internal/manifest/project.go
 git commit -m "feat(apply): удалять осиротевших агентов через managed_agents"
 ```
 
@@ -1110,12 +1130,16 @@ Expected: PASS
 
 - [ ] **Step 5: Прогнать apply на временном проекте**
 
+Пути берутся от корня репозитория, а не хардкодятся — иначе проверка легко уедет на чужой чекаут и даст ложный зелёный.
+
 ```bash
-cd cli && make build
+REPO=$(git rev-parse --show-toplevel)
+(cd "$REPO/cli" && make build)
 TMP=$(mktemp -d) && cd "$TMP" && git init -q
-ZPROF_REPO=/Volumes/mydata/projects/zprof/profiles /Volumes/mydata/projects/zprof/cli/bin/zprof apply ios-swift
+ZPROF_REPO="$REPO/profiles" "$REPO/cli/bin/zprof" apply ios-swift
 grep -A 12 "block=stop-list" CLAUDE.md
-ls .claude/agents/ | grep -c orchestrator || echo "оркестраторов нет — верно"
+ls .claude/agents/task-runner.md
+ls .claude/agents/ | grep orchestrator && echo "ОШИБКА: оркестратор остался" || echo "оркестраторов нет — верно"
 ```
 
 Expected: блок `stop-list` содержит и базовые строки, и iOS-специфичные; оркестраторов в `.claude/agents/` нет; `task-runner.md` есть.
@@ -1137,8 +1161,10 @@ git commit -m "feat(overlays): стоп-листы во всех девяти ov
 - Modify: `cli/internal/doctor/diagnostics_test.go`
 
 **Interfaces:**
-- Consumes: `manifest.ProjectManifest.Overlays`, `OverlayManifest.StopList` (Task 2)
+- Consumes: `manifest.ProjectManifest.Overlays`, `OverlayManifest.StopList` (Task 2), `agents.Retired` (Task 1)
 - Produces: `checkTaskRunner(projectDir string) []Issue`, `checkStopLists(overlays []string, repoDir string) []Issue`, `checkRunLogs(projectDir string) []Issue`
+
+Добавь `"github.com/vaporphd/zprof/internal/agents"` в импорты `diagnostics.go`. Список упразднённых имён живёт там — своей копии в `doctor` быть не должно.
 
 - [ ] **Step 1: Написать падающие тесты**
 
@@ -1211,11 +1237,6 @@ Expected: FAIL — `undefined: checkTaskRunner`
 // doctor suggests cleaning up. There is no automatic retention in v1.
 const runLogWarnThreshold = 50
 
-// retiredAgents mirrors internal/apply.retiredAgents: agents zprof used to
-// ship. One surviving in a project means main can still dispatch it and
-// bypass the task-runner — the exact leak this design closes.
-var retiredAgents = []string{"dev-orchestrator", "exploratory-orchestrator"}
-
 // checkTaskRunner errors when the task-runner agent is absent, or when a
 // retired orchestrator is still present. Both break the isolation
 // contract: without the runner main has nothing to delegate to, and with a
@@ -1234,7 +1255,7 @@ func checkTaskRunner(projectDir string) []Issue {
 			Message: "task-runner.md отсутствует — main'у некому передавать задачи; запусти `zprof sync`",
 		})
 	}
-	for _, name := range retiredAgents {
+	for _, name := range agents.Retired {
 		p := filepath.Join(agentsDir, name+".md")
 		if _, err := os.Stat(p); err == nil {
 			out = append(out, Issue{
@@ -1419,7 +1440,7 @@ git commit -m "docs(reviews): шейкдаун task-runner — замер про
 | `apply/tables.go:150` (fallback `buildExecutingTable`) | Task 4 шаг 3 |
 | `apply/e2e_test.go:62-63` (ассерты на файлы) | Task 4 шаг 3.5 |
 | `eval/scoring.go:17` (`roleGuessRe`) | Task 4 шаг 3.5 |
-| `apply/prune.go` (`retiredAgents`) | намеренно — это и есть список упразднённых |
+| `agents/retired.go` (`Retired`) | намеренно — это и есть список упразднённых, единственный |
 | `eval/parser.go:165`, `eval/scoring.go:12` (комментарии) | косметика, правка не требуется |
 
 **Плейсхолдеры**
