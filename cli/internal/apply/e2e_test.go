@@ -123,14 +123,14 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	// content, none of the workflow's own dispatch/trigger content that
 	// used to be inlined via the old loop-template block.
 	loop, _ := os.ReadFile(filepath.Join(proj, "AGENT_LOOP.md"))
-	require.Contains(t, string(loop), "Agent loop router")
-	require.NotContains(t, string(loop), "Dispatch table")
+	require.Contains(t, string(loop), "Контракт main-сессии")
+	require.NotContains(t, string(loop), "Маршруты")
 	require.NotContains(t, string(loop), "Trigger-фразы")
 
 	// Assert workflows/dev-pipeline.md composes the base workflow content
 	// (base/workflows/dev-pipeline.md) plus the ios-swift extension.
 	wf, _ := os.ReadFile(filepath.Join(proj, "workflows", "dev-pipeline.md"))
-	require.Contains(t, string(wf), "Dispatch table")
+	require.Contains(t, string(wf), "Маршруты")
 	require.Contains(t, string(wf), "<!-- zprof:begin overlay=ios-swift block=workflow-extension -->")
 }
 
