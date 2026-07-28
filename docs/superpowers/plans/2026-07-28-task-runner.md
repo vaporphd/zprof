@@ -1140,6 +1140,27 @@ stop_list:
 Run: `grep -rn "main" profiles/overlays/*/loop.md`
 Expected после правки: только упоминания в контексте trigger-фраз и веток git (`main branch`), ни одного «main дёргает/диспатчит/читает».
 
+- [ ] **Step 3.5: Вычистить упоминания оркестратора из промптов overlay-агентов**
+
+После Task 4 обоих оркестраторов не существует, но 49 файлов в восьми overlay'ях всё ещё адресуют вывод «оркестратору» — например в `profiles/overlays/ios-swift/agents/implementer.md`:
+
+```
+Anything the orchestrator needs to know goes in `one_line:` or in an ADR/report file.
+```
+
+Найди все вхождения:
+
+Run: `grep -rn "orchestrator" profiles/overlays/`
+
+Замени каждое **осмысленно**, а не механически:
+
+- Речь про того, кто диспатчил агента и читает его схему → `task-runner`. Пример выше становится `Anything task-runner needs to know goes in ...`.
+- Речь про пример того, чего писать НЕ надо (строки вида `no postscript ("Notes for parent orchestrator: …")`) → это иллюстрация запрещённой преамбулы, а не ссылка на агента. Оставь фразу как есть: она — образец плохого вывода, и её узнаваемость важнее терминологической чистоты.
+
+Не переписывай окружающий текст: меняется только слово, обозначающее адресата.
+
+Ожидаемо после правки: `grep -rn "orchestrator" profiles/overlays/` возвращает только строки-иллюстрации из второго пункта.
+
 - [ ] **Step 4: Проверить, что все манифесты парсятся**
 
 Run: `cd cli && go build ./... && go test ./internal/manifest/ -v`
