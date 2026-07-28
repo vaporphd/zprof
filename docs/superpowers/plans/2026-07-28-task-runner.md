@@ -842,6 +842,7 @@ git commit -m "feat(base): task-runner вместо dev/exploratory оркест
 - Modify: `profiles/base/workflows/dev-pipeline.md` (полная замена)
 - Modify: `profiles/base/workflows/exploratory.md` (полная замена)
 - Modify: `profiles/base/claude-block-base.md`
+- Modify: `profiles/base/agents/evaluator.md:23` — висячая ссылка на удалённого агента
 
 - [ ] **Step 1: Переписать роутер**
 
@@ -986,6 +987,22 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 Прогресс задачи живёт в `.zprof/runs/<id>.md` — читай хвост по запросу, не
 весь файл.
 ```
+
+- [ ] **Step 4.5: Починить висячую ссылку в evaluator.md**
+
+`profiles/base/agents/evaluator.md:23` перечисляет роли, которые оценивает, и среди них `[[dev-orchestrator]]` — агента, удалённого в Task 4. Замени в этой строке
+
+```
+[[dev-orchestrator]] dispatched most of them and is a legitimate evaluation subject too.
+```
+
+на
+
+```
+[[task-runner]] dispatched most of them and is a legitimate evaluation subject too.
+```
+
+Остальной текст строки не трогай.
 
 - [ ] **Step 5: Проверить, что ссылок на оркестраторов не осталось**
 
