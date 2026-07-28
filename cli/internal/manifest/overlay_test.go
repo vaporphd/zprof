@@ -38,3 +38,18 @@ func TestLoadOverlayEmptyLoopTemplateAllowed(t *testing.T) {
 	require.Equal(t, "base", m.Name)
 	require.Equal(t, "", m.LoopTemplate)
 }
+
+func TestLoadOverlayParsesStopList(t *testing.T) {
+	m, err := LoadOverlay(filepath.Join("..", "..", "testdata", "overlays", "with-stop-list.yaml"))
+	require.NoError(t, err)
+	require.Len(t, m.StopList, 2)
+	require.Equal(t, "загрузка билда в TestFlight или App Store Connect", m.StopList[0])
+}
+
+// Манифест без stop_list грузится без ошибки: пустоту диагностирует
+// zprof doctor, а не парсер — иначе старые overlay'и перестанут читаться.
+func TestLoadOverlayWithoutStopListIsValid(t *testing.T) {
+	m, err := LoadOverlay(filepath.Join("..", "..", "testdata", "overlays", "valid-manifest.yaml"))
+	require.NoError(t, err)
+	require.Empty(t, m.StopList)
+}

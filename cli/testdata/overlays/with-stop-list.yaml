@@ -1,0 +1,7 @@
+name: ios-swift
+display_name: "iOS / Swift"
+version: 0.1.0
+loop_template: dev-pipeline
+stop_list:
+  - "загрузка билда в TestFlight или App Store Connect"
+  - "смена bundle identifier, entitlements, provisioning profile"
