@@ -24,6 +24,12 @@ type ProjectManifest struct {
 	Minimal        bool              `yaml:"minimal"`
 	ModelOverrides map[string]string `yaml:"model_overrides,omitempty"`
 	AgentOverrides map[string]string `yaml:"agent_overrides,omitempty"`
+
+	// ManagedAgents lists the agent names zprof itself wrote on the last
+	// apply. Names present here but absent from the current sources are
+	// orphans from an earlier profile version and get pruned on the next
+	// apply; anything not listed is user-authored and never touched.
+	ManagedAgents []string `yaml:"managed_agents,omitempty"`
 }
 
 // LoadProject reads and parses a project manifest (.zprof.yaml) at path.
