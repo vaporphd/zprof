@@ -14,7 +14,12 @@ import (
 // mood feature", "Reviewer — MoodJournalInterface"). We accept a known
 // role token anywhere in the description matched as a word — the first
 // match wins. Non-matches bucket to "other" — useful signal in itself.
-var roleGuessRe = regexp.MustCompile(`(?i)\b(architect|implementer|tester|reviewer|bug[- ]?hunter|refactor(?:-agent)?|explorer|planner|task[- ]?runner|dev[- ]?orchestrator|exploratory[- ]?orchestrator|docs[- ]?writer|xcodegen[- ]?driver|xcode[- ]?runner|spm[- ]?manager|swiftlint[- ]?checker|simulator[- ]?driver|testflight[- ]?shipper|evaluator)\b`)
+// The exploratory chain (intake → unpacker → explorer → hypothesizer →
+// verifier → report-writer) is listed too — those dispatches used to bucket
+// to "other" and made RE sessions unreadable. Retired tokens
+// (dev-orchestrator, exploratory-orchestrator) stay: `zprof eval` reads
+// archived session logs from before the task-runner migration.
+var roleGuessRe = regexp.MustCompile(`(?i)\b(architect|implementer|tester|reviewer|bug[- ]?hunter|refactor(?:-agent)?|explorer|planner|task[- ]?runner|dev[- ]?orchestrator|exploratory[- ]?orchestrator|docs[- ]?writer|intake|unpacker|hypothesizer|verifier|report[- ]?writer|xcodegen[- ]?driver|xcode[- ]?runner|spm[- ]?manager|swiftlint[- ]?checker|simulator[- ]?driver|testflight[- ]?shipper|evaluator)\b`)
 
 // GuessRole extracts the role bucket for a dispatch. Descriptions are
 // author-chosen — we look for the first known role token anywhere in the
@@ -76,6 +81,12 @@ type Violation struct {
 
 // knownRoles are the role tokens we accept as `next:` targets. Anything else
 // is flagged as "next-unreachable" — including free-form typos.
+//
+// The set must cover every target the shipped profiles actually emit,
+// otherwise a contract-compliant handoff scores as a violation and
+// "Compliance without violations" becomes unreachable on projects using the
+// issue-loop-github-strict or re-macho overlays. Verified against
+// `grep -r '^ *next:' profiles/`.
 var knownRoles = map[string]bool{
 	"architect": true, "implementer": true, "tester": true, "reviewer": true,
 	"bug-hunter": true, "refactor-agent": true, "explorer": true, "planner": true,
@@ -83,6 +94,17 @@ var knownRoles = map[string]bool{
 	"xcodegen-driver": true, "xcode-runner": true, "spm-manager": true,
 	"swiftlint-checker": true, "simulator-driver": true, "testflight-shipper": true,
 	"evaluator": true,
+	// Escalation targets: back to the human, or back to the main session
+	// that owns the conversation.
+	"human": true, "main-session": true,
+	// Base gates (--with-gates).
+	"plan-reviewer": true, "north-star-auditor": true, "evidence-auditor": true,
+	// Exploratory / RE chain (base/workflows/exploratory.md).
+	"intake": true, "unpacker": true, "hypothesizer": true,
+	"verifier": true, "report-writer": true,
+	// issue-loop-github-strict process agents.
+	"integration-gate": true, "pr-shepherd": true, "spec-maintainer": true,
+	"wiki-keeper": true, "ci-devops": true,
 	// Explicit sentinel: null means the loop stops here — valid.
 	"null": true, "none": true, "": true,
 }

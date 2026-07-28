@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -124,4 +125,69 @@ func TestIsPassAcceptsReviewerVerdicts(t *testing.T) {
 	require.False(t, isPass("blocked"))
 	require.False(t, isPass("failed"))
 	require.False(t, isPass(""), "empty verdict means the schema was never emitted")
+}
+
+// TestNextFieldAcceptsEveryTargetProfilesEmit locks knownRoles to the set of
+// `next:` targets the shipped profiles actually emit. Every miss here scored
+// a contract-compliant handoff as a `next-unreachable` violation, which made
+// the "Compliance without violations" acceptance criterion unreachable on
+// any project using issue-loop-github-strict or re-macho.
+//
+// The list is the deduplicated output of
+// `grep -rhoE '^ *next: .*' profiles/ --include='*.md'` split on `|`.
+func TestNextFieldAcceptsEveryTargetProfilesEmit(t *testing.T) {
+	emitted := []string{
+		"architect", "bug-hunter", "explorer", "human", "hypothesizer",
+		"implementer", "integration-gate", "main-session", "null",
+		"plan-reviewer", "planner", "pr-shepherd", "refactor-agent",
+		"report-writer", "reviewer", "task-runner", "tester", "unpacker",
+		"verifier",
+	}
+	var dispatches []Dispatch
+	for i, target := range emitted {
+		dispatches = append(dispatches, Dispatch{
+			ID:        fmt.Sprintf("ok-%d", i),
+			AgentName: "reviewer run",
+			Status:    "completed",
+			Returned:  Return{Verdict: "done", Next: target, RawFirstLine: "verdict: done"},
+		})
+	}
+	// Negative control: an invented target must still be flagged, otherwise
+	// the assertions above would pass on a knownRoles map that accepts all.
+	dispatches = append(dispatches, Dispatch{
+		ID: "bogus", AgentName: "reviewer run", Status: "completed",
+		Returned: Return{Verdict: "done", Next: "kubernetes-whisperer", RawFirstLine: "verdict: done"},
+	})
+
+	score := Score(&Trace{Dispatches: dispatches}, func(string, string) bool { return true })
+
+	unreachable := map[string]bool{}
+	for _, v := range score.Violations {
+		if v.Kind == "next-unreachable" {
+			unreachable[v.DispatchID] = true
+		}
+	}
+	for i, target := range emitted {
+		require.False(t, unreachable[fmt.Sprintf("ok-%d", i)],
+			"next: %s is emitted by a shipped profile and must be reachable", target)
+	}
+	require.True(t, unreachable["bogus"], "an unknown target must still be flagged")
+}
+
+// The exploratory chain used to bucket to "other", which made RE sessions
+// unreadable in the scorecard.
+func TestGuessRoleKnowsExploratoryChain(t *testing.T) {
+	for desc, want := range map[string]string{
+		"Intake for the macho binary":       "intake",
+		"unpacker pass 1":                   "unpacker",
+		"Hypothesizer — 4 candidates":       "hypothesizer",
+		"Verifier on hypothesis 2":          "verifier",
+		"report-writer final":               "report-writer",
+		"Report writer final":               "report-writer",
+		"Dev-orchestrator (archived run)":   "dev-orchestrator",
+		"exploratory orchestrator archived": "exploratory-orchestrator",
+		"totally unrelated label":           "other",
+	} {
+		require.Equal(t, want, GuessRole(desc), "description: %q", desc)
+	}
 }
