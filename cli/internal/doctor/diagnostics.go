@@ -14,6 +14,7 @@ import (
 	"github.com/vaporphd/zprof/internal/managed"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/models"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // Issue severity levels.
@@ -53,12 +54,16 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  1. .zprof.yaml parses
 //  2. every declared overlay exists under repoDir/overlays/
 //  3. overlay count is within v1 support (warn at 2+, error at 4+)
-//  4. every .claude/agents/*.md has YAML-parseable frontmatter
+//  4. every .claude/agents/*.md has YAML-parseable frontmatter, and every
+//     role among them declares a return_format
 //  5. every .claude/agents/*.md has a resolvable model: field
 //  6. CLAUDE.md / AGENT_LOOP.md managed-block markers are matched
 //  7. task-runner.md is present and no retired orchestrator survives
 //  8. every active overlay declares a non-empty stop_list
-//  9. .zprof/runs/ isn't piling up past runLogWarnThreshold files
+//  9. no agent file is orphaned — absent from both managed_agents and the
+//     currently active sources, so nothing will ever prune it
+//  10. .zprof/runs/ is covered by .gitignore
+//  11. .zprof/runs/ isn't piling up past runLogWarnThreshold files
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -82,6 +87,8 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkManagedMarkers(projectDir)...)
 	out = append(out, checkTaskRunner(projectDir)...)
 	out = append(out, checkStopLists(proj.Overlays, repoDir)...)
+	out = append(out, checkOrphanAgents(projectDir, repoDir, proj)...)
+	out = append(out, checkRunsGitignored(projectDir)...)
 	out = append(out, checkRunLogs(projectDir)...)
 	return out, nil
 }
@@ -93,6 +100,15 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 // silently at load time. Requires the `name` field to be present as a
 // minimal contract; other fields are validated elsewhere (model tier,
 // tool whitelist per §T1) or by the human authoring the overlay.
+//
+// Roles additionally must declare `return_format`: whoever dispatched a
+// role parses its answer as a schema (`verdict:` first line, `next:`
+// routing), and a role that never states its schema returns prose that
+// silently derails the loop. Tool-agents are exempt — their output is
+// consumed by the workflow step that called them, and a user's own agent
+// in .claude/agents/ is none of doctor's business. Role membership is
+// resolved via agents.RoleOf, which understands the namespaced names a
+// multi-overlay apply writes (`implementer-ios`).
 func checkAgentFrontmatter(projectDir string) []Issue {
 	agentsDir := filepath.Join(projectDir, ".claude", "agents")
 	if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
@@ -135,9 +151,29 @@ func checkAgentFrontmatter(projectDir string) []Issue {
 				Message: "frontmatter missing `name` field",
 			})
 		}
+		if role := agents.RoleOf(agentNameFor(agentsDir, path)); role != "" {
+			if rf, ok := fm["return_format"].(string); !ok || strings.TrimSpace(rf) == "" {
+				out = append(out, Issue{
+					Level:   LevelError,
+					Path:    path,
+					Message: fmt.Sprintf("role %q has no `return_format` in frontmatter — its caller parses the answer as a schema", role),
+				})
+			}
+		}
 		return nil
 	})
 	return out
+}
+
+// agentNameFor converts an on-disk agent path into the name zprof knows it
+// by: the path relative to .claude/agents/ without the .md suffix, slashes
+// normalized. `gates/plan-reviewer.md` → `gates/plan-reviewer`.
+func agentNameFor(agentsDir, path string) string {
+	rel, err := filepath.Rel(agentsDir, path)
+	if err != nil {
+		rel = filepath.Base(path)
+	}
+	return filepath.ToSlash(strings.TrimSuffix(rel, ".md"))
 }
 
 // checkOverlayCount warns/errors when the project composes more overlays
@@ -249,7 +285,7 @@ func checkTaskRunner(projectDir string) []Issue {
 		out = append(out, Issue{
 			Level:   LevelError,
 			Path:    agentsDir,
-			Message: "task-runner.md отсутствует — main'у некому передавать задачи; запусти `zprof sync`",
+			Message: "task-runner.md is missing — main has nobody to hand tasks to; run `zprof sync`",
 		})
 	}
 	for _, name := range agents.Retired {
@@ -258,7 +294,7 @@ func checkTaskRunner(projectDir string) []Issue {
 			out = append(out, Issue{
 				Level:   LevelError,
 				Path:    p,
-				Message: fmt.Sprintf("%s упразднён, но остался в проекте — main может дёрнуть его в обход task-runner; запусти `zprof sync`", name),
+				Message: fmt.Sprintf("%s is retired but still present in the project — main could dispatch it, bypassing task-runner; run `zprof sync`", name),
 			})
 		}
 	}
@@ -280,11 +316,141 @@ func checkStopLists(overlays []string, repoDir string) []Issue {
 			out = append(out, Issue{
 				Level:   LevelError,
 				Path:    p,
-				Message: fmt.Sprintf("overlay %q не объявляет stop_list — task-runner не узнает, что нельзя делать самостоятельно", name),
+				Message: fmt.Sprintf("overlay %q declares no stop_list — task-runner has no way to know what it must not do on its own", name),
 			})
 		}
 	}
 	return out
+}
+
+// checkOrphanAgents warns about files in .claude/agents/ that neither the
+// manifest's managed_agents roster nor the currently active sources account
+// for. Nothing removes those automatically: prune only touches names the
+// last apply recorded, so in a project applied by a zprof old enough to
+// predate managed_agents the roster is empty and every stale agent survives
+// silently. Warn rather than error — a user is entitled to keep their own
+// agents next to zprof's, and this check cannot tell the two apart.
+//
+// Retired names are skipped: checkTaskRunner already reports those as
+// errors with a more specific message.
+func checkOrphanAgents(projectDir, repoDir string, proj *manifest.ProjectManifest) []Issue {
+	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
+		return nil
+	}
+	expected, err := expectedAgentNames(proj, repoDir)
+	if err != nil {
+		// Without a readable repo checkout every file would look orphaned.
+		// checkOverlaysExist reports the underlying problem.
+		return nil
+	}
+	known := map[string]bool{}
+	for _, n := range proj.ManagedAgents {
+		known[n] = true
+	}
+	for n := range expected {
+		known[n] = true
+	}
+	for _, n := range agents.Retired {
+		known[n] = true
+	}
+
+	var out []Issue
+	_ = filepath.Walk(agentsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		name := agentNameFor(agentsDir, path)
+		if known[name] {
+			return nil
+		}
+		out = append(out, Issue{
+			Level:   LevelWarn,
+			Path:    path,
+			Message: fmt.Sprintf("agent %q is listed in neither managed_agents nor the active sources — zprof will never remove it; delete it by hand if it is stale", name),
+		})
+		return nil
+	})
+	return out
+}
+
+// expectedAgentNames reproduces the roster the current .zprof.yaml would
+// produce if applied right now: base agents (gates only with --with-gates)
+// plus each overlay's agents, namespaced exactly as apply namespaces them
+// when more than one overlay is active.
+func expectedAgentNames(proj *manifest.ProjectManifest, repoDir string) (map[string]bool, error) {
+	base, err := overlay.LoadBase(filepath.Join(repoDir, "base"))
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for name := range base.Agents {
+		if !proj.WithGates && strings.HasPrefix(name, "gates/") {
+			continue
+		}
+		out[name] = true
+	}
+	multi := len(proj.Overlays) > 1
+	for _, name := range proj.Overlays {
+		o, err := overlay.LoadOverlay(filepath.Join(repoDir, "overlays", name))
+		if err != nil {
+			return nil, err
+		}
+		for agentName := range o.Agents {
+			if multi {
+				agentName = overlay.NamespaceAgent(agentName, o.Manifest.Name)
+			}
+			out[agentName] = true
+		}
+	}
+	return out, nil
+}
+
+// checkRunsGitignored warns when the runner's journal directory can end up
+// committed. Run logs are per-machine scratch: useful to tail, worthless in
+// history, and they leak task phrasing into the repo.
+//
+// A project with no .gitignore at all is only flagged once .zprof/runs/
+// actually exists — before that there is nothing to leak, and the project
+// may not even be a git repo.
+func checkRunsGitignored(projectDir string) []Issue {
+	warn := func(path string) []Issue {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    path,
+			Message: "`.zprof/runs/` is not in .gitignore — run logs will be committed; add the entry or run `zprof apply` again",
+		}}
+	}
+	p := filepath.Join(projectDir, ".gitignore")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		if info, statErr := os.Stat(filepath.Join(projectDir, ".zprof", "runs")); statErr == nil && info.IsDir() {
+			return warn(projectDir)
+		}
+		return nil
+	}
+	if gitignoreCoversRuns(string(data)) {
+		return nil
+	}
+	return warn(p)
+}
+
+// gitignoreCoversRuns reports whether any active .gitignore pattern
+// excludes .zprof/runs/. Accepts the exact entry apply writes plus the
+// coarser `.zprof/` form, with or without leading/trailing slashes.
+// Comment lines never count.
+func gitignoreCoversRuns(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "/"), "/")
+		if line == ".zprof/runs" || line == ".zprof" {
+			return true
+		}
+	}
+	return false
 }
 
 // checkRunLogs warns when run logs pile up. They are gitignored and
@@ -305,7 +471,7 @@ func checkRunLogs(projectDir string) []Issue {
 		return []Issue{{
 			Level:   LevelWarn,
 			Path:    runs,
-			Message: fmt.Sprintf("%d run-логов (> %d) — стоит почистить", n, runLogWarnThreshold),
+			Message: fmt.Sprintf("%d run logs (> %d) — consider cleaning up .zprof/runs/", n, runLogWarnThreshold),
 		}}
 	}
 	return nil
