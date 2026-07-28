@@ -166,6 +166,43 @@ func buildExecutingTable(opts ApplyOpts) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// buildStopListBlock renders the "## Stop list" section for CLAUDE.md: the
+// base entries followed by each active overlay's, deduplicated, every row
+// tagged with the source that declared it. The task-runner refuses to
+// perform these on its own and returns verdict=blocked instead. Rendered
+// into CLAUDE.md on purpose — a policy the user cannot read is a hidden
+// policy.
+func buildStopListBlock(opts ApplyOpts) string {
+	var b strings.Builder
+	b.WriteString("## Stop list\n\n")
+	b.WriteString("`task-runner` не выполняет перечисленное самостоятельно: он возвращает `verdict: blocked` с вопросом, решение принимает человек.\n\n")
+	b.WriteString("| Действие | Источник |\n")
+	b.WriteString("|---|---|\n")
+
+	seen := map[string]bool{}
+	appendRows := func(entries []string, source string) {
+		for _, e := range entries {
+			if e == "" || seen[e] {
+				continue
+			}
+			seen[e] = true
+			b.WriteString("| " + e + " | " + source + " |\n")
+		}
+	}
+
+	if opts.Base != nil && opts.Base.Manifest != nil {
+		appendRows(opts.Base.Manifest.StopList, "base")
+	}
+	for _, o := range opts.Overlays {
+		if o == nil || o.Manifest == nil {
+			continue
+		}
+		appendRows(o.Manifest.StopList, o.Manifest.Name)
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func sortedMapKeys(m map[string]string) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

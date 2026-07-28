@@ -231,6 +231,11 @@ func buildClaudeBlocks(opts ApplyOpts) []managed.Block {
 		Key:     "executing",
 		Content: buildExecutingTable(opts),
 	})
+	blocks = append(blocks, managed.Block{
+		Overlay: "base",
+		Key:     "stop-list",
+		Content: buildStopListBlock(opts),
+	})
 	return blocks
 }
 
@@ -265,7 +270,7 @@ func ensureGitignore(dir string, overlays []*overlay.Overlay) error {
 		return err
 	}
 	content := string(data)
-	entries := []string{"thoughts/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
+	entries := []string{"thoughts/", ".zprof/runs/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
 	for _, o := range overlays {
 		if o == nil || o.Manifest == nil {
 			continue

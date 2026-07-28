@@ -3,6 +3,7 @@ package apply
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vaporphd/zprof/internal/managed"
@@ -106,4 +107,30 @@ func TestApplyMultiOverlayNamespacesAgents(t *testing.T) {
 	// architect should be namespaced when >1 overlay
 	require.FileExists(t, filepath.Join(proj, ".claude", "agents", "architect-fake-ios.md"))
 	require.FileExists(t, filepath.Join(proj, ".claude", "agents", "architect-fake-py.md"))
+}
+
+func TestBuildStopListBlockMergesBaseAndOverlays(t *testing.T) {
+	opts := ApplyOpts{
+		Base: &overlay.Base{
+			Manifest: &manifest.OverlayManifest{
+				Name:     "base",
+				StopList: []string{"force-push в опубликованную ветку", "релиз, деплой, публикация пакета"},
+			},
+		},
+		Overlays: []*overlay.Overlay{
+			{Manifest: &manifest.OverlayManifest{
+				Name:     "ios-swift",
+				StopList: []string{"загрузка билда в TestFlight", "релиз, деплой, публикация пакета"},
+			}},
+		},
+	}
+
+	got := buildStopListBlock(opts)
+
+	require.Contains(t, got, "## Stop list")
+	require.Contains(t, got, "| force-push в опубликованную ветку | base |")
+	require.Contains(t, got, "| загрузка билда в TestFlight | ios-swift |")
+	// Дубль, объявленный и в base, и в overlay, рендерится один раз — с
+	// источником base, потому что base идёт первым.
+	require.Equal(t, 1, strings.Count(got, "релиз, деплой, публикация пакета"))
 }
