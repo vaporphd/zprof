@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/vaporphd/zprof/internal/agents"
 	"github.com/vaporphd/zprof/internal/managed"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/models"
@@ -55,6 +56,9 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  4. every .claude/agents/*.md has YAML-parseable frontmatter
 //  5. every .claude/agents/*.md has a resolvable model: field
 //  6. CLAUDE.md / AGENT_LOOP.md managed-block markers are matched
+//  7. task-runner.md is present and no retired orchestrator survives
+//  8. every active overlay declares a non-empty stop_list
+//  9. .zprof/runs/ isn't piling up past runLogWarnThreshold files
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -76,6 +80,9 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkAgentFrontmatter(projectDir)...)
 	out = append(out, checkAgentModels(projectDir)...)
 	out = append(out, checkManagedMarkers(projectDir)...)
+	out = append(out, checkTaskRunner(projectDir)...)
+	out = append(out, checkStopLists(proj.Overlays, repoDir)...)
+	out = append(out, checkRunLogs(projectDir)...)
 	return out, nil
 }
 
@@ -221,4 +228,85 @@ func checkManagedMarkers(projectDir string) []Issue {
 		}
 	}
 	return out
+}
+
+// runLogWarnThreshold is the number of files under .zprof/runs/ past which
+// doctor suggests cleaning up. There is no automatic retention in v1.
+const runLogWarnThreshold = 50
+
+// checkTaskRunner errors when the task-runner agent is absent, or when a
+// retired orchestrator is still present. Both break the isolation
+// contract: without the runner main has nothing to delegate to, and with a
+// leftover orchestrator it has a second, unsupervised path.
+func checkTaskRunner(projectDir string) []Issue {
+	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
+		return nil // no agents applied yet — not this check's business
+	}
+
+	var out []Issue
+	if _, err := os.Stat(filepath.Join(agentsDir, "task-runner.md")); err != nil {
+		out = append(out, Issue{
+			Level:   LevelError,
+			Path:    agentsDir,
+			Message: "task-runner.md отсутствует — main'у некому передавать задачи; запусти `zprof sync`",
+		})
+	}
+	for _, name := range agents.Retired {
+		p := filepath.Join(agentsDir, name+".md")
+		if _, err := os.Stat(p); err == nil {
+			out = append(out, Issue{
+				Level:   LevelError,
+				Path:    p,
+				Message: fmt.Sprintf("%s упразднён, но остался в проекте — main может дёрнуть его в обход task-runner; запусти `zprof sync`", name),
+			})
+		}
+	}
+	return out
+}
+
+// checkStopLists errors for every active overlay whose manifest declares no
+// stop_list. An empty list means the runner has no idea what it must not do
+// on its own, and irreversible actions pass unreviewed.
+func checkStopLists(overlays []string, repoDir string) []Issue {
+	var out []Issue
+	for _, name := range overlays {
+		p := filepath.Join(repoDir, "overlays", name, "manifest.yaml")
+		m, err := manifest.LoadOverlay(p)
+		if err != nil {
+			continue // checkOverlaysExist already reports a missing overlay
+		}
+		if len(m.StopList) == 0 {
+			out = append(out, Issue{
+				Level:   LevelError,
+				Path:    p,
+				Message: fmt.Sprintf("overlay %q не объявляет stop_list — task-runner не узнает, что нельзя делать самостоятельно", name),
+			})
+		}
+	}
+	return out
+}
+
+// checkRunLogs warns when run logs pile up. They are gitignored and
+// harmless, but a large pile makes the tail-read habit expensive.
+func checkRunLogs(projectDir string) []Issue {
+	runs := filepath.Join(projectDir, ".zprof", "runs")
+	entries, err := os.ReadDir(runs)
+	if err != nil {
+		return nil
+	}
+	n := 0
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			n++
+		}
+	}
+	if n > runLogWarnThreshold {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    runs,
+			Message: fmt.Sprintf("%d run-логов (> %d) — стоит почистить", n, runLogWarnThreshold),
+		}}
+	}
+	return nil
 }

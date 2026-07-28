@@ -2,6 +2,7 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,8 @@ func TestDiagnoseAgentResolvableModelIsClean(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "auditor.md"),
 		[]byte("---\nname: auditor\nmodel: opus\n---\nBody.\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "agents", "task-runner.md"),
+		[]byte("---\nname: task-runner\nmodel: opus\n---\nBody.\n"), 0o644))
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -197,4 +200,53 @@ func TestDiagnoseCleanProjectHasNoIssues(t *testing.T) {
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
+}
+
+func TestCheckTaskRunnerMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "agents"), 0o755))
+
+	issues := checkTaskRunner(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "task-runner")
+}
+
+func TestCheckTaskRunnerFlagsSurvivingOrchestrator(t *testing.T) {
+	dir := t.TempDir()
+	agents := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agents, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agents, "task-runner.md"), []byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agents, "dev-orchestrator.md"), []byte("---\nname: dev-orchestrator\n---\n"), 0o644))
+
+	issues := checkTaskRunner(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "dev-orchestrator")
+}
+
+func TestCheckStopListsEmptyOverlay(t *testing.T) {
+	repo := t.TempDir()
+	ovDir := filepath.Join(repo, "overlays", "demo")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: demo\nloop_template: dev-pipeline\n"), 0o644))
+
+	issues := checkStopLists([]string{"demo"}, repo)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "stop_list")
+}
+
+func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {
+	dir := t.TempDir()
+	runs := filepath.Join(dir, ".zprof", "runs")
+	require.NoError(t, os.MkdirAll(runs, 0o755))
+	for i := 0; i < 51; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(runs, fmt.Sprintf("r%02d.md", i)), []byte("x"), 0o644))
+	}
+
+	issues := checkRunLogs(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
 }
