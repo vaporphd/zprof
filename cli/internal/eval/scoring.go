@@ -79,7 +79,7 @@ type Violation struct {
 var knownRoles = map[string]bool{
 	"architect": true, "implementer": true, "tester": true, "reviewer": true,
 	"bug-hunter": true, "refactor-agent": true, "explorer": true, "planner": true,
-	"dev-orchestrator": true, "exploratory-orchestrator": true, "docs-writer": true,
+	"task-runner": true, "dev-orchestrator": true, "exploratory-orchestrator": true, "docs-writer": true,
 	"xcodegen-driver": true, "xcode-runner": true, "spm-manager": true,
 	"swiftlint-checker": true, "simulator-driver": true, "testflight-shipper": true,
 	"evaluator": true,

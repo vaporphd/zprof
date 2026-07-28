@@ -78,6 +78,39 @@ func TestParseReturnFormatToleratesFencedBlock(t *testing.T) {
 	require.Equal(t, "verdict: block", r.RawFirstLine)
 }
 
+func TestNextFieldAcceptsTaskRunner(t *testing.T) {
+	// task-runner replaces dev-orchestrator/exploratory-orchestrator as the
+	// loop's entry point. Any agent that hands control back to it via
+	// `next: task-runner` must not be flagged as next-unreachable — that's
+	// exactly how §12.1 attributes dispatch outcomes to the new role.
+	trace := &Trace{
+		Dispatches: []Dispatch{
+			{
+				ID:        "d1",
+				AgentName: "task-runner dispatch",
+				Status:    "completed",
+				Returned:  Return{Verdict: "done", Next: "task-runner", RawFirstLine: "verdict: done"},
+			},
+			{
+				ID:        "d2",
+				AgentName: "task-runner dispatch",
+				Status:    "completed",
+				Returned:  Return{Verdict: "done", Next: "totally-made-up", RawFirstLine: "verdict: done"},
+			},
+		},
+	}
+	score := Score(trace, func(string, string) bool { return true })
+
+	var unreachable []string
+	for _, v := range score.Violations {
+		if v.Kind == "next-unreachable" {
+			unreachable = append(unreachable, v.DispatchID)
+		}
+	}
+	require.NotContains(t, unreachable, "d1", "next: task-runner must be a known role")
+	require.Contains(t, unreachable, "d2", "sanity check: an unknown role must still be flagged — otherwise the assertion above proves nothing")
+}
+
 func TestIsPassAcceptsReviewerVerdicts(t *testing.T) {
 	// Reviewer uses a different verdict vocabulary than architect/implementer.
 	// The scorer must recognize all approval variants including the routine
