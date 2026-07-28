@@ -14,7 +14,7 @@ import (
 // mood feature", "Reviewer — MoodJournalInterface"). We accept a known
 // role token anywhere in the description matched as a word — the first
 // match wins. Non-matches bucket to "other" — useful signal in itself.
-var roleGuessRe = regexp.MustCompile(`(?i)\b(architect|implementer|tester|reviewer|bug[- ]?hunter|refactor(?:-agent)?|explorer|planner|dev[- ]?orchestrator|exploratory[- ]?orchestrator|docs[- ]?writer|xcodegen[- ]?driver|xcode[- ]?runner|spm[- ]?manager|swiftlint[- ]?checker|simulator[- ]?driver|testflight[- ]?shipper|evaluator)\b`)
+var roleGuessRe = regexp.MustCompile(`(?i)\b(architect|implementer|tester|reviewer|bug[- ]?hunter|refactor(?:-agent)?|explorer|planner|task[- ]?runner|dev[- ]?orchestrator|exploratory[- ]?orchestrator|docs[- ]?writer|xcodegen[- ]?driver|xcode[- ]?runner|spm[- ]?manager|swiftlint[- ]?checker|simulator[- ]?driver|testflight[- ]?shipper|evaluator)\b`)
 
 // GuessRole extracts the role bucket for a dispatch. Descriptions are
 // author-chosen — we look for the first known role token anywhere in the

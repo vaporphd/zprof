@@ -59,8 +59,7 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	for _, f := range []string{
 		".claude/agents/planner.md",
 		".claude/agents/docs-writer.md",
-		".claude/agents/dev-orchestrator.md",
-		".claude/agents/exploratory-orchestrator.md",
+		".claude/agents/task-runner.md",
 		".claude/agents/architect.md",
 		".claude/agents/implementer.md",
 		".claude/agents/tester.md",

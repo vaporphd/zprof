@@ -18,17 +18,16 @@ func IsKnownRole(role string) bool {
 // Consilium (role -> agent) table. Everything else — tool-agents dispatched
 // from within a workflow rather than from the top-level router — is skipped.
 var roleAgents = map[string]bool{
-	"planner":                  true,
-	"docs-writer":              true,
-	"dev-orchestrator":         true,
-	"exploratory-orchestrator": true,
-	"architect":                true,
-	"implementer":              true,
-	"tester":                   true,
-	"bug-hunter":               true,
-	"refactor-agent":           true,
-	"explorer":                 true,
-	"reviewer":                 true,
+	"planner":        true,
+	"docs-writer":    true,
+	"task-runner":    true,
+	"architect":      true,
+	"implementer":    true,
+	"tester":         true,
+	"bug-hunter":     true,
+	"refactor-agent": true,
+	"explorer":       true,
+	"reviewer":       true,
 }
 
 // gateRoles are the gates/*.md base agents that count as roles when
@@ -147,7 +146,7 @@ func buildExecutingTable(opts ApplyOpts) string {
 			}
 			continue
 		}
-		agent := "dev-orchestrator"
+		agent := "task-runner"
 		if _, ok := o.Agents["implementer"]; ok {
 			agent = "implementer"
 			if multi {
