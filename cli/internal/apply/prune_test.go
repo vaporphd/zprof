@@ -69,6 +69,37 @@ func TestPruneKeepsStillLiveAgent(t *testing.T) {
 	require.FileExists(t, p)
 }
 
+// Имя из .zprof.yaml, уводящее за пределы каталога агентов, игнорируется:
+// файл снаружи не трогаем даже при попытке traversal.
+func TestPruneRefusesPathTraversalName(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	outside := filepath.Join(root, "victim.md")
+	require.NoError(t, os.WriteFile(outside, []byte("не трогать\n"), 0o644))
+
+	removed, err := PruneOrphanAgents(dir, []string{"../../victim"}, nil)
+	require.NoError(t, err)
+	require.Empty(t, removed)
+	require.FileExists(t, outside, "prune не должен выходить за .claude/agents/")
+
+	baks, err := filepath.Glob(filepath.Join(root, "victim.md.zprof.bak-*"))
+	require.NoError(t, err)
+	require.Empty(t, baks, "не должно быть даже бэкапа — файл вообще не открывался")
+}
+
+// Имя в подкаталоге (gates/*) остаётся валидным — нормализация не должна
+// запрещать легальные вложенные пути.
+func TestPruneAllowsSubdirectoryAgent(t *testing.T) {
+	dir := t.TempDir()
+	p := writeAgentFile(t, filepath.Join(dir, "gates"), "old-gate")
+
+	removed, err := PruneOrphanAgents(dir, []string{"gates/old-gate"}, nil)
+	require.NoError(t, err)
+	require.Equal(t, []string{"gates/old-gate"}, removed)
+	require.NoFileExists(t, p)
+}
+
 // Отсутствие файла на диске — не ошибка: запись могла быть удалена руками.
 func TestPruneSkipsMissingFile(t *testing.T) {
 	dir := t.TempDir()

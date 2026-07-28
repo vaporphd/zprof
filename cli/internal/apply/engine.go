@@ -36,6 +36,21 @@ type ApplyResult struct {
 	RemovedAgents []string
 }
 
+// FormatRemovedAgents renders the removed-agent summary line(s) for CLI
+// output, or "" when nothing was removed. Deleting agent files is the only
+// destructive thing an apply does, so it is reported by name rather than
+// folded into a counter: a silent deletion is indistinguishable from a bug,
+// and the user needs the names to find the backups.
+func FormatRemovedAgents(removed []string) string {
+	if len(removed) == 0 {
+		return ""
+	}
+	names := append([]string(nil), removed...)
+	sort.Strings(names)
+	return fmt.Sprintf("Удалено агентов: %d (рядом сохранён .bak каждого)\n  %s\n",
+		len(names), strings.Join(names, ", "))
+}
+
 // Apply orchestrates a full profile application: base agents, namespaced
 // overlay agents, managed AGENT_LOOP.md/CLAUDE.md rendering, state file
 // bootstrap, .gitignore maintenance, and project manifest persistence.

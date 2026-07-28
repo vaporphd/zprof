@@ -127,13 +127,19 @@ func Run(opts Opts) error {
 		loaded = append(loaded, o)
 	}
 	proj := &manifest.ProjectManifest{Overlays: chosen, Language: lang, WithGates: withGates, Minimal: minimal}
-	_, err = apply.Apply(apply.ApplyOpts{
+	// Re-running init over an already-applied project must not drop the
+	// previous managed_agents roster or the user's overrides.
+	if existing, err := manifest.LoadProject(filepath.Join(opts.ProjectDir, ".zprof.yaml")); err == nil {
+		proj.CarryOverFrom(existing)
+	}
+	res, err := apply.Apply(apply.ApplyOpts{
 		ProjectDir: opts.ProjectDir, Base: base, Overlays: loaded,
 		Project: proj, MergeMode: managed.ModeOverwrite,
 	})
 	if err != nil {
 		return err
 	}
+	fmt.Print(apply.FormatRemovedAgents(res.RemovedAgents))
 	fmt.Println("✔ zprof init завершён.")
 	return nil
 }

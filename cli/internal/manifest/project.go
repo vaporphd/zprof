@@ -57,6 +57,34 @@ func (m *ProjectManifest) Save(path string) error {
 	return fsutil.WriteFileAtomic(path, data, 0o644)
 }
 
+// CarryOverFrom copies the fields of a previously saved manifest that a
+// fresh apply must not lose. Overlays/Language/WithGates/Minimal are
+// deliberately NOT carried over — those come from the command line and
+// describe the apply being requested right now.
+//
+// ManagedAgents is the load-bearing one: Apply overwrites it with the
+// roster it just wrote, so a caller that builds a fresh manifest without
+// carrying the previous value forward leaves PruneOrphanAgents blind —
+// every namespaced agent from a dropped overlay stays in .claude/agents/
+// as a valid, dispatchable file that nothing will ever remove.
+//
+// Only unset (nil) fields are filled, so an explicitly built manifest can
+// still override any of them.
+func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
+	if prev == nil {
+		return
+	}
+	if m.ModelOverrides == nil {
+		m.ModelOverrides = prev.ModelOverrides
+	}
+	if m.AgentOverrides == nil {
+		m.AgentOverrides = prev.AgentOverrides
+	}
+	if m.ManagedAgents == nil {
+		m.ManagedAgents = prev.ManagedAgents
+	}
+}
+
 // ResolvedModel returns the exact model ID for a role from ModelOverrides.
 // Returns ErrNoOverride if the role has no override (caller falls back to
 // the overlay default).

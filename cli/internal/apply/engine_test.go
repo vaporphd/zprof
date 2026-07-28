@@ -134,3 +134,15 @@ func TestBuildStopListBlockMergesBaseAndOverlays(t *testing.T) {
 	// источником base, потому что base идёт первым.
 	require.Equal(t, 1, strings.Count(got, "релиз, деплой, публикация пакета"))
 }
+
+// Удаление файлов агентов — единственная деструктивная операция apply,
+// поэтому она отчитывается именами, а не счётчиком.
+func TestFormatRemovedAgentsNamesAndBackupHint(t *testing.T) {
+	require.Empty(t, FormatRemovedAgents(nil))
+
+	out := FormatRemovedAgents([]string{"tester-py", "implementer-py"})
+	require.Contains(t, out, "Удалено агентов: 2")
+	require.Contains(t, out, ".bak")
+	// Имена отсортированы, чтобы вывод не прыгал между запусками.
+	require.Contains(t, out, "implementer-py, tester-py")
+}
