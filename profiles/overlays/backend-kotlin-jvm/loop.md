@@ -18,7 +18,7 @@
 - Layer taxonomy per module: `domain/` (model/error/usecase|service/repository), `data/` (dto/datasource/mapper), `api/` (только для server), `di/` composition root
 - Ban list в production `**/domain/**` + `**/data/**`: `runCatching { }` (F-15 shakedown — swallows CancellationException), `!!`, `GlobalScope`, `runBlocking` (кроме `fun main()`), `println`/`System.out.println`, второй `Json { }` block
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Сборка/тесты/dep-tree через Gradle | `gradle-runner` |
@@ -30,4 +30,4 @@ Overlay стеко-агностичен — процесс-агенты (`planne
 ```
 zprof apply backend-kotlin-jvm issue-loop-github-strict
 ```
-Дает GitHub-issue-driven pipeline с полным контуром: planner (DRAFT→plan-reviewer→AUTHOR через `gh issue create`) → main-session dispatches architect (если ADR-trigger=yes) → implementer (branch `issue-<N>-<slug>` → PR через `gh pr create`) → integration-gate (если diff в `<INTEGRATION_SCOPE>`) → wiki-keeper → reviewer → pr-shepherd (squash-merge + stamp) → spec-maintainer + docs-writer post-merge.
+Дает GitHub-issue-driven pipeline с полным контуром: planner (DRAFT→plan-reviewer→AUTHOR через `gh issue create`) → task-runner dispatches architect (если ADR-trigger=yes) → implementer (branch `issue-<N>-<slug>` → PR через `gh pr create`) → integration-gate (если diff в `<INTEGRATION_SCOPE>`) → wiki-keeper → reviewer → pr-shepherd (squash-merge + stamp) → spec-maintainer + docs-writer post-merge.

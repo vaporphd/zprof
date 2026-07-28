@@ -17,7 +17,7 @@
 5. **verifier** — валидирует гипотезы через lldb / Frida / dtrace; собирает evidence
 6. **report-writer** — финальный markdown-отчёт в `reports/<binary-slug>-<YYYY-MM-DD>.md`
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Static headers / symbols / dependencies | `otool-runner` |

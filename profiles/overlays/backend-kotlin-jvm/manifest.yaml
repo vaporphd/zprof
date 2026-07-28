@@ -37,3 +37,9 @@ tool_agents:
   - gradle-runner
   - ktlint-checker
   - init-kotlin-jvm
+
+stop_list:
+  - "публикация артефакта в Maven-репозиторий"
+  - "смена groupId или artifactId"
+  - "ломающая смена публичного API библиотеки"
+  - "правка production-конфигов (application-prod.*)"

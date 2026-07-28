@@ -52,3 +52,9 @@ tool_agents:
   - ci-devops
   - pr-shepherd
   - integration-gate
+
+stop_list:
+  - "merge PR в основную ветку"
+  - "закрытие issue"
+  - "создание релиза или тега"
+  - "изменение настроек репозитория и CI-секретов"

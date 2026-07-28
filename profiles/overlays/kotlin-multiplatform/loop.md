@@ -19,7 +19,7 @@
 - kotlinx.serialization с ОДНИМ Json instance через DI
 - Multi-module Gradle с `libs.versions.toml`, `kotlin("multiplatform")` плагин
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Сборка Gradle (assembleDebug / linkFramework / packageDistribution) | `gradle-runner` |

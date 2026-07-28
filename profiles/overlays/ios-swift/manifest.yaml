@@ -39,3 +39,9 @@ executing:
   spm-manager: "Package.swift, Package.resolved"
   xcode-runner: "xcodebuild build/test invocations"
   swiftlint-checker: ".swiftlint.yml + swiftlint runs"
+
+stop_list:
+  - "загрузка билда в TestFlight или App Store Connect"
+  - "смена bundle identifier, entitlements или provisioning profile"
+  - "смена team ID и параметров подписи"
+  - "правка project.pbxproj руками вместо project.yml"

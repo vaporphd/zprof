@@ -19,7 +19,7 @@
 - Vitest 2 (unit) + Playwright 1.48+ (e2e)
 - ESLint 9 flat config + Prettier 3
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Установка / обновление пакетов | `pnpm-manager` |

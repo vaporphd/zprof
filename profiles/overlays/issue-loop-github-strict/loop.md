@@ -9,7 +9,7 @@
 ### Pipeline (canonical sequence)
 ```
 backlog empty   → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR: gh issue create)
-issue picked    → main-session dispatches architect (if ADR-trigger=yes) → implementer
+issue picked    → task-runner dispatches architect (if ADR-trigger=yes) → implementer
                   (implementer: branch issue-<N>-<slug> → gh pr create Closes #N)
 PR opened       → integration-gate (если diff в INTEGRATION_SCOPE) → wiki-keeper → reviewer
 approved        → pr-shepherd (если AUTO_MERGE=on) → squash-merge + delete branch + stamp
@@ -45,7 +45,7 @@ zprof apply <stack-overlay> issue-loop-github-strict
 
 Overlay стеко-агностичен: `integration-gate` читает `<INTEGRATION_GATE>` из проектного `CLAUDE.md`, `ci-devops` — `<LINT_CMD>`/`<TEST_CMD>` оттуда же.
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Планирование милестоуна / груминг бэклога | `planner` |
