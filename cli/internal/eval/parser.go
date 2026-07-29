@@ -172,12 +172,20 @@ var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*(?:working\\s+directory|ра
 
 // extractWorkingDir returns the trimmed path from the first
 // "Working directory: X" line in prompt, or empty when absent.
+//
+// Trailing punctuation is stripped here rather than in the pattern. The
+// regex's closing "`?" only sheds a backtick that ends the line, so a hint
+// written as a sentence — "Рабочий каталог: `/tmp/x`." — otherwise yields
+// "/tmp/x`." and every relative artifact under it fails to resolve. That
+// silently turned a whole end-to-end run's artifact checks red.
 func extractWorkingDir(prompt string) string {
 	m := workingDirRe.FindStringSubmatch(prompt)
 	if len(m) < 2 {
 		return ""
 	}
-	return strings.TrimRight(strings.TrimSpace(m[1]), "/")
+	path := strings.TrimSpace(m[1])
+	path = strings.TrimRight(path, ".,;:!?)]}\"'`")
+	return strings.TrimRight(strings.TrimSpace(path), "/")
 }
 
 // notifRe splits a queue-operation payload's <task-notification> block.

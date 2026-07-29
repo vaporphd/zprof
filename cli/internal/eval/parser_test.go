@@ -86,3 +86,20 @@ func TestGuessRole(t *testing.T) {
 		})
 	}
 }
+
+// TestExtractWorkingDirStripsTrailingPunctuation guards the case that broke a
+// real end-to-end run: the hint written as a sentence. The regex's closing
+// backtick only matches at line end, so "…`/tmp/x`." used to yield "/tmp/x`."
+// and every relative artifact under that root was reported missing.
+func TestExtractWorkingDirStripsTrailingPunctuation(t *testing.T) {
+	cases := map[string]string{
+		"Рабочий каталог: `/tmp/e2e-py`.":  "/tmp/e2e-py",
+		"Working directory: `/tmp/e2e-py`.": "/tmp/e2e-py",
+		"Рабочий каталог: /tmp/e2e-py,":     "/tmp/e2e-py",
+		"Working directory: `/tmp/e2e-py`":  "/tmp/e2e-py",
+		"Рабочий каталог: /tmp/e2e-py/":     "/tmp/e2e-py",
+	}
+	for prompt, want := range cases {
+		require.Equal(t, want, extractWorkingDir(prompt), "prompt: %s", prompt)
+	}
+}
