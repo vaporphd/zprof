@@ -131,8 +131,14 @@ func TestBuildStopListBlockMergesBaseAndOverlays(t *testing.T) {
 	require.Contains(t, got, "| force-push в опубликованную ветку | base |")
 	require.Contains(t, got, "| загрузка билда в TestFlight | ios-swift |")
 	// Дубль, объявленный и в base, и в overlay, рендерится один раз — с
-	// источником base, потому что base идёт первым.
+	// источником base, потому что base идёт первым. Проверяем не просто
+	// счётчик строки (он остался бы равен 1 и при развороте правила
+	// «первый выигрывает» на «последний»), а именно то, какой источник
+	// выжил: ряд с source=base должен присутствовать, ряд с
+	// source=ios-swift для той же строки — отсутствовать.
 	require.Equal(t, 1, strings.Count(got, "релиз, деплой, публикация пакета"))
+	require.Contains(t, got, "| релиз, деплой, публикация пакета | base |")
+	require.NotContains(t, got, "| релиз, деплой, публикация пакета | ios-swift |")
 }
 
 // Удаление файлов агентов — единственная деструктивная операция apply,
