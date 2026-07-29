@@ -3,6 +3,7 @@ package apply
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/vaporphd/zprof/internal/managed"
@@ -106,4 +107,48 @@ func TestApplyMultiOverlayNamespacesAgents(t *testing.T) {
 	// architect should be namespaced when >1 overlay
 	require.FileExists(t, filepath.Join(proj, ".claude", "agents", "architect-fake-ios.md"))
 	require.FileExists(t, filepath.Join(proj, ".claude", "agents", "architect-fake-py.md"))
+}
+
+func TestBuildStopListBlockMergesBaseAndOverlays(t *testing.T) {
+	opts := ApplyOpts{
+		Base: &overlay.Base{
+			Manifest: &manifest.OverlayManifest{
+				Name:     "base",
+				StopList: []string{"force-push в опубликованную ветку", "релиз, деплой, публикация пакета"},
+			},
+		},
+		Overlays: []*overlay.Overlay{
+			{Manifest: &manifest.OverlayManifest{
+				Name:     "ios-swift",
+				StopList: []string{"загрузка билда в TestFlight", "релиз, деплой, публикация пакета"},
+			}},
+		},
+	}
+
+	got := buildStopListBlock(opts)
+
+	require.Contains(t, got, "## Stop list")
+	require.Contains(t, got, "| force-push в опубликованную ветку | base |")
+	require.Contains(t, got, "| загрузка билда в TestFlight | ios-swift |")
+	// Дубль, объявленный и в base, и в overlay, рендерится один раз — с
+	// источником base, потому что base идёт первым. Проверяем не просто
+	// счётчик строки (он остался бы равен 1 и при развороте правила
+	// «первый выигрывает» на «последний»), а именно то, какой источник
+	// выжил: ряд с source=base должен присутствовать, ряд с
+	// source=ios-swift для той же строки — отсутствовать.
+	require.Equal(t, 1, strings.Count(got, "релиз, деплой, публикация пакета"))
+	require.Contains(t, got, "| релиз, деплой, публикация пакета | base |")
+	require.NotContains(t, got, "| релиз, деплой, публикация пакета | ios-swift |")
+}
+
+// Удаление файлов агентов — единственная деструктивная операция apply,
+// поэтому она отчитывается именами, а не счётчиком.
+func TestFormatRemovedAgentsNamesAndBackupHint(t *testing.T) {
+	require.Empty(t, FormatRemovedAgents(nil))
+
+	out := FormatRemovedAgents([]string{"tester-py", "implementer-py"})
+	require.Contains(t, out, "Удалено агентов: 2")
+	require.Contains(t, out, ".bak")
+	// Имена отсортированы, чтобы вывод не прыгал между запусками.
+	require.Contains(t, out, "implementer-py, tester-py")
 }

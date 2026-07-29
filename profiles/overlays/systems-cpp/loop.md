@@ -19,7 +19,7 @@
 - Testing: GoogleTest + GoogleMock, EXPECT/ASSERT hierarchy, parameterized (`INSTANTIATE_TEST_SUITE_P`), typed (`TYPED_TEST_SUITE`)
 - Static analysis: `clang-tidy` with `--config-file=.clang-tidy`
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Configure / build / test | `cmake-runner` |

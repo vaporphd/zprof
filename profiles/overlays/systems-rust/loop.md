@@ -21,7 +21,7 @@
 - Proc macros: `#[derive(...)]`, custom derive, attribute macros
 - Const generics + `const fn`
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | build/check/run/test | `cargo-runner` |

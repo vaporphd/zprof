@@ -32,6 +32,13 @@ type OverlayManifest struct {
 	// legacy detect-globs fallback is used, which is imprecise for overlays
 	// with multiple executing agents.
 	Executing map[string]string `yaml:"executing"`
+	// StopList enumerates irreversible or outward-facing actions the
+	// task-runner must never take on its own — it returns verdict=blocked
+	// and hands the decision back to the user instead. Plain
+	// human-readable sentences: the runner reads them, nothing matches
+	// them mechanically. Emptiness is diagnosed by `zprof doctor`, not by
+	// this parser, so overlays predating the field still load.
+	StopList []string `yaml:"stop_list"`
 }
 
 // LoadOverlay reads and validates an overlay manifest.yaml file at path.

@@ -4,40 +4,24 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/vaporphd/zprof/internal/agents"
 	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 // IsKnownRole returns true if role is a valid role or gate name — used by
 // commands like `zprof agents set` to reject typos before they persist in
 // .zprof.yaml where they'd silently misconfigure the next apply.
-func IsKnownRole(role string) bool {
-	return roleAgents[role] || gateRoles[role]
-}
+//
+// The role/tool distinction itself lives in internal/agents so doctor can
+// apply the same rule without importing this package.
+func IsKnownRole(role string) bool { return agents.IsRole(role) }
 
-// roleAgents is the whitelist of agent basenames considered "roles" for the
-// Consilium (role -> agent) table. Everything else — tool-agents dispatched
-// from within a workflow rather than from the top-level router — is skipped.
-var roleAgents = map[string]bool{
-	"planner":                  true,
-	"docs-writer":              true,
-	"dev-orchestrator":         true,
-	"exploratory-orchestrator": true,
-	"architect":                true,
-	"implementer":              true,
-	"tester":                   true,
-	"bug-hunter":               true,
-	"refactor-agent":           true,
-	"explorer":                 true,
-	"reviewer":                 true,
-}
-
-// gateRoles are the gates/*.md base agents that count as roles when
-// --with-gates is set.
-var gateRoles = map[string]bool{
-	"north-star-auditor": true,
-	"evidence-auditor":   true,
-	"plan-reviewer":      true,
-}
+// roleAgents / gateRoles alias the shared definitions; the Consilium table
+// below reads them on every row.
+var (
+	roleAgents = agents.Roles
+	gateRoles  = agents.Gates
+)
 
 // buildConsiliumTable auto-generates the "## Consilium" markdown table
 // (role -> agent -> source) from the base and overlay agents actually
@@ -147,12 +131,18 @@ func buildExecutingTable(opts ApplyOpts) string {
 			}
 			continue
 		}
-		agent := "dev-orchestrator"
-		if _, ok := o.Agents["implementer"]; ok {
-			agent = "implementer"
-			if multi {
-				agent = overlay.NamespaceAgent("implementer", o.Manifest.Name)
-			}
+		// No `executing:` map and no implementer to fall back on: this
+		// overlay has no file owner at all (process-only overlays like
+		// issue-loop-github-strict, read-only ones like re-macho). Emit
+		// nothing. Naming `task-runner` here would contradict its own
+		// prompt — it does not write code — and the runner reads this very
+		// table to learn who owns what.
+		if _, ok := o.Agents["implementer"]; !ok {
+			continue
+		}
+		agent := "implementer"
+		if multi {
+			agent = overlay.NamespaceAgent("implementer", o.Manifest.Name)
 		}
 		globs := "-"
 		if o.Detect != nil {
@@ -161,6 +151,44 @@ func buildExecutingTable(opts ApplyOpts) string {
 			}
 		}
 		b.WriteString("| " + agent + " | " + globs + " |\n")
+	}
+
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// buildStopListBlock renders the "## Stop list" section for CLAUDE.md: the
+// base entries followed by each active overlay's, deduplicated, every row
+// tagged with the source that declared it. The list binds both actors — the
+// runner returns verdict=blocked instead of performing one, and the main
+// session (which owns git operations, and the list contains force-push and
+// branch/tag deletion) asks the user first. Rendered into CLAUDE.md on
+// purpose — a policy the user cannot read is a hidden policy.
+func buildStopListBlock(opts ApplyOpts) string {
+	var b strings.Builder
+	b.WriteString("## Stop list\n\n")
+	b.WriteString("Список связывает **обоих** акторов. `task-runner` не выполняет перечисленное и не поручает — возвращает `verdict: blocked` с вопросом. Main-сессия перечисленное не делает своими руками (в списке есть git-операции, которые иначе принадлежат ей) — сначала спрашивает пользователя. Решение в обоих случаях принимает человек.\n\n")
+	b.WriteString("| Действие | Источник |\n")
+	b.WriteString("|---|---|\n")
+
+	seen := map[string]bool{}
+	appendRows := func(entries []string, source string) {
+		for _, e := range entries {
+			if e == "" || seen[e] {
+				continue
+			}
+			seen[e] = true
+			b.WriteString("| " + e + " | " + source + " |\n")
+		}
+	}
+
+	if opts.Base != nil && opts.Base.Manifest != nil {
+		appendRows(opts.Base.Manifest.StopList, "base")
+	}
+	for _, o := range opts.Overlays {
+		if o == nil || o.Manifest == nil {
+			continue
+		}
+		appendRows(o.Manifest.StopList, o.Manifest.Name)
 	}
 
 	return strings.TrimRight(b.String(), "\n")

@@ -1,20 +1,35 @@
 # Dev pipeline
 
-Основной поток. Overlay подставляет свои stack-aware агенты
-(architect / implementer / tester / bug-hunter / refactor-agent / explorer).
+Инструкция для `task-runner`, не для main. Overlay подставляет свои
+stack-aware агенты (`architect` / `implementer` / `tester` / `bug-hunter` /
+`refactor-agent` / `explorer` / `reviewer`), при нескольких overlay'ях —
+namespace-нутые.
 
-## Dispatch table
-| Задача | Первый агент |
+## Маршруты
+
+| Тип задачи | Цепочка |
 |---|---|
-| Новая feature | `dev-orchestrator` |
-| Багфикс | `bug-hunter` (overlay-specific) → `dev-orchestrator` если нужен полный pipeline |
-| Только дизайн | `architect` (overlay-specific) |
-| Только code review | `reviewer` (overlay-specific) |
-| Только тесты | `tester` (overlay-specific) |
-| Рефакторинг без feature | `refactor-agent` (overlay-specific) |
-| Read-only investigation | `explorer` (overlay-specific) |
+| Новая фича | `planner → architect → implementer → tester → reviewer` |
+| Багфикс | `bug-hunter → tester → reviewer` |
+| Рефактор без новой функциональности | `refactor-agent → tester → reviewer` |
+| Только тесты | `tester` |
+| Только ревью | `reviewer` |
+| Read-only investigation внутри задачи | `explorer` |
 
-## Изоляция (обязательные правила main'а)
-1. Не цитировать output subagent'а — только return_format schema.
-2. ≤3 строки в followup.md после каждого dispatch.
-3. Vocal self-check перед dispatch: «читаю поле <X> из результата».
+## Петля тестов
+
+`tester` вернул `failed` — это не провал цикла. Верни работу
+`implementer`'у с текстом падения, максимум **три** круга. Не сошлось —
+`verdict: blocked` с историей попыток.
+
+## Fan-out
+
+Если требуется ≥5 независимых параллельных проверок (обзор многих файлов,
+sweep по миграции) — используй Workflow tool вместо параллельных Task'ов.
+Для параллельных `implementer`'ов задавай `isolation: "worktree"`, иначе
+они подерутся за файлы.
+
+## Изоляция
+
+Читай только поля схемы возвращаемых агентов. Содержимое артефактов
+втягивай, лишь когда оно нужно тебе для решения, а не «на всякий случай».

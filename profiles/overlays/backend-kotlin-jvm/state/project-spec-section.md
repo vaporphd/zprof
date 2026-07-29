@@ -62,7 +62,7 @@
 - MERGE_GATE: <local-green | CI-green>
 - If local-green: `.githooks/pre-commit` runs `ktlintCheck` on staged .kt; `.githooks/pre-push` runs `test`. No CI required.
 - If CI-green: GitHub Actions / GitLab CI workflow at `.github/workflows/*.yml`; must be green before merge.
-- AUTO_MERGE: <on | off> — controls whether `pr-shepherd` auto-merges approved+green PRs.
+- MERGE: human approval required. `pr-shepherd` runs pre-flight + delivery checks and stops there — merging into the default branch is on the stop list, so the runner returns `blocked` and a human performs the merge.
 
 ### Forbidden imports blacklist (per module)
 - `core-model/**` — no `io.ktor.*`, `org.springframework.*`, `java.sql.*`, `okhttp3.*`, `retrofit2.*`, or any other feature module's package.

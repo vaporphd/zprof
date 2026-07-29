@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -78,6 +79,39 @@ func TestParseReturnFormatToleratesFencedBlock(t *testing.T) {
 	require.Equal(t, "verdict: block", r.RawFirstLine)
 }
 
+func TestNextFieldAcceptsTaskRunner(t *testing.T) {
+	// task-runner replaces dev-orchestrator/exploratory-orchestrator as the
+	// loop's entry point. Any agent that hands control back to it via
+	// `next: task-runner` must not be flagged as next-unreachable — that's
+	// exactly how §12.1 attributes dispatch outcomes to the new role.
+	trace := &Trace{
+		Dispatches: []Dispatch{
+			{
+				ID:        "d1",
+				AgentName: "task-runner dispatch",
+				Status:    "completed",
+				Returned:  Return{Verdict: "done", Next: "task-runner", RawFirstLine: "verdict: done"},
+			},
+			{
+				ID:        "d2",
+				AgentName: "task-runner dispatch",
+				Status:    "completed",
+				Returned:  Return{Verdict: "done", Next: "totally-made-up", RawFirstLine: "verdict: done"},
+			},
+		},
+	}
+	score := Score(trace, func(string, string) bool { return true })
+
+	var unreachable []string
+	for _, v := range score.Violations {
+		if v.Kind == "next-unreachable" {
+			unreachable = append(unreachable, v.DispatchID)
+		}
+	}
+	require.NotContains(t, unreachable, "d1", "next: task-runner must be a known role")
+	require.Contains(t, unreachable, "d2", "sanity check: an unknown role must still be flagged — otherwise the assertion above proves nothing")
+}
+
 func TestIsPassAcceptsReviewerVerdicts(t *testing.T) {
 	// Reviewer uses a different verdict vocabulary than architect/implementer.
 	// The scorer must recognize all approval variants including the routine
@@ -91,4 +125,140 @@ func TestIsPassAcceptsReviewerVerdicts(t *testing.T) {
 	require.False(t, isPass("blocked"))
 	require.False(t, isPass("failed"))
 	require.False(t, isPass(""), "empty verdict means the schema was never emitted")
+}
+
+// TestNextFieldAcceptsEveryTargetProfilesEmit locks knownRoles to the set of
+// `next:` targets the shipped profiles actually emit. Every miss here scored
+// a contract-compliant handoff as a `next-unreachable` violation, which made
+// the "Compliance without violations" acceptance criterion unreachable on
+// any project using issue-loop-github-strict or re-macho.
+//
+// The list is the deduplicated output of
+// `grep -rhoE '^ *next: .*' profiles/ --include='*.md'` split on `|`.
+func TestNextFieldAcceptsEveryTargetProfilesEmit(t *testing.T) {
+	emitted := []string{
+		"architect", "bug-hunter", "explorer", "human", "hypothesizer",
+		"implementer", "integration-gate", "main-session", "null",
+		"plan-reviewer", "planner", "pr-shepherd", "refactor-agent",
+		"report-writer", "reviewer", "task-runner", "tester", "unpacker",
+		"verifier",
+	}
+	var dispatches []Dispatch
+	for i, target := range emitted {
+		dispatches = append(dispatches, Dispatch{
+			ID:        fmt.Sprintf("ok-%d", i),
+			AgentName: "reviewer run",
+			Status:    "completed",
+			Returned:  Return{Verdict: "done", Next: target, RawFirstLine: "verdict: done"},
+		})
+	}
+	// Negative control: an invented target must still be flagged, otherwise
+	// the assertions above would pass on a knownRoles map that accepts all.
+	dispatches = append(dispatches, Dispatch{
+		ID: "bogus", AgentName: "reviewer run", Status: "completed",
+		Returned: Return{Verdict: "done", Next: "kubernetes-whisperer", RawFirstLine: "verdict: done"},
+	})
+
+	score := Score(&Trace{Dispatches: dispatches}, func(string, string) bool { return true })
+
+	unreachable := map[string]bool{}
+	for _, v := range score.Violations {
+		if v.Kind == "next-unreachable" {
+			unreachable[v.DispatchID] = true
+		}
+	}
+	for i, target := range emitted {
+		require.False(t, unreachable[fmt.Sprintf("ok-%d", i)],
+			"next: %s is emitted by a shipped profile and must be reachable", target)
+	}
+	require.True(t, unreachable["bogus"], "an unknown target must still be flagged")
+}
+
+// TestArtifactConfirmedByRunLogWhenArtifactIsNotAPath guards the second
+// real-run regression: task-runner's contract explicitly allows `artifact`
+// to be a PR link or commit SHA list instead of a path ("ссылка на PR, SHA
+// коммита или путь к отчёту" — profiles/base/agents/task-runner.md). A real
+// dispatch returned `artifact: commits 2493635 (feat retry), 22d03f6 (chore
+// version 0.2.0); dist/netkit-0.2.0-py3-none-any.whl` — contract-valid, but
+// scored as artifact-missing because no candidate parsed out of that string
+// is a real path. `run_log` is the runner's own mandatory journal path
+// (always a real on-disk path per contract); its existence is treated as
+// proof the dispatch happened, confirming the artifact claim without
+// stat-ing it directly.
+func TestArtifactConfirmedByRunLogWhenArtifactIsNotAPath(t *testing.T) {
+	notAPath := "commits 2493635 (feat retry), 22d03f6 (chore version 0.2.0); dist/netkit-0.2.0-py3-none-any.whl"
+	const runLogPath = ".zprof/runs/2026-07-28-fix.md"
+
+	// checkArtifactExists is called with (path, workingDir) — only the
+	// runner's journal path resolves to a real file; the PR/SHA-list
+	// artifact string never will, by construction of this fake.
+	onlyRunLogExists := func(path, workingDir string) bool { return path == runLogPath }
+
+	confirmed := &Trace{Dispatches: []Dispatch{{
+		ID: "d1", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{
+			Verdict: "done", Artifact: notAPath, RunLog: runLogPath,
+			RawFirstLine: "verdict: done",
+		},
+	}}}
+	score := Score(confirmed, onlyRunLogExists)
+	require.Empty(t, score.Violations, "existing run_log must confirm a non-path artifact claim")
+
+	unconfirmed := &Trace{Dispatches: []Dispatch{{
+		ID: "d2", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{
+			Verdict: "done", Artifact: notAPath, RunLog: "",
+			RawFirstLine: "verdict: done",
+		},
+	}}}
+	score = Score(unconfirmed, onlyRunLogExists)
+	require.Len(t, score.Violations, 1)
+	require.Equal(t, "artifact-missing", score.Violations[0].Kind,
+		"without a confirming run_log, a non-path artifact must still be flagged")
+}
+
+// TestArtifactMissingSkippedForBlockedVerdict guards against the real
+// end-to-end regression: a task-runner dispatch returned `verdict: blocked`
+// with `artifact: —` (its contract's placeholder for "nothing produced
+// yet") and the scorer flagged it as artifact-missing with the literal
+// detail text `claimed artifact not found on disk: —`. `blocked` means the
+// runner stopped for a human decision before producing anything, so the
+// artifact field is not a check-able claim at all — only `done` and
+// `failed` dispatches should still be held to the file-existence check.
+func TestArtifactMissingSkippedForBlockedVerdict(t *testing.T) {
+	neverExists := func(string, string) bool { return false }
+
+	blocked := &Trace{Dispatches: []Dispatch{{
+		ID: "d-blocked", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{Verdict: "blocked", Artifact: "—", RawFirstLine: "verdict: blocked"},
+	}}}
+	score := Score(blocked, neverExists)
+	require.Empty(t, score.Violations, "blocked verdict must not raise artifact-missing")
+
+	done := &Trace{Dispatches: []Dispatch{{
+		ID: "d-done", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{Verdict: "done", Artifact: "—", RawFirstLine: "verdict: done"},
+	}}}
+	score = Score(done, neverExists)
+	require.Len(t, score.Violations, 1)
+	require.Equal(t, "artifact-missing", score.Violations[0].Kind,
+		"done verdict with an unresolvable artifact claim must still be flagged")
+}
+
+// The exploratory chain used to bucket to "other", which made RE sessions
+// unreadable in the scorecard.
+func TestGuessRoleKnowsExploratoryChain(t *testing.T) {
+	for desc, want := range map[string]string{
+		"Intake for the macho binary":       "intake",
+		"unpacker pass 1":                   "unpacker",
+		"Hypothesizer — 4 candidates":       "hypothesizer",
+		"Verifier on hypothesis 2":          "verifier",
+		"report-writer final":               "report-writer",
+		"Report writer final":               "report-writer",
+		"Dev-orchestrator (archived run)":   "dev-orchestrator",
+		"exploratory orchestrator archived": "exploratory-orchestrator",
+		"totally unrelated label":           "other",
+	} {
+		require.Equal(t, want, GuessRole(desc), "description: %q", desc)
+	}
 }

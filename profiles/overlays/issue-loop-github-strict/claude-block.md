@@ -6,7 +6,6 @@ pipeline:
     # populates each. Leave placeholders here and edit per project.
     default_branch: "main"                # override per project
     merge_gate: "local-green"             # local-green | CI-green
-    auto_merge: "off"                     # on | off — controls pr-shepherd dispatch
     integration_scope: []                 # list of paths/globs whose PRs must exercise <integration_gate>
     integration_gate: "<see stack overlay's claude-block>"
     build_cmd: "<see stack overlay's claude-block>"
@@ -26,7 +25,7 @@ pipeline:
     # Pipeline shape — the canonical sequence agents run in
     pipeline_shape: |
       backlog empty   → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR, gh issue create)
-      issue picked    → main-session dispatches architect (if ADR-trigger=yes) → implementer
+      issue picked    → task-runner dispatches architect (if ADR-trigger=yes) → implementer
       PR opened       → integration-gate (if in INTEGRATION_SCOPE) → wiki-keeper → reviewer
-      approved        → pr-shepherd (if AUTO_MERGE=on) → merge + delete branch + stamp
+      approved        → pr-shepherd (pre-flight + delivery checks) → blocked: merge approval → human merges
       post-merge      → spec-maintainer (docs/PROJECT_SPEC.md) + docs-writer (README/CLAUDE.md/followup.md/lessons.md)

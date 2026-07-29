@@ -59,8 +59,7 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	for _, f := range []string{
 		".claude/agents/planner.md",
 		".claude/agents/docs-writer.md",
-		".claude/agents/dev-orchestrator.md",
-		".claude/agents/exploratory-orchestrator.md",
+		".claude/agents/task-runner.md",
 		".claude/agents/architect.md",
 		".claude/agents/implementer.md",
 		".claude/agents/tester.md",
@@ -124,15 +123,107 @@ func TestE2E_IOSApplyOnFixture(t *testing.T) {
 	// content, none of the workflow's own dispatch/trigger content that
 	// used to be inlined via the old loop-template block.
 	loop, _ := os.ReadFile(filepath.Join(proj, "AGENT_LOOP.md"))
-	require.Contains(t, string(loop), "Agent loop router")
-	require.NotContains(t, string(loop), "Dispatch table")
+	require.Contains(t, string(loop), "Контракт main-сессии")
+	require.NotContains(t, string(loop), "Маршруты")
 	require.NotContains(t, string(loop), "Trigger-фразы")
 
 	// Assert workflows/dev-pipeline.md composes the base workflow content
 	// (base/workflows/dev-pipeline.md) plus the ios-swift extension.
 	wf, _ := os.ReadFile(filepath.Join(proj, "workflows", "dev-pipeline.md"))
-	require.Contains(t, string(wf), "Dispatch table")
+	require.Contains(t, string(wf), "Маршруты")
 	require.Contains(t, string(wf), "<!-- zprof:begin overlay=ios-swift block=workflow-extension -->")
+}
+
+// TestE2E_SecondApplyPrunesDroppedOverlayAgents is the regression for the
+// dropped `managed_agents` carry-over: `zprof apply ios-swift
+// backend-python` writes namespaced agents and records the roster, then
+// `zprof apply ios-swift` must delete the backend-python half. Before the
+// fix the second run built a fresh manifest that lost the roster, so prune
+// saw previous=nil and every `*-py` agent stayed behind as a valid,
+// dispatchable file that nothing would ever remove.
+//
+// The test walks the exact sequence cmd/apply.go performs — load the saved
+// manifest, build a fresh one from the new flags, CarryOverFrom — so it
+// fails if that call site regresses, not only if the engine does.
+func TestE2E_SecondApplyPrunesDroppedOverlayAgents(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err)
+	profilesDir := filepath.Join(root, "profiles")
+
+	proj := t.TempDir()
+	copyDir(t, filepath.Join(root, "cli", "testdata", "projects", "smoke-ios"), proj)
+	mfPath := filepath.Join(proj, ".zprof.yaml")
+
+	base, err := overlay.LoadBase(filepath.Join(profilesDir, "base"))
+	require.NoError(t, err)
+	ios, err := overlay.LoadOverlay(filepath.Join(profilesDir, "overlays", "ios-swift"))
+	require.NoError(t, err)
+	py, err := overlay.LoadOverlay(filepath.Join(profilesDir, "overlays", "backend-python"))
+	require.NoError(t, err)
+
+	// First apply: two overlays, so every overlay agent is namespaced.
+	first := &manifest.ProjectManifest{Overlays: []string{"ios-swift", "backend-python"}, Language: "ru"}
+	_, err = Apply(ApplyOpts{
+		ProjectDir: proj, Base: base, Overlays: []*overlay.Overlay{ios, py},
+		Project: first, MergeMode: managed.ModeOverwrite,
+	})
+	require.NoError(t, err)
+
+	pyAgents := []string{"implementer-py", "tester-py", "architect-py", "reviewer-py"}
+	for _, n := range pyAgents {
+		require.FileExists(t, filepath.Join(proj, ".claude", "agents", n+".md"))
+	}
+
+	saved, err := manifest.LoadProject(mfPath)
+	require.NoError(t, err)
+	require.Contains(t, saved.ManagedAgents, "implementer-py",
+		"apply must persist the roster it wrote")
+
+	// Second apply: ios-swift only, exactly as cmd/apply.go composes it.
+	second := &manifest.ProjectManifest{Overlays: []string{"ios-swift"}, Language: "ru"}
+	second.CarryOverFrom(saved)
+	res, err := Apply(ApplyOpts{
+		ProjectDir: proj, Base: base, Overlays: []*overlay.Overlay{ios},
+		Project: second, MergeMode: managed.ModeOverwrite,
+	})
+	require.NoError(t, err)
+
+	for _, n := range pyAgents {
+		require.NoFileExists(t, filepath.Join(proj, ".claude", "agents", n+".md"),
+			"orphan from the dropped overlay must be removed: %s", n)
+		require.Contains(t, res.RemovedAgents, n)
+		baks, globErr := filepath.Glob(filepath.Join(proj, ".claude", "agents", n+".md.zprof.bak-*"))
+		require.NoError(t, globErr)
+		require.Len(t, baks, 1, "every removal keeps a .bak: %s", n)
+	}
+
+	// The surviving overlay is now single, so its agents are un-namespaced;
+	// the namespaced ios copies are orphans too and must be gone.
+	require.FileExists(t, filepath.Join(proj, ".claude", "agents", "implementer.md"))
+	require.NoFileExists(t, filepath.Join(proj, ".claude", "agents", "implementer-ios.md"))
+
+	// And the roster on disk now describes only what the second apply wrote.
+	after, err := manifest.LoadProject(mfPath)
+	require.NoError(t, err)
+	require.NotContains(t, after.ManagedAgents, "implementer-py")
+	require.Contains(t, after.ManagedAgents, "implementer")
+}
+
+// User overrides must survive an apply the same way the roster does.
+func TestCarryOverFromKeepsOverridesAndRoster(t *testing.T) {
+	prev := &manifest.ProjectManifest{
+		Overlays:       []string{"ios-swift", "backend-python"},
+		ModelOverrides: map[string]string{"architect": "opus"},
+		AgentOverrides: map[string]string{"tester": "tester-custom"},
+		ManagedAgents:  []string{"implementer-py", "implementer-ios"},
+	}
+	next := &manifest.ProjectManifest{Overlays: []string{"ios-swift"}, Language: "ru"}
+	next.CarryOverFrom(prev)
+
+	require.Equal(t, prev.ModelOverrides, next.ModelOverrides)
+	require.Equal(t, prev.AgentOverrides, next.AgentOverrides)
+	require.Equal(t, prev.ManagedAgents, next.ManagedAgents)
+	require.Equal(t, []string{"ios-swift"}, next.Overlays, "overlays come from the command line, not the old file")
 }
 
 func TestE2E_IOSApplyWithGates(t *testing.T) {

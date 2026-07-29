@@ -2,12 +2,14 @@
 package doctor
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 func hasLevel(issues []Issue, level string) bool {
@@ -47,7 +49,10 @@ func TestDiagnoseWarnsOnMultipleOverlays(t *testing.T) {
 		[]byte("overlays: [a, b]\n"), 0o644))
 	repo := t.TempDir()
 	for _, n := range []string{"a", "b"} {
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays", n), 0o755))
+		ovDir := filepath.Join(repo, "overlays", n)
+		require.NoError(t, os.MkdirAll(ovDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+			[]byte("name: "+n+"\nstop_list: [\"x\"]\n"), 0o644))
 	}
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
@@ -60,7 +65,10 @@ func TestDiagnoseSingleOverlayNoCountIssue(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"),
 		[]byte("overlays: [a]\n"), 0o644))
 	repo := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays", "a"), 0o755))
+	ovDir := filepath.Join(repo, "overlays", "a")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: a\nstop_list: [\"x\"]\n"), 0o644))
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -121,6 +129,9 @@ func TestDiagnoseAgentResolvableModelIsClean(t *testing.T) {
 	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "auditor.md"),
 		[]byte("---\nname: auditor\nmodel: opus\n---\nBody.\n"), 0o644))
+	// task-runner is a role, so it must also declare a return_format.
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "agents", "task-runner.md"),
+		[]byte("---\nname: task-runner\nmodel: opus\nreturn_format: |\n  verdict: done\n---\nBody.\n"), 0o644))
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -197,4 +208,388 @@ func TestDiagnoseCleanProjectHasNoIssues(t *testing.T) {
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
+}
+
+func TestCheckTaskRunnerMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "agents"), 0o755))
+
+	issues := checkTaskRunner(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "task-runner")
+}
+
+func TestCheckTaskRunnerFlagsSurvivingOrchestrator(t *testing.T) {
+	dir := t.TempDir()
+	agents := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agents, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agents, "task-runner.md"), []byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agents, "dev-orchestrator.md"), []byte("---\nname: dev-orchestrator\n---\n"), 0o644))
+
+	issues := checkTaskRunner(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "dev-orchestrator")
+}
+
+func TestCheckStopListsEmptyOverlay(t *testing.T) {
+	repo := t.TempDir()
+	ovDir := filepath.Join(repo, "overlays", "demo")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: demo\nloop_template: dev-pipeline\n"), 0o644))
+
+	issues := checkStopLists([]string{"demo"}, repo)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "stop_list")
+}
+
+// A missing overlay directory is checkOverlaysExist's turf — checkStopLists
+// stays silent about it.
+func TestCheckStopListsSilentWhenOverlayDirMissing(t *testing.T) {
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays"), 0o755))
+
+	require.Empty(t, checkStopLists([]string{"nonexistent"}, repo))
+}
+
+// The overlay's directory exists but manifest.yaml doesn't parse — nothing
+// else in doctor catches this, and `apply`/`sync` fail on it outright, so
+// checkStopLists must report it.
+func TestCheckStopListsBrokenManifestErrors(t *testing.T) {
+	repo := t.TempDir()
+	ovDir := filepath.Join(repo, "overlays", "demo")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: [this is not valid yaml\n"), 0o644))
+
+	issues := checkStopLists([]string{"demo"}, repo)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "manifest failed to load")
+	require.Contains(t, issues[0].Path, "manifest.yaml")
+}
+
+func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {
+	dir := t.TempDir()
+	runs := filepath.Join(dir, ".zprof", "runs")
+	require.NoError(t, os.MkdirAll(runs, 0o755))
+	for i := 0; i < 51; i++ {
+		require.NoError(t, os.WriteFile(filepath.Join(runs, fmt.Sprintf("r%02d.md", i)), []byte("x"), 0o644))
+	}
+
+	issues := checkRunLogs(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+}
+
+// --- return_format contract (spec §10) ---------------------------------
+
+// A role's caller parses its answer as a schema, so a role without
+// return_format silently derails the loop.
+func TestCheckAgentFrontmatterRoleMissingReturnFormat(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nmodel: opus\n---\nbody\n"), 0o644))
+
+	issues := checkAgentFrontmatter(proj)
+	require.True(t, findIssue(issues, LevelError, "return_format"))
+}
+
+// Namespaced roles from a multi-overlay apply must be recognized as roles.
+func TestCheckAgentFrontmatterNamespacedRoleMissingReturnFormat(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "refactor-agent-ios.md"),
+		[]byte("---\nname: refactor-agent-ios\nmodel: opus\n---\nbody\n"), 0o644))
+
+	issues := checkAgentFrontmatter(proj)
+	require.True(t, findIssue(issues, LevelError, `role "refactor-agent"`))
+}
+
+// Tool-agents are exempt — and so is a user's own agent sitting in
+// .claude/agents/, which doctor has no business grading.
+func TestCheckAgentFrontmatterToolAgentNeedsNoReturnFormat(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "xcode-runner.md"),
+		[]byte("---\nname: xcode-runner\nmodel: haiku\n---\nbody\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "my-own-helper.md"),
+		[]byte("---\nname: my-own-helper\nmodel: haiku\n---\nbody\n"), 0o644))
+
+	require.Empty(t, checkAgentFrontmatter(proj))
+}
+
+// A role that declares the field is clean.
+func TestCheckAgentFrontmatterRoleWithReturnFormatIsClean(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "reviewer.md"),
+		[]byte("---\nname: reviewer\nmodel: opus\nreturn_format: |\n  verdict: approve\n---\nbody\n"), 0o644))
+
+	require.Empty(t, checkAgentFrontmatter(proj))
+}
+
+// --- orphan agents (spec §10) ------------------------------------------
+
+// writeRepoFixture builds a minimal but real zprof repo: base with one
+// agent, plus the named overlays each with one agent.
+func writeRepoFixture(t *testing.T, overlayAgents map[string][]string) string {
+	t.Helper()
+	repo := t.TempDir()
+	baseDir := filepath.Join(repo, "base")
+	require.NoError(t, os.MkdirAll(filepath.Join(baseDir, "agents"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "manifest.yaml"),
+		[]byte("name: base\nversion: 0.1.0\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(baseDir, "agents", "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+
+	for name, list := range overlayAgents {
+		dir := filepath.Join(repo, "overlays", name)
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "agents"), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "manifest.yaml"),
+			[]byte("name: "+name+"\nloop_template: dev-pipeline\nstop_list: [\"x\"]\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "detect.yaml"),
+			[]byte("name: "+name+"\ndetect:\n  any_file: [\"go.mod\"]\n  confidence: high\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "loop.md"), []byte("loop\n"), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "claude-block.md"), []byte("block\n"), 0o644))
+		for _, a := range list {
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "agents", a+".md"),
+				[]byte("---\nname: "+a+"\n---\n"), 0o644))
+		}
+	}
+	return repo
+}
+
+func TestCheckOrphanAgentsWarnsOnUntrackedFile(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	for _, n := range []string{"task-runner", "implementer", "implementer-py"} {
+		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, n+".md"),
+			[]byte("---\nname: "+n+"\n---\n"), 0o644))
+	}
+
+	// managed_agents empty — exactly the pre-migration project this check
+	// exists for: prune can never fire, so the leftover must be shown.
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, pm)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "implementer-py")
+}
+
+func TestCheckOrphanAgentsSilentOnDisownedFile(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\n---\n"), 0o644))
+	// The user's own agent, claimed via the frontmatter marker.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "my-custom.md"),
+		[]byte("---\nname: my-custom\nzprof_managed: false\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	require.Empty(t, checkOrphanAgents(proj, repo, pm),
+		"a file claimed with zprof_managed: false is not an orphan")
+}
+
+func TestCheckOrphanAgentsStillWarnsWhenMarkerUnparseable(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\n---\n"), 0o644))
+	// Broken YAML: the claim cannot be read, so it does not suppress.
+	// Suppressing here would hide the orphan and the parse error together.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "broken.md"),
+		[]byte("---\nname: broken\nzprof_managed: [unclosed\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, pm)
+
+	require.Len(t, issues, 1)
+	require.Contains(t, issues[0].Message, "broken")
+}
+
+func TestCheckOrphanAgentsWarnsWhenDisowningAProvidedAgent(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	// `implementer` comes from the active overlay: the marker buys nothing,
+	// and the user must be told rather than left feeling protected.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nzprof_managed: false\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, pm)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "overwrites")
+}
+
+func TestCheckOrphanAgentsSilentWhenTrackedOrInSources(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	for _, n := range []string{"task-runner", "implementer", "legacy-role"} {
+		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, n+".md"),
+			[]byte("---\nname: "+n+"\n---\n"), 0o644))
+	}
+
+	// legacy-role is tracked, so prune owns it; the other two are in sources.
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}, ManagedAgents: []string{"legacy-role"}}
+	require.Empty(t, checkOrphanAgents(proj, repo, pm))
+}
+
+// Gates live in a subdirectory and are only expected with --with-gates.
+func TestCheckOrphanAgentsHandlesGateSubdirectory(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "base", "agents", "gates"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "base", "agents", "gates", "plan-reviewer.md"),
+		[]byte("---\nname: plan-reviewer\n---\n"), 0o644))
+
+	proj := t.TempDir()
+	gatesDir := filepath.Join(proj, ".claude", "agents", "gates")
+	require.NoError(t, os.MkdirAll(gatesDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gatesDir, "plan-reviewer.md"),
+		[]byte("---\nname: plan-reviewer\n---\n"), 0o644))
+
+	withGates := &manifest.ProjectManifest{Overlays: []string{"demo"}, WithGates: true}
+	require.Empty(t, checkOrphanAgents(proj, repo, withGates),
+		"a gate expected by --with-gates is not an orphan")
+
+	withoutGates := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, withoutGates)
+	require.Len(t, issues, 1)
+	require.Contains(t, issues[0].Message, "gates/plan-reviewer")
+}
+
+// Retired names are reported by checkTaskRunner as errors; don't double-report.
+func TestCheckOrphanAgentsSkipsRetiredNames(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "dev-orchestrator.md"),
+		[]byte("---\nname: dev-orchestrator\n---\n"), 0o644))
+
+	require.Empty(t, checkOrphanAgents(proj, repo, &manifest.ProjectManifest{Overlays: []string{"demo"}}))
+}
+
+// An unreadable repo means "cannot tell" — never turn that into a wall of
+// false orphans. checkOverlaysExist reports the real problem.
+func TestCheckOrphanAgentsSilentWithoutRepo(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "whatever.md"),
+		[]byte("---\nname: whatever\n---\n"), 0o644))
+
+	require.Empty(t, checkOrphanAgents(proj, t.TempDir(), &manifest.ProjectManifest{}))
+}
+
+// --- .zprof/runs/ gitignored (spec §10) --------------------------------
+
+func TestCheckRunsGitignoredWarnsWhenEntryMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+		[]byte("thoughts/\n*.zprof.bak-*\n"), 0o644))
+
+	issues := checkRunsGitignored(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, ".zprof/runs/")
+}
+
+func TestCheckRunsGitignoredAcceptsEntryVariants(t *testing.T) {
+	for _, entry := range []string{".zprof/runs/", ".zprof/runs", "/.zprof/runs/", ".zprof/", ".zprof"} {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+			[]byte("thoughts/\n"+entry+"\n"), 0o644))
+		require.Empty(t, checkRunsGitignored(dir), "entry %q should count as coverage", entry)
+	}
+}
+
+func TestCheckRunsGitignoredIgnoresCommentedEntry(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+		[]byte("# .zprof/runs/\nthoughts/\n"), 0o644))
+	require.Len(t, checkRunsGitignored(dir), 1, "a commented-out entry ignores nothing")
+}
+
+// No .gitignore at all: silent until run logs actually exist — the project
+// may not even be a git repo yet.
+func TestCheckRunsGitignoredNoGitignore(t *testing.T) {
+	dir := t.TempDir()
+	require.Empty(t, checkRunsGitignored(dir))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".zprof", "runs"), 0o755))
+	issues := checkRunsGitignored(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+}
+
+// --- doctor messages are English (project convention) -------------------
+
+func TestDoctorMessagesAreEnglish(t *testing.T) {
+	runner := checkTaskRunner(mustAgentsDirProject(t))
+	require.NotEmpty(t, runner)
+
+	repo := t.TempDir()
+	ovDir := filepath.Join(repo, "overlays", "demo")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: demo\nloop_template: dev-pipeline\n"), 0o644))
+
+	runs := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(runs, ".zprof", "runs"), 0o755))
+	for i := 0; i < 51; i++ {
+		require.NoError(t, os.WriteFile(
+			filepath.Join(runs, ".zprof", "runs", fmt.Sprintf("r%02d.md", i)), []byte("x"), 0o644))
+	}
+
+	var all []Issue
+	all = append(all, runner...)
+	all = append(all, checkStopLists([]string{"demo"}, repo)...)
+	all = append(all, checkRunLogs(runs)...)
+	all = append(all, checkRunsGitignored(runs)...)
+	require.NotEmpty(t, all)
+
+	for _, i := range all {
+		for _, r := range i.Message {
+			require.False(t, r >= 'а' && r <= 'я' || r >= 'А' && r <= 'Я' || r == 'ё' || r == 'Ё',
+				"Issue.Message must be English, got Cyrillic in: %s", i.Message)
+		}
+	}
+}
+
+func mustAgentsDirProject(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "dev-orchestrator.md"),
+		[]byte("---\nname: dev-orchestrator\n---\n"), 0o644))
+	return dir
 }

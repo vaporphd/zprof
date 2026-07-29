@@ -19,3 +19,9 @@ tool_agents:
   - ktlint-checker
   - detekt-checker
   - init-kmp
+
+stop_list:
+  - "публикация в Play Console или App Store Connect"
+  - "смена applicationId или bundle identifier"
+  - "смена keystore и параметров подписи"
+  - "ломающая смена публичного API общего модуля"

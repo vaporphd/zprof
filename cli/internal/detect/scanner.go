@@ -69,6 +69,16 @@ func scanOne(dir string, r *manifest.DetectRules) ([]string, []string) {
 	// workspace (*.xcworkspace) is itself a directory, never a plain
 	// file, so skipping pattern checks for dirs would silently break
 	// detection of pure Xcode (non-SPM) projects.
+	//
+	// A pattern carrying a path separator (`gradle/libs.versions.toml`) is
+	// matched against the path relative to the project root instead of the
+	// base name. filepath.Match never crosses a separator, so such patterns
+	// could never match a bare base name and contributed no evidence at all.
+	// Overlays listing a bare pattern alongside (`build.gradle.kts` next to
+	// `shared/build.gradle.kts`) still detected via the bare one; patterns
+	// that existed only in path form were simply inert. The mismatch was
+	// easy to miss because any_regex joins its path directly and so always
+	// honored the same string.
 	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return nil
@@ -84,8 +94,16 @@ func scanOne(dir string, r *manifest.DetectRules) ([]string, []string) {
 				return filepath.SkipDir
 			}
 		}
+		relSlash := name
+		if rel, relErr := filepath.Rel(dir, path); relErr == nil {
+			relSlash = filepath.ToSlash(rel)
+		}
 		for _, pattern := range patterns {
-			m, err := filepath.Match(pattern, name)
+			target := name
+			if strings.Contains(pattern, "/") {
+				target = relSlash
+			}
+			m, err := filepath.Match(pattern, target)
 			if err != nil {
 				warnings = append(warnings, fmt.Sprintf("overlay=%s: bad any_file pattern %q: %v", r.Name, pattern, err))
 				continue

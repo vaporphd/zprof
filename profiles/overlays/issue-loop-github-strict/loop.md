@@ -9,10 +9,10 @@
 ### Pipeline (canonical sequence)
 ```
 backlog empty   → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR: gh issue create)
-issue picked    → main-session dispatches architect (if ADR-trigger=yes) → implementer
+issue picked    → task-runner dispatches architect (if ADR-trigger=yes) → implementer
                   (implementer: branch issue-<N>-<slug> → gh pr create Closes #N)
 PR opened       → integration-gate (если diff в INTEGRATION_SCOPE) → wiki-keeper → reviewer
-approved        → pr-shepherd (если AUTO_MERGE=on) → squash-merge + delete branch + stamp
+approved        → pr-shepherd (pre-flight + delivery checks) → blocked: apruv на merge → human мержит
 post-merge      → spec-maintainer (docs/PROJECT_SPEC.md) + docs-writer (README/CLAUDE/followup/lessons)
 ```
 
@@ -27,7 +27,7 @@ post-merge      → spec-maintainer (docs/PROJECT_SPEC.md) + docs-writer (README
 | `src/**` (code) | `implementer` / `bug-hunter` / `refactor-agent` (stack overlay) | ✓ |
 | `**/test/**`, `**/integrationTest/**` | `tester` (stack overlay) | ✓ |
 | GitHub issue create / edit | `planner` (AUTHOR mode only) | ✓ |
-| `gh pr merge` | `pr-shepherd` (when AUTO_MERGE=on) | ✓ |
+| `gh pr merge` | никто из агентов — стоп-лист. `pr-shepherd` доводит PR до готовности и возвращает `blocked`; merge выполняет человек | ✓ |
 
 ### Base gates (already in `base/agents/gates/` — this overlay references, does not redefine)
 - `north-star-auditor` — pre-dispatch: does this task actually move the project forward?
@@ -45,11 +45,11 @@ zprof apply <stack-overlay> issue-loop-github-strict
 
 Overlay стеко-агностичен: `integration-gate` читает `<INTEGRATION_GATE>` из проектного `CLAUDE.md`, `ci-devops` — `<LINT_CMD>`/`<TEST_CMD>` оттуда же.
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Планирование милестоуна / груминг бэклога | `planner` |
-| Merge approved PR (only if AUTO_MERGE=on) | `pr-shepherd` |
+| Довести approved PR до готовности к merge (сам merge не делает) | `pr-shepherd` |
 | Integration gate против реальной внешней системы | `integration-gate` |
 | Sync docs/PROJECT_SPEC.md after merge | `spec-maintainer` |
 | Sync docs/wiki/ atomically with code PR | `wiki-keeper` |

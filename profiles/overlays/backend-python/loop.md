@@ -17,7 +17,7 @@
 - ruff (linter + formatter) + mypy (strict)
 - asyncio best practices (structured concurrency via `asyncio.TaskGroup`, `anyio` for portability)
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Пакеты (install / lock / sync) | `uv-manager` |

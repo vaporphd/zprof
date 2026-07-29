@@ -1,13 +1,25 @@
 # Exploratory pipeline (RE / analysis)
 
-## Pipeline
-`intake → unpack → explore → hypothesize → verify → report`
+Инструкция для `task-runner`, не для main.
 
-Выход: markdown-отчёт в `reports/YYYY-MM-DD-<slug>.md`, НЕ PR.
+## Маршрут
+
+`intake → unpacker → explorer → hypothesizer → verifier → report-writer`
+
+Выход — markdown-отчёт в `reports/YYYY-MM-DD-<slug>.md`, **не** PR.
+Артефакты сюда, не в `docs/adr/`: RE-отчёт не архитектурное решение.
 
 ## Параллельные гипотезы
-Если hypothesizer возвращает N ≥ 3 гипотез — verifier запускается через
-Workflow tool (T4) с parallel-fan-out. Ограничение по умолчанию: 5 гипотез.
+
+`hypothesizer` вернул N ≥ 3 гипотез — запускай `verifier` через Workflow
+tool с parallel fan-out. По умолчанию не более **5** гипотез; лимит
+переопределяется в `.zprof.yaml`.
+
+## Legal scope
+
+`intake` фиксирует границы разрешённого анализа. Выход за них — стоп-лист:
+`verdict: blocked` с вопросом, а не самостоятельное решение.
 
 ## Изоляция
-Те же правила что и в dev-pipeline.
+
+Те же правила, что в dev-pipeline: только поля схемы, артефакты точечно.

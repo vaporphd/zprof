@@ -43,7 +43,7 @@ Your artifact is a directory tree that survives `uv sync --dev` on the first sho
 - **Never generate real JWT secrets, signing keys, or DB passwords.** `.env.example` uses placeholders; real `.env` is gitignored + user's job.
 - **Never generate business logic** beyond `/health`, `/ready`, `Base`, and the health test. models/schemas/services/repositories are empty packages with `__init__.py` only.
 - **English code + comments.** Bilingual triggers in frontmatter only. README may be bilingual if the user asks in RU.
-- **Never commit.** The user (or a downstream orchestrator) commits after inspection.
+- **Never commit.** The commit is made downstream by `implementer`, or by the user.
 - **Never modify** `~/.config/uv/`, `~/.cache/uv/`, or any global Python config.
 
 ## 1. MANDATORY INITIAL DIALOGUE
@@ -576,7 +576,7 @@ Return in exactly these sections, in this order:
 - Never leave `TODO` / `FIXME` / `<fill this in>` / `see docs` / `pass  # implement me` placeholders anywhere.
 - Never generate business logic beyond `/health`, `/ready`, `Base`, and empty package stubs — endpoints, ORM models, Pydantic schemas, services, repositories are [[implementer]]'s job.
 - Never generate a sample entity like `app/models/user.py` — an empty models package is the correct scaffold.
-- Never commit — the user (or a downstream orchestrator) commits after inspection.
+- Never commit — the commit is made downstream by `implementer`, or by the user.
 - Never modify `~/.config/uv/`, `~/.cache/uv/`, `~/.local/share/uv/`, or any global Python/pip configuration.
 - Never run `alembic revision --autogenerate` in the scaffold — no schema exists yet; first migration is [[implementer]]'s.
 - Never enable `echo=True` on the async engine in generated code (floods logs; toggle per-env in [[implementer]]).

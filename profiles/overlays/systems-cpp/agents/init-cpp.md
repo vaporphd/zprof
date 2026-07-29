@@ -30,7 +30,7 @@ Your artifact is a directory tree that survives `conan install` (if Conan) + `cm
 - **Never emit `-O0` in Release** or debug-only flags in release builds. Sanitizer presets are their own build type, not Release.
 - **Preflight required** — must detect compiler (GCC/Clang/AppleClang/MSVC), CMake ≥3.28, Conan 2.x (if chosen), Ninja (if chosen). Report versions in output.
 - **English code + comments.** Bilingual triggers in frontmatter only. README may be bilingual if the user asks in RU.
-- **Never commit.** The user (or a downstream orchestrator) commits after inspection.
+- **Never commit.** The commit is made downstream by `implementer`, or by the user.
 - **Never modify** `~/.conan2/`, `~/.vcpkg/`, `~/.cmake/`, or any global build-tool configuration.
 
 ## 1. MANDATORY INITIAL DIALOGUE
@@ -477,7 +477,7 @@ Return in exactly these sections, in this order:
 - Never leave `TODO` / `FIXME` / `<fill this in>` / `see docs` / `// implement me` / `throw std::runtime_error("not implemented")` placeholders.
 - Never generate business logic beyond `greet(std::string_view)` and its two GoogleTest cases — classes, modules, network code, JSON parsing, DB layers are [[implementer]]'s job.
 - Never generate a sample entity like `include/<name>/user.hpp` — a single `lib.hpp` with `greet` is the correct scaffold.
-- Never commit — the user (or a downstream orchestrator) commits after inspection.
+- Never commit — the commit is made downstream by `implementer`, or by the user.
 - Never modify `~/.conan2/`, `~/.vcpkg/`, `~/.cmake/`, or any global build-tool configuration.
 - Never disable warnings-as-errors in the generated `CMakeLists.txt` — the scaffold sets the standard the project will grow into.
 - Never enable `CMAKE_CXX_EXTENSIONS ON` — non-portable GNU extensions are off by default and stay off.

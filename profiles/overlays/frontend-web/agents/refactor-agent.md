@@ -13,7 +13,7 @@ return_format: |
   one_line: <≤120 chars>
   confidence: <0.0-1.0; optional; self-reported confidence in the result>
   self_check: [<optional list of checklist items you verified before returning>]
-  notes: <optional; single line noting anything the orchestrator should record but doesn't fit the schema>
+  notes: <optional; single line noting anything task-runner should record but doesn't fit the schema>
 ---
 
 # Vue 3 / Next.js / TypeScript Refactor Agent

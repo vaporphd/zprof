@@ -30,7 +30,7 @@ Your artifact is a directory tree that survives `cargo check --all-targets --all
 - **Never enable** `panic = "abort"` in Debug (only in Release if explicitly chosen); never enable `opt-level = 0` in Release; never enable `lto = "fat"` in Debug.
 - **Preflight required** — must detect `rustc --version` ≥ 1.83, `cargo --version` ≥ 1.83, and (if chosen) `cargo-nextest --version`. Report versions in output.
 - **English code + comments.** Bilingual triggers in frontmatter only. README may be bilingual if the user asks in RU.
-- **Never commit.** The user (or a downstream orchestrator) commits after inspection.
+- **Never commit.** The commit is made downstream by `implementer`, or by the user.
 - **Never modify** `~/.cargo/config.toml`, `~/.rustup/`, or any global toolchain configuration.
 
 ## 1. MANDATORY INITIAL DIALOGUE
@@ -442,7 +442,7 @@ Return in exactly these sections, in this order:
 - Never leave `TODO` / `FIXME` / `todo!()` / `unimplemented!()` / `<fill this in>` / `// implement me` placeholders.
 - Never generate business logic beyond `greet(&str) -> String` and its tests — modules, DTOs, HTTP handlers, DB layers, background jobs are [[implementer]]'s job.
 - Never generate a sample entity like `src/user.rs` — a single `greet` function is the correct scaffold.
-- Never commit — the user (or a downstream orchestrator) commits after inspection.
+- Never commit — the commit is made downstream by `implementer`, or by the user.
 - Never modify `~/.cargo/config.toml`, `~/.rustup/`, or any global toolchain configuration.
 - Never disable the root `[lints]` in the generated Cargo.toml — the scaffold sets the standard the project will grow into.
 - Never enable `unsafe_code = "allow"`; the forbid stays; if a downstream module truly needs unsafe, [[implementer]] narrows it per-module via `#[allow(unsafe_code)]` at the smallest scope.

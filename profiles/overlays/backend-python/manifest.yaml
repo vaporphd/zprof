@@ -18,3 +18,9 @@ tool_agents:
   - ruff-checker
   - mypy-checker
   - init-fastapi
+
+stop_list:
+  - "alembic downgrade на существующих данных"
+  - "миграция с DROP TABLE или DROP COLUMN"
+  - "правка production .env и файлов с секретами"
+  - "публикация пакета в PyPI"

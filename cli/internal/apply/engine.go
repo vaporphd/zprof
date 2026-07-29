@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/vaporphd/zprof/internal/managed"
@@ -32,6 +33,22 @@ type ApplyResult struct {
 	UpdatedFiles  []string
 	StateFiles    []string
 	Conflicts     []managed.Conflict
+	RemovedAgents []string
+}
+
+// FormatRemovedAgents renders the removed-agent summary line(s) for CLI
+// output, or "" when nothing was removed. Deleting agent files is the only
+// destructive thing an apply does, so it is reported by name rather than
+// folded into a counter: a silent deletion is indistinguishable from a bug,
+// and the user needs the names to find the backups.
+func FormatRemovedAgents(removed []string) string {
+	if len(removed) == 0 {
+		return ""
+	}
+	names := append([]string(nil), removed...)
+	sort.Strings(names)
+	return fmt.Sprintf("Удалено агентов: %d (рядом сохранён .bak каждого)\n  %s\n",
+		len(names), strings.Join(names, ", "))
 }
 
 // Apply orchestrates a full profile application: base agents, namespaced
@@ -81,6 +98,16 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 			res.CreatedAgents = append(res.CreatedAgents, out)
 		}
 	}
+
+	// 2.5. Prune agents a previous apply wrote that no longer exist, then
+	// record the current roster so the next apply can do the same.
+	removed, err := PruneOrphanAgents(agentDest, opts.Project.ManagedAgents, res.CreatedAgents)
+	if err != nil {
+		return nil, fmt.Errorf("prune orphan agents: %w", err)
+	}
+	res.RemovedAgents = removed
+	opts.Project.ManagedAgents = append([]string(nil), res.CreatedAgents...)
+	sort.Strings(opts.Project.ManagedAgents)
 
 	// 3. Render AGENT_LOOP.md (thin router only)
 	loopPath := filepath.Join(opts.ProjectDir, "AGENT_LOOP.md")
@@ -219,6 +246,11 @@ func buildClaudeBlocks(opts ApplyOpts) []managed.Block {
 		Key:     "executing",
 		Content: buildExecutingTable(opts),
 	})
+	blocks = append(blocks, managed.Block{
+		Overlay: "base",
+		Key:     "stop-list",
+		Content: buildStopListBlock(opts),
+	})
 	return blocks
 }
 
@@ -253,7 +285,7 @@ func ensureGitignore(dir string, overlays []*overlay.Overlay) error {
 		return err
 	}
 	content := string(data)
-	entries := []string{"thoughts/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
+	entries := []string{"thoughts/", ".zprof/runs/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
 	for _, o := range overlays {
 		if o == nil || o.Manifest == nil {
 			continue

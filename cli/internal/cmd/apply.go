@@ -68,7 +68,10 @@ func NewApplyCmd() *cobra.Command {
 				Minimal:   minimal,
 			}
 			if existing, err := manifest.LoadProject(filepath.Join(pwd, ".zprof.yaml")); err == nil {
-				proj.ModelOverrides = existing.ModelOverrides
+				// Carries model/agent overrides AND managed_agents — the
+				// latter is what lets PruneOrphanAgents see the roster the
+				// previous apply wrote and delete what this one dropped.
+				proj.CarryOverFrom(existing)
 			}
 			if dryRun {
 				fmt.Println("[dry-run] would apply overlays:", args)
@@ -88,6 +91,7 @@ func NewApplyCmd() *cobra.Command {
 			fmt.Printf("Создано агентов: %d\n", len(res.CreatedAgents))
 			fmt.Printf("Обновлено файлов: %d\n", len(res.UpdatedFiles))
 			fmt.Printf("Создано state-файлов: %d\n", len(res.StateFiles))
+			fmt.Print(apply.FormatRemovedAgents(res.RemovedAgents))
 			if len(res.Conflicts) > 0 {
 				fmt.Printf("Конфликтов managed-блоков: %d\n", len(res.Conflicts))
 			}

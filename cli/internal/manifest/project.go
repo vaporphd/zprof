@@ -24,6 +24,12 @@ type ProjectManifest struct {
 	Minimal        bool              `yaml:"minimal"`
 	ModelOverrides map[string]string `yaml:"model_overrides,omitempty"`
 	AgentOverrides map[string]string `yaml:"agent_overrides,omitempty"`
+
+	// ManagedAgents lists the agent names zprof itself wrote on the last
+	// apply. Names present here but absent from the current sources are
+	// orphans from an earlier profile version and get pruned on the next
+	// apply; anything not listed is user-authored and never touched.
+	ManagedAgents []string `yaml:"managed_agents,omitempty"`
 }
 
 // LoadProject reads and parses a project manifest (.zprof.yaml) at path.
@@ -49,6 +55,34 @@ func (m *ProjectManifest) Save(path string) error {
 		return err
 	}
 	return fsutil.WriteFileAtomic(path, data, 0o644)
+}
+
+// CarryOverFrom copies the fields of a previously saved manifest that a
+// fresh apply must not lose. Overlays/Language/WithGates/Minimal are
+// deliberately NOT carried over — those come from the command line and
+// describe the apply being requested right now.
+//
+// ManagedAgents is the load-bearing one: Apply overwrites it with the
+// roster it just wrote, so a caller that builds a fresh manifest without
+// carrying the previous value forward leaves PruneOrphanAgents blind —
+// every namespaced agent from a dropped overlay stays in .claude/agents/
+// as a valid, dispatchable file that nothing will ever remove.
+//
+// Only unset (nil) fields are filled, so an explicitly built manifest can
+// still override any of them.
+func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
+	if prev == nil {
+		return
+	}
+	if m.ModelOverrides == nil {
+		m.ModelOverrides = prev.ModelOverrides
+	}
+	if m.AgentOverrides == nil {
+		m.AgentOverrides = prev.AgentOverrides
+	}
+	if m.ManagedAgents == nil {
+		m.ManagedAgents = prev.ManagedAgents
+	}
 }
 
 // ResolvedModel returns the exact model ID for a role from ModelOverrides.

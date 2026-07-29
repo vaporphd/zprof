@@ -18,3 +18,9 @@ tool_agents:
   - rustfmt-checker
   - miri-checker
   - init-rust
+
+stop_list:
+  - "публикация крейта на crates.io"
+  - "ломающая смена публичного API (semver major)"
+  - "повышение MSRV"
+  - "добавление unsafe в ранее safe публичный API"

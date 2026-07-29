@@ -162,19 +162,30 @@ func processAssistant(line []byte, ts time.Time, meta *SessionMeta, dispatches m
 }
 
 // workingDirRe matches a "Working directory: <path>" hint in a subagent
-// prompt. The orchestrator uses this phrasing across role prompts to tell
-// each subagent which project root it should treat as `.`. Case-insensitive,
-// tolerant of surrounding backticks and trailing punctuation.
-var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*working\\s+directory:\\s*`?([^`\\s].*?)`?\\s*$")
+// prompt, in either of the two languages role prompts are written in: the
+// English "Working directory:" phrasing and the Russian "Рабочий каталог:"
+// equivalent mandated by the project spec (main-session prompts are written
+// in Russian; see docs/superpowers/specs/2026-07-16-zprof-design.md §11).
+// Case-insensitive, tolerant of surrounding backticks and trailing
+// punctuation.
+var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*(?:working\\s+directory|рабочий\\s+каталог):\\s*`?([^`\\s].*?)`?\\s*$")
 
 // extractWorkingDir returns the trimmed path from the first
 // "Working directory: X" line in prompt, or empty when absent.
+//
+// Trailing punctuation is stripped here rather than in the pattern. The
+// regex's closing "`?" only sheds a backtick that ends the line, so a hint
+// written as a sentence — "Рабочий каталог: `/tmp/x`." — otherwise yields
+// "/tmp/x`." and every relative artifact under it fails to resolve. That
+// silently turned a whole end-to-end run's artifact checks red.
 func extractWorkingDir(prompt string) string {
 	m := workingDirRe.FindStringSubmatch(prompt)
 	if len(m) < 2 {
 		return ""
 	}
-	return strings.TrimRight(strings.TrimSpace(m[1]), "/")
+	path := strings.TrimSpace(m[1])
+	path = strings.TrimRight(path, ".,;:!?)]}\"'`")
+	return strings.TrimRight(strings.TrimSpace(path), "/")
 }
 
 // notifRe splits a queue-operation payload's <task-notification> block.
@@ -240,22 +251,22 @@ func processUserToolResult(line []byte, dispatches map[string]*Dispatch) {
 	var env struct {
 		Message struct {
 			Content []struct {
-				Type       string `json:"type"`
-				ToolUseID  string `json:"tool_use_id"`
-				IsError    bool   `json:"is_error"`
-				Content    []struct {
+				Type      string `json:"type"`
+				ToolUseID string `json:"tool_use_id"`
+				IsError   bool   `json:"is_error"`
+				Content   []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"content"`
 		} `json:"message"`
 		ToolUseResult struct {
-			Status             string `json:"status"`
-			AgentType          string `json:"agentType"`
-			ResolvedModel      string `json:"resolvedModel"`
-			TotalDurationMs    int64  `json:"totalDurationMs"`
-			TotalTokens        int    `json:"totalTokens"`
-			TotalToolUseCount  int    `json:"totalToolUseCount"`
+			Status            string `json:"status"`
+			AgentType         string `json:"agentType"`
+			ResolvedModel     string `json:"resolvedModel"`
+			TotalDurationMs   int64  `json:"totalDurationMs"`
+			TotalTokens       int    `json:"totalTokens"`
+			TotalToolUseCount int    `json:"totalToolUseCount"`
 		} `json:"toolUseResult"`
 	}
 	if err := json.Unmarshal(line, &env); err != nil {
@@ -338,12 +349,15 @@ func parseReturnFormat(raw string) Return {
 	// the next known key.
 	lines := strings.Split(trimmed, "\n")
 	known := map[string]*string{
-		"verdict":  &r.Verdict,
-		"artifact": &r.Artifact,
-		"next":     &r.Next,
-		"one_line": &r.OneLine,
-		"blocker":  &r.Blocker,
-		"notes":    &r.Notes,
+		"verdict":     &r.Verdict,
+		"artifact":    &r.Artifact,
+		"next":        &r.Next,
+		"one_line":    &r.OneLine,
+		"blocker":     &r.Blocker,
+		"notes":       &r.Notes,
+		"run_log":     &r.RunLog,
+		"question":    &r.Question,
+		"resume_hint": &r.ResumeHint,
 	}
 	for i, ln := range lines {
 		key, val, ok := splitYAMLPair(ln)

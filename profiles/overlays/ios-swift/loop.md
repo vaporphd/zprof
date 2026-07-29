@@ -10,7 +10,7 @@
 Стандартный dev-pipeline, где architect/implementer/tester знают Xcode targets,
 Package.swift, SwiftUI vs UIKit vs AppKit layers.
 
-### Специальные диспатчи
+### Специальные диспатчи (для task-runner)
 | Задача | Агент |
 |---|---|
 | Обновить SPM зависимости | `spm-manager` |
