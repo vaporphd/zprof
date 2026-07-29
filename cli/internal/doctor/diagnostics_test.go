@@ -49,7 +49,10 @@ func TestDiagnoseWarnsOnMultipleOverlays(t *testing.T) {
 		[]byte("overlays: [a, b]\n"), 0o644))
 	repo := t.TempDir()
 	for _, n := range []string{"a", "b"} {
-		require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays", n), 0o755))
+		ovDir := filepath.Join(repo, "overlays", n)
+		require.NoError(t, os.MkdirAll(ovDir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+			[]byte("name: "+n+"\nstop_list: [\"x\"]\n"), 0o644))
 	}
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
@@ -62,7 +65,10 @@ func TestDiagnoseSingleOverlayNoCountIssue(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"),
 		[]byte("overlays: [a]\n"), 0o644))
 	repo := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays", "a"), 0o755))
+	ovDir := filepath.Join(repo, "overlays", "a")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: a\nstop_list: [\"x\"]\n"), 0o644))
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -238,6 +244,32 @@ func TestCheckStopListsEmptyOverlay(t *testing.T) {
 	require.Len(t, issues, 1)
 	require.Equal(t, LevelError, issues[0].Level)
 	require.Contains(t, issues[0].Message, "stop_list")
+}
+
+// A missing overlay directory is checkOverlaysExist's turf — checkStopLists
+// stays silent about it.
+func TestCheckStopListsSilentWhenOverlayDirMissing(t *testing.T) {
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "overlays"), 0o755))
+
+	require.Empty(t, checkStopLists([]string{"nonexistent"}, repo))
+}
+
+// The overlay's directory exists but manifest.yaml doesn't parse — nothing
+// else in doctor catches this, and `apply`/`sync` fail on it outright, so
+// checkStopLists must report it.
+func TestCheckStopListsBrokenManifestErrors(t *testing.T) {
+	repo := t.TempDir()
+	ovDir := filepath.Join(repo, "overlays", "demo")
+	require.NoError(t, os.MkdirAll(ovDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
+		[]byte("name: [this is not valid yaml\n"), 0o644))
+
+	issues := checkStopLists([]string{"demo"}, repo)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "manifest failed to load")
+	require.Contains(t, issues[0].Path, "manifest.yaml")
 }
 
 func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {

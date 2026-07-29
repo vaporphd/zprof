@@ -304,13 +304,29 @@ func checkTaskRunner(projectDir string) []Issue {
 // checkStopLists errors for every active overlay whose manifest declares no
 // stop_list. An empty list means the runner has no idea what it must not do
 // on its own, and irreversible actions pass unreviewed.
+//
+// It also errors when an overlay's directory exists but its manifest.yaml
+// fails to load (missing file, invalid YAML, failed validation) — that
+// leaves the same blind spot as an empty stop_list, and unlike a genuinely
+// missing overlay (whose directory is absent — checkOverlaysExist's turf),
+// nothing else in doctor diagnoses it, even though `apply`/`sync` fail on
+// it outright.
 func checkStopLists(overlays []string, repoDir string) []Issue {
 	var out []Issue
 	for _, name := range overlays {
-		p := filepath.Join(repoDir, "overlays", name, "manifest.yaml")
+		dir := filepath.Join(repoDir, "overlays", name)
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue // checkOverlaysExist already reports a missing overlay
+		}
+		p := filepath.Join(dir, "manifest.yaml")
 		m, err := manifest.LoadOverlay(p)
 		if err != nil {
-			continue // checkOverlaysExist already reports a missing overlay
+			out = append(out, Issue{
+				Level:   LevelError,
+				Path:    p,
+				Message: fmt.Sprintf("overlay %q manifest failed to load: %v", name, err),
+			})
+			continue
 		}
 		if len(m.StopList) == 0 {
 			out = append(out, Issue{
