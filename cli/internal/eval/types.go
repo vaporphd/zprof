@@ -67,6 +67,18 @@ type Return struct {
 	Confidence float64
 	Notes      string
 	SelfCheck  []string
+	// RunLog is the task-runner contract's mandatory journal path
+	// (`.zprof/runs/<id>.md`) — always a real on-disk path, unlike
+	// `Artifact`, which the task-runner contract allows to be a PR link or
+	// commit SHA instead of a path. Its existence is used by the scorer as
+	// proof-of-work when `Artifact` is not itself a stat-able path.
+	RunLog string
+	// Question and ResumeHint are populated only on `verdict: blocked`
+	// returns — task-runner's contract for handing an unresolved decision
+	// back to the human (question to answer, journal position to resume
+	// from).
+	Question   string
+	ResumeHint string
 	// RawFirstLine is the first non-empty line of the subagent's response;
 	// used by Compliance.HasPreamble to check whether the return started
 	// with the return_format block or with narrative prose.

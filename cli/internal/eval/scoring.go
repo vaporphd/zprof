@@ -162,8 +162,16 @@ func Score(t *Trace, checkArtifactExists func(artifact, workingDir string) bool)
 		// for blocked verdicts rather than raise a false artifact-missing.
 		verdict := strings.ToLower(strings.TrimSpace(d.Returned.Verdict))
 		if verdict != "blocked" && d.Returned.Artifact != "" && d.Returned.Artifact != "none" {
-			exists := checkArtifactExists(d.Returned.Artifact, d.WorkingDir)
-			if exists {
+			// task-runner's contract allows `artifact` to be a PR link or
+			// commit SHA instead of an on-disk path — those can never pass a
+			// file-existence check. `run_log` is the runner's own mandatory
+			// journal path (always a real path per contract) and its
+			// presence on disk is proof the dispatch actually did work, so
+			// treat it as confirmation of the artifact claim before falling
+			// back to stat-ing `artifact` itself.
+			if d.Returned.RunLog != "" && checkArtifactExists(d.Returned.RunLog, d.WorkingDir) {
+				stats.ArtifactExists++
+			} else if checkArtifactExists(d.Returned.Artifact, d.WorkingDir) {
 				stats.ArtifactExists++
 			} else {
 				stats.ArtifactMissing++

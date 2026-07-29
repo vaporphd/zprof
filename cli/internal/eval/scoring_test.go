@@ -174,6 +174,49 @@ func TestNextFieldAcceptsEveryTargetProfilesEmit(t *testing.T) {
 	require.True(t, unreachable["bogus"], "an unknown target must still be flagged")
 }
 
+// TestArtifactConfirmedByRunLogWhenArtifactIsNotAPath guards the second
+// real-run regression: task-runner's contract explicitly allows `artifact`
+// to be a PR link or commit SHA list instead of a path ("ссылка на PR, SHA
+// коммита или путь к отчёту" — profiles/base/agents/task-runner.md). A real
+// dispatch returned `artifact: commits 2493635 (feat retry), 22d03f6 (chore
+// version 0.2.0); dist/netkit-0.2.0-py3-none-any.whl` — contract-valid, but
+// scored as artifact-missing because no candidate parsed out of that string
+// is a real path. `run_log` is the runner's own mandatory journal path
+// (always a real on-disk path per contract); its existence is treated as
+// proof the dispatch happened, confirming the artifact claim without
+// stat-ing it directly.
+func TestArtifactConfirmedByRunLogWhenArtifactIsNotAPath(t *testing.T) {
+	notAPath := "commits 2493635 (feat retry), 22d03f6 (chore version 0.2.0); dist/netkit-0.2.0-py3-none-any.whl"
+	const runLogPath = ".zprof/runs/2026-07-28-fix.md"
+
+	// checkArtifactExists is called with (path, workingDir) — only the
+	// runner's journal path resolves to a real file; the PR/SHA-list
+	// artifact string never will, by construction of this fake.
+	onlyRunLogExists := func(path, workingDir string) bool { return path == runLogPath }
+
+	confirmed := &Trace{Dispatches: []Dispatch{{
+		ID: "d1", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{
+			Verdict: "done", Artifact: notAPath, RunLog: runLogPath,
+			RawFirstLine: "verdict: done",
+		},
+	}}}
+	score := Score(confirmed, onlyRunLogExists)
+	require.Empty(t, score.Violations, "existing run_log must confirm a non-path artifact claim")
+
+	unconfirmed := &Trace{Dispatches: []Dispatch{{
+		ID: "d2", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{
+			Verdict: "done", Artifact: notAPath, RunLog: "",
+			RawFirstLine: "verdict: done",
+		},
+	}}}
+	score = Score(unconfirmed, onlyRunLogExists)
+	require.Len(t, score.Violations, 1)
+	require.Equal(t, "artifact-missing", score.Violations[0].Kind,
+		"without a confirming run_log, a non-path artifact must still be flagged")
+}
+
 // TestArtifactMissingSkippedForBlockedVerdict guards against the real
 // end-to-end regression: a task-runner dispatch returned `verdict: blocked`
 // with `artifact: —` (its contract's placeholder for "nothing produced

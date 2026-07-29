@@ -341,12 +341,15 @@ func parseReturnFormat(raw string) Return {
 	// the next known key.
 	lines := strings.Split(trimmed, "\n")
 	known := map[string]*string{
-		"verdict":  &r.Verdict,
-		"artifact": &r.Artifact,
-		"next":     &r.Next,
-		"one_line": &r.OneLine,
-		"blocker":  &r.Blocker,
-		"notes":    &r.Notes,
+		"verdict":     &r.Verdict,
+		"artifact":    &r.Artifact,
+		"next":        &r.Next,
+		"one_line":    &r.OneLine,
+		"blocker":     &r.Blocker,
+		"notes":       &r.Notes,
+		"run_log":     &r.RunLog,
+		"question":    &r.Question,
+		"resume_hint": &r.ResumeHint,
 	}
 	for i, ln := range lines {
 		key, val, ok := splitYAMLPair(ln)
