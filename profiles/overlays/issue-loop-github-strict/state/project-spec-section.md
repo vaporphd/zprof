@@ -8,10 +8,8 @@
 ### Merge policy
 - `MERGE_GATE`: <local-green | CI-green>
   - `local-green`: pre-commit + pre-push hooks (`.githooks/*`) ARE the merge gate. CI is a courtesy or absent.
-  - `CI-green`: GitHub Actions checks must pass; pr-shepherd uses `--auto` mode.
-- `AUTO_MERGE`: <on | off>
-  - `on`: pr-shepherd dispatched after reviewer approves; auto-squash-merges verified PRs.
-  - `off`: main session stops at reviewer approve; a human merges.
+  - `CI-green`: GitHub Actions checks must pass; the human-run merge uses `--auto` mode.
+- Merging into `<default-branch>` is always a human decision (stop-list). `pr-shepherd` runs after reviewer approves, does pre-flight + delivery verification, then returns `blocked` asking a human to approve and run the merge — it never runs `gh pr merge` itself.
 
 ### Integration gate
 - `INTEGRATION_SCOPE`: <list of file paths/globs whose PRs must exercise the real gate>
@@ -46,7 +44,7 @@
 - Upstream: `north-star-auditor` (base) → `planner` → `plan-reviewer` (base) → `planner` (AUTHOR)
 - Execution: `architect` (stack) → `implementer` (stack) → `tester` (stack)
 - Pre-merge: `integration-gate` → `wiki-keeper` → `reviewer` (stack)
-- Merge: `pr-shepherd`
+- Merge readiness: `pr-shepherd` (readies + asks — never merges; merge is a human decision)
 - Post-merge: `spec-maintainer` → `docs-writer`
 - Infrastructure: `ci-devops`
 - Support: `bug-hunter` / `refactor-agent` / `explorer` (stack) — dispatched on demand

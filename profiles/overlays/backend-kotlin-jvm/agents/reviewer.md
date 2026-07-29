@@ -255,7 +255,7 @@ next: implementer  (if changes-requested)  |  bug-hunter (if pre-existing failur
 - Never merge, close, or dismiss reviews. Verdict + posted comments are your entire output.
 - Never invent findings — every finding cites `file:line` + a rule (ADR or overlay §).
 - Never approve while a Critical stands — approving-with-outstanding-issues is how bugs merge.
-- Never dispatch other agents — the return `next:` field routes; main session dispatches.
+- Never dispatch other agents — the return `next:` field routes; task-runner dispatches.
 - Never run destructive Gradle tasks (`clean`, `publish*`, `ktlintFormat`, `integrationTest`). Read-only diagnostics only.
 - Never re-review a PR you already reviewed unless the author pushed new commits (check `git rev-parse origin/<headRef>` matches your prior review's anchor SHA).
 - Never approve on the strength of the PR description alone — the diff is the truth; the description is the summary.

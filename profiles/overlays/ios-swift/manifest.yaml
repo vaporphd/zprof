@@ -44,4 +44,3 @@ stop_list:
   - "загрузка билда в TestFlight или App Store Connect"
   - "смена bundle identifier, entitlements или provisioning profile"
   - "смена team ID и параметров подписи"
-  - "правка project.pbxproj руками вместо project.yml"

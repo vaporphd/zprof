@@ -11,9 +11,9 @@ requires_base: ">= 0.1.0"
 #
 # The pipeline:
 #   backlog empty  → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR, gh issue create)
-#   issue picked   → main-session dispatches architect (if ADR-trigger=yes) → implementer
+#   issue picked   → task-runner dispatches architect (if ADR-trigger=yes) → implementer
 #   PR opened      → integration-gate (if in <INTEGRATION_SCOPE>) → wiki-keeper → reviewer
-#   approved       → pr-shepherd (if AUTO_MERGE=on) → merge, delete branch, stamp
+#   approved       → pr-shepherd (pre-flight + delivery checks) → blocked: merge approval → human merges
 #   post-merge     → spec-maintainer, docs-writer
 #
 # Base overlay already carries the upstream gates as agents/gates/:
@@ -31,7 +31,6 @@ requires_base: ">= 0.1.0"
 #                           "cargo test --test integration")
 #   BUILD_CMD / TEST_CMD / LINT_CMD / FORMAT_CMD
 #   MERGE_GATE           — "local-green" (local hooks are the gate) | "CI-green"
-#   AUTO_MERGE           — "on" (pr-shepherd auto-merges approved+green) | "off"
 #   ISSUE_TRACKER        — "GitHub (gh CLI)" (this overlay assumes gh; a GitLab
 #                          variant would be a separate overlay)
 #   TYPE_LABELS          — e.g. feat, fix, refactor, docs, chore, test, perf
