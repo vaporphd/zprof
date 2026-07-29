@@ -165,6 +165,28 @@ func checkAgentFrontmatter(projectDir string) []Issue {
 	return out
 }
 
+// disownedInFrontmatter reports whether an agent file carries
+// `zprof_managed: false` — the marker by which a user claims a file as their
+// own so the orphan check stops nagging about it. A file zprof cannot read or
+// parse is not treated as disowned: other checks report those, and silently
+// suppressing a warning on a broken file would hide two problems at once.
+func disownedInFrontmatter(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	m := frontmatterRe.FindSubmatch(data)
+	if m == nil {
+		return false
+	}
+	var fm map[string]any
+	if err := yaml.Unmarshal(m[1], &fm); err != nil {
+		return false
+	}
+	managed, ok := fm["zprof_managed"].(bool)
+	return ok && !managed
+}
+
 // agentNameFor converts an on-disk agent path into the name zprof knows it
 // by: the path relative to .claude/agents/ without the .md suffix, slashes
 // normalized. `gates/plan-reviewer.md` → `gates/plan-reviewer`.
@@ -345,7 +367,14 @@ func checkStopLists(overlays []string, repoDir string) []Issue {
 // last apply recorded, so in a project applied by a zprof old enough to
 // predate managed_agents the roster is empty and every stale agent survives
 // silently. Warn rather than error — a user is entitled to keep their own
-// agents next to zprof's, and this check cannot tell the two apart.
+// agents next to zprof's.
+//
+// A user settles the ambiguity by writing `zprof_managed: false` into the
+// agent's frontmatter, which silences the warning for that file. The marker
+// lives in the file rather than in .zprof.yaml so that deleting the agent
+// disposes of its claim too; a roster in the manifest would outlive the file
+// it described. Claiming a file an active source also provides earns a
+// different warning instead of silence — see below.
 //
 // Retired names are skipped: checkTaskRunner already reports those as
 // errors with a more specific message.
@@ -377,13 +406,28 @@ func checkOrphanAgents(projectDir, repoDir string, proj *manifest.ProjectManifes
 			return nil
 		}
 		name := agentNameFor(agentsDir, path)
+		disowned := disownedInFrontmatter(path)
 		if known[name] {
+			// A file the active sources will rewrite cannot be disowned:
+			// the next apply overwrites it whatever the frontmatter says.
+			// Saying so is the point — the marker would otherwise read as
+			// protection the user does not actually have.
+			if disowned && expected[name] {
+				out = append(out, Issue{
+					Level:   LevelWarn,
+					Path:    path,
+					Message: fmt.Sprintf("agent %q claims `zprof_managed: false` but an active source provides it — the next apply overwrites this file; rename it to keep your own version", name),
+				})
+			}
+			return nil
+		}
+		if disowned {
 			return nil
 		}
 		out = append(out, Issue{
 			Level:   LevelWarn,
 			Path:    path,
-			Message: fmt.Sprintf("agent %q is listed in neither managed_agents nor the active sources — zprof will never remove it; delete it by hand if it is stale", name),
+			Message: fmt.Sprintf("agent %q is listed in neither managed_agents nor the active sources — zprof will never remove it; delete it by hand if it is stale, or add `zprof_managed: false` to its frontmatter to claim it as your own", name),
 		})
 		return nil
 	})

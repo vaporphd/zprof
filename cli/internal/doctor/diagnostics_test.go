@@ -388,6 +388,65 @@ func TestCheckOrphanAgentsWarnsOnUntrackedFile(t *testing.T) {
 	require.Contains(t, issues[0].Message, "implementer-py")
 }
 
+func TestCheckOrphanAgentsSilentOnDisownedFile(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\n---\n"), 0o644))
+	// The user's own agent, claimed via the frontmatter marker.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "my-custom.md"),
+		[]byte("---\nname: my-custom\nzprof_managed: false\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	require.Empty(t, checkOrphanAgents(proj, repo, pm),
+		"a file claimed with zprof_managed: false is not an orphan")
+}
+
+func TestCheckOrphanAgentsStillWarnsWhenMarkerUnparseable(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\n---\n"), 0o644))
+	// Broken YAML: the claim cannot be read, so it does not suppress.
+	// Suppressing here would hide the orphan and the parse error together.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "broken.md"),
+		[]byte("---\nname: broken\nzprof_managed: [unclosed\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, pm)
+
+	require.Len(t, issues, 1)
+	require.Contains(t, issues[0].Message, "broken")
+}
+
+func TestCheckOrphanAgentsWarnsWhenDisowningAProvidedAgent(t *testing.T) {
+	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte("---\nname: task-runner\n---\n"), 0o644))
+	// `implementer` comes from the active overlay: the marker buys nothing,
+	// and the user must be told rather than left feeling protected.
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nzprof_managed: false\n---\n"), 0o644))
+
+	pm := &manifest.ProjectManifest{Overlays: []string{"demo"}}
+	issues := checkOrphanAgents(proj, repo, pm)
+
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "overwrites")
+}
+
 func TestCheckOrphanAgentsSilentWhenTrackedOrInSources(t *testing.T) {
 	repo := writeRepoFixture(t, map[string][]string{"demo": {"implementer"}})
 	proj := t.TempDir()
