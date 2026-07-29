@@ -174,6 +174,34 @@ func TestNextFieldAcceptsEveryTargetProfilesEmit(t *testing.T) {
 	require.True(t, unreachable["bogus"], "an unknown target must still be flagged")
 }
 
+// TestArtifactMissingSkippedForBlockedVerdict guards against the real
+// end-to-end regression: a task-runner dispatch returned `verdict: blocked`
+// with `artifact: —` (its contract's placeholder for "nothing produced
+// yet") and the scorer flagged it as artifact-missing with the literal
+// detail text `claimed artifact not found on disk: —`. `blocked` means the
+// runner stopped for a human decision before producing anything, so the
+// artifact field is not a check-able claim at all — only `done` and
+// `failed` dispatches should still be held to the file-existence check.
+func TestArtifactMissingSkippedForBlockedVerdict(t *testing.T) {
+	neverExists := func(string, string) bool { return false }
+
+	blocked := &Trace{Dispatches: []Dispatch{{
+		ID: "d-blocked", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{Verdict: "blocked", Artifact: "—", RawFirstLine: "verdict: blocked"},
+	}}}
+	score := Score(blocked, neverExists)
+	require.Empty(t, score.Violations, "blocked verdict must not raise artifact-missing")
+
+	done := &Trace{Dispatches: []Dispatch{{
+		ID: "d-done", AgentName: "task-runner dispatch", Status: "completed",
+		Returned: Return{Verdict: "done", Artifact: "—", RawFirstLine: "verdict: done"},
+	}}}
+	score = Score(done, neverExists)
+	require.Len(t, score.Violations, 1)
+	require.Equal(t, "artifact-missing", score.Violations[0].Kind,
+		"done verdict with an unresolvable artifact claim must still be flagged")
+}
+
 // The exploratory chain used to bucket to "other", which made RE sessions
 // unreadable in the scorecard.
 func TestGuessRoleKnowsExploratoryChain(t *testing.T) {

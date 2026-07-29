@@ -155,7 +155,13 @@ func Score(t *Trace, checkArtifactExists func(artifact, workingDir string) bool)
 			stats.PassAt1++
 		}
 
-		if d.Returned.Artifact != "" && d.Returned.Artifact != "none" {
+		// `blocked` dispatches have not produced anything yet — the runner
+		// contract has them write a placeholder ("—" or empty) in `artifact`
+		// and stop for a human decision. Checking that placeholder as a
+		// filesystem path always fails, so skip the artifact check entirely
+		// for blocked verdicts rather than raise a false artifact-missing.
+		verdict := strings.ToLower(strings.TrimSpace(d.Returned.Verdict))
+		if verdict != "blocked" && d.Returned.Artifact != "" && d.Returned.Artifact != "none" {
 			exists := checkArtifactExists(d.Returned.Artifact, d.WorkingDir)
 			if exists {
 				stats.ArtifactExists++
