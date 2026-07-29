@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>zprof — схема: накат профиля и агентский цикл</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Martian+Mono:wght@300;500;700&family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,600;1,6..72,300&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   zprof — technical schematic
+   blueprint ink · amber signal · teal data · magenta warning
+   ============================================================ */
+:root{
+  --ink:#0b0e11;
+  --ink-2:#11161b;
+  --panel:#141a20;
+  --panel-2:#1a222a;
+  --line:#26323d;
+  --line-hot:#37485a;
+  --fg:#d7dee5;
+  --fg-dim:#8a99a8;
+  --fg-faint:#5d6b78;
+  --amber:#e8a33d;
+  --amber-soft:#f0c583;
+  --teal:#5fd6c5;
+  --magenta:#e0577f;
+  --violet:#9d8cf0;
+  --grid:rgba(72,96,120,.16);
+  --mono:'Martian Mono',ui-monospace,monospace;
+  --code:'JetBrains Mono',ui-monospace,monospace;
+  --serif:'Newsreader',Georgia,serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  background:
+    radial-gradient(1200px 700px at 80% -10%, rgba(232,163,61,.07), transparent 60%),
+    radial-gradient(900px 600px at 5% 30%, rgba(95,214,197,.05), transparent 60%),
+    linear-gradient(var(--grid) 1px, transparent 1px) 0 0/34px 34px,
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0/34px 34px,
+    var(--ink);
+  color:var(--fg);
+  font-family:var(--serif);
+  font-size:17px;
+  line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+body::after{ /* grain */
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.16;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='140'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/></filter><rect width='140' height='140' filter='url(%23n)' opacity='.5'/></svg>");
+  mix-blend-mode:overlay;
+}
+.wrap{max-width:1220px;margin:0 auto;padding:0 28px 140px}
+
+/* ---------- type ---------- */
+h1,h2,h3,h4,.mono,.tag,.num,th,.btn,.node-t{font-family:var(--mono);}
+h2{font-size:clamp(22px,3vw,34px);font-weight:700;letter-spacing:-.03em;margin:0 0 6px;line-height:1.12}
+h3{font-size:15px;font-weight:500;letter-spacing:.02em;color:var(--amber);margin:0 0 10px;text-transform:uppercase}
+p{margin:0 0 14px;color:var(--fg-dim)}
+p strong{color:var(--fg);font-weight:600}
+code,.code{font-family:var(--code);font-size:.82em;background:rgba(95,214,197,.09);border:1px solid rgba(95,214,197,.18);color:var(--teal);padding:1px 6px;border-radius:4px;white-space:nowrap}
+a{color:var(--amber)}
+
+/* ---------- header ---------- */
+header{padding:88px 0 46px;position:relative}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.42em;color:var(--fg-faint);text-transform:uppercase;margin-bottom:26px;display:flex;gap:14px;align-items:center}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line),transparent)}
+h1{
+  font-size:clamp(46px,10vw,116px);font-weight:700;letter-spacing:-.07em;line-height:.86;
+  margin:0 0 20px;color:var(--fg);
+}
+h1 em{font-style:normal;color:var(--amber);text-shadow:0 0 46px rgba(232,163,61,.4)}
+.lede{font-size:clamp(17px,2vw,21px);max-width:56ch;color:var(--fg-dim);font-weight:300}
+.lede b{color:var(--fg);font-weight:600}
+.factstrip{display:flex;flex-wrap:wrap;gap:0;margin-top:44px;border:1px solid var(--line);background:rgba(20,26,32,.6);backdrop-filter:blur(4px)}
+.fact{flex:1 1 150px;padding:16px 20px;border-right:1px solid var(--line)}
+.fact:last-child{border-right:0}
+.fact b{display:block;font-family:var(--mono);font-size:26px;font-weight:700;color:var(--amber);letter-spacing:-.04em}
+.fact span{font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;color:var(--fg-faint)}
+
+/* ---------- section chrome ---------- */
+section{padding:76px 0 10px;border-top:1px solid var(--line);margin-top:56px}
+.sec-head{display:flex;gap:26px;align-items:flex-start;margin-bottom:40px}
+.num{font-size:11px;letter-spacing:.3em;color:var(--amber);padding-top:9px;white-space:nowrap;opacity:.9}
+.sec-head p{max-width:62ch;margin:8px 0 0}
+
+/* ---------- generic panel ---------- */
+.panel{background:linear-gradient(180deg,var(--panel),var(--ink-2));border:1px solid var(--line);position:relative}
+.panel::before{content:"";position:absolute;top:-1px;left:-1px;width:9px;height:9px;border-top:1px solid var(--amber);border-left:1px solid var(--amber);opacity:.7}
+.panel::after{content:"";position:absolute;bottom:-1px;right:-1px;width:9px;height:9px;border-bottom:1px solid var(--amber);border-right:1px solid var(--amber);opacity:.7}
+
+/* ============ ACT I — apply ============ */
+.applygrid{display:grid;grid-template-columns:minmax(0,.86fr) minmax(0,1.25fr) minmax(0,1fr);gap:0;border:1px solid var(--line);background:var(--ink-2)}
+.col{padding:22px 20px 26px;border-right:1px solid var(--line);min-width:0}
+.col:last-child{border-right:0}
+.col-h{font-family:var(--mono);font-size:10px;letter-spacing:.22em;text-transform:uppercase;color:var(--fg-faint);margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.col-h i{font-style:normal;color:var(--teal);font-size:9px;border:1px solid rgba(95,214,197,.3);padding:2px 6px;border-radius:3px}
+
+/* repo tree */
+.tree{font-family:var(--code);font-size:12.5px;line-height:1.95;color:var(--fg-dim)}
+.tree .d{color:var(--amber-soft)}
+.tree .f{color:var(--fg-dim)}
+.tree .c{color:var(--fg-faint);font-style:italic}
+.tree .lvl1{padding-left:14px}
+.tree .lvl2{padding-left:30px}
+.tree .lvl3{padding-left:46px}
+
+/* stepper */
+ol.steps{list-style:none;margin:0;padding:0;counter-reset:s}
+ol.steps li{
+  counter-increment:s;position:relative;padding:11px 12px 11px 46px;margin-bottom:6px;cursor:pointer;
+  border:1px solid transparent;border-left:2px solid var(--line);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:-.01em;line-height:1.5;color:var(--fg-dim);
+  transition:.18s ease;background:transparent;
+}
+ol.steps li::before{
+  content:counter(s,decimal-leading-zero);position:absolute;left:14px;top:11px;
+  font-size:10px;color:var(--fg-faint);letter-spacing:.05em;
+}
+ol.steps li em{display:block;font-family:var(--serif);font-style:normal;font-size:13.5px;color:var(--fg-faint);margin-top:4px;letter-spacing:0;line-height:1.45}
+ol.steps li:hover{background:rgba(232,163,61,.05);border-left-color:var(--line-hot);color:var(--fg)}
+ol.steps li[aria-selected="true"]{
+  background:linear-gradient(90deg,rgba(232,163,61,.13),transparent);
+  border-left-color:var(--amber);color:var(--fg);
+}
+ol.steps li[aria-selected="true"]::before{color:var(--amber)}
+
+/* project files */
+.files{font-family:var(--code);font-size:12.5px;line-height:1.9}
+.files div{color:var(--fg-faint);padding:1px 7px;border-left:2px solid transparent;transition:.2s ease;border-radius:2px}
+.files div.on{color:var(--ink);background:var(--amber);border-left-color:var(--amber);font-weight:700}
+.files div.dim{opacity:.42}
+.files .ind{padding-left:22px}
+.files .ind2{padding-left:38px}
+
+.stepnote{margin-top:18px;border-top:1px dashed var(--line);padding-top:14px;font-size:14px;color:var(--fg-dim);min-height:78px}
+.stepnote b{color:var(--amber);font-family:var(--mono);font-size:11px;letter-spacing:.06em;display:block;margin-bottom:6px}
+
+/* ---------- detail cards row ---------- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;margin-top:26px}
+.card{padding:20px 20px 22px}
+.card h4{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--teal);margin:0 0 12px}
+.card p{font-size:14.5px;margin-bottom:0}
+pre{
+  font-family:var(--code);font-size:11.5px;line-height:1.7;margin:0 0 12px;padding:13px 14px;
+  background:#090c0f;border:1px solid var(--line);overflow-x:auto;color:var(--fg-dim);
+}
+pre .k{color:var(--amber)}
+pre .s{color:var(--teal)}
+pre .c{color:var(--fg-faint);font-style:italic}
+pre .m{color:var(--magenta)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:6px 9px;border-bottom:1px solid var(--line)}
+th{font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--fg-faint);font-weight:500}
+td{font-family:var(--code);color:var(--fg-dim)}
+td:first-child{color:var(--amber-soft)}
+tr:last-child td{border-bottom:0}
+
+/* ---------- ACT II — loop ---------- */
+.loopbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:22px}
+.btn{
+  font-size:11px;letter-spacing:.12em;text-transform:uppercase;padding:10px 16px;cursor:pointer;
+  background:transparent;border:1px solid var(--line);color:var(--fg-dim);transition:.2s;font-weight:500;
+}
+.btn:hover{border-color:var(--line-hot);color:var(--fg)}
+.btn[aria-pressed="true"]{background:var(--magenta);border-color:var(--magenta);color:#12060b;font-weight:700}
+.hint{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--fg-faint);text-transform:uppercase}
+.stage{border:1px solid var(--line);background:linear-gradient(180deg,#10151a,#0b0e11);padding:8px}
+svg.diagram{display:block;width:100%;height:auto}
+.node-t{font-size:11px;letter-spacing:-.02em;fill:var(--fg)}
+.node-s{font-family:var(--code);font-size:9.5px;fill:var(--fg-faint)}
+.flow{stroke-dasharray:5 7;animation:march 1.6s linear infinite}
+@keyframes march{to{stroke-dashoffset:-24}}
+.leak{opacity:0;transition:opacity .45s ease}
+.stage.leaking .leak{opacity:1}
+.stage.leaking .clean{opacity:.14;transition:opacity .45s}
+.tokplate{transition:.4s}
+
+.tokrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:0;border:1px solid var(--line);border-top:0}
+.tok{padding:16px 18px;border-right:1px solid var(--line)}
+.tok:last-child{border-right:0}
+.tok b{display:block;font-family:var(--mono);font-size:22px;letter-spacing:-.04em;color:var(--teal)}
+.tok.bad b{color:var(--magenta)}
+.tok span{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-faint)}
+
+/* tiers */
+.tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:0;border:1px solid var(--line);margin-top:26px}
+.tier{padding:22px 20px;border-right:1px solid var(--line);position:relative;overflow:hidden}
+.tier:last-child{border-right:0}
+.tier b{font-family:var(--mono);font-size:44px;font-weight:700;letter-spacing:-.06em;color:var(--line-hot);position:absolute;right:12px;top:2px;line-height:1}
+.tier h4{font-family:var(--mono);font-size:12px;letter-spacing:.02em;color:var(--amber);margin:0 0 8px;position:relative}
+.tier p{font-size:14px;margin:0;position:relative}
+
+/* rules */
+.rules{counter-reset:r;list-style:none;padding:0;margin:26px 0 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:16px}
+.rules li{counter-increment:r;position:relative;padding:18px 18px 18px 54px;border:1px solid var(--line);background:rgba(224,87,127,.045);font-size:14.5px;color:var(--fg-dim)}
+.rules li::before{content:"R" counter(r);position:absolute;left:16px;top:16px;font-family:var(--mono);font-size:11px;color:var(--magenta);letter-spacing:.04em}
+
+/* overlays */
+.ovgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(228px,1fr));gap:12px;margin-top:22px}
+.ov{border:1px solid var(--line);padding:15px 15px 16px;background:var(--ink-2);transition:.2s}
+.ov:hover{border-color:var(--amber);background:rgba(232,163,61,.05)}
+.ov h4{font-family:var(--mono);font-size:12px;color:var(--fg);margin:0 0 3px;letter-spacing:-.01em}
+.ov .ns{font-family:var(--code);font-size:10px;color:var(--teal);margin-bottom:9px}
+.ov ul{list-style:none;margin:0;padding:0;font-family:var(--code);font-size:10.5px;line-height:1.75;color:var(--fg-faint)}
+.ov .wf{margin-top:9px;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--amber);opacity:.85}
+
+footer{margin-top:74px;padding-top:26px;border-top:1px solid var(--line);font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--fg-faint);display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+
+@media (max-width:1000px){
+  .applygrid{grid-template-columns:1fr;}
+  .col{border-right:0;border-bottom:1px solid var(--line)}
+  .sec-head{flex-direction:column;gap:6px}
+}
+@media (prefers-reduced-motion:reduce){.flow{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="eyebrow">vaporphd/zprof · схема системы</div>
+  <h1>слои,<br>потом <em>цикл</em></h1>
+  <p class="lede">zprof — слоёная система профилей для Claude Code. <b>Один слой</b> раскатывает stack-aware агентов в проект. <b>Второй</b> гоняет их по циклу так, чтобы main-сессия не захлебнулась их выхлопом.</p>
+  <div class="factstrip">
+    <div class="fact"><b>9</b><span>overlays</span></div>
+    <div class="fact"><b>7</b><span>шагов apply</span></div>
+    <div class="fact"><b>4</b><span>уровня изоляции</span></div>
+    <div class="fact"><b>≤500</b><span>токенов на pipeline</span></div>
+    <div class="fact"><b>3</b><span>overlay макс.</span></div>
+  </div>
+</header>
+
+<!-- ============================ ACT I ============================ -->
+<section id="apply">
+  <div class="sec-head">
+    <div class="num">01 / НАКАТ</div>
+    <div>
+      <h2>Как профиль ложится на проект</h2>
+      <p><code>zprof init</code> сканирует директорию по <code>detect.yaml</code> каждого overlay, показывает найденное в визарде (high-confidence — предвыбраны), и передаёт выбор в apply-движок. Дальше — семь шагов, строго по порядку. Кликни шаг: справа подсветятся файлы, которые он создаёт.</p>
+    </div>
+  </div>
+
+  <div class="applygrid">
+    <!-- SOURCE -->
+    <div class="col">
+      <div class="col-h">Источник <i>~/.zprof/repo</i></div>
+      <div class="tree">
+        <div class="d">base/</div>
+        <div class="lvl1 f">manifest.yaml</div>
+        <div class="lvl1 f">agent-loop-router.md</div>
+        <div class="lvl1 f">claude-block-base.md</div>
+        <div class="lvl1 d">agents/</div>
+        <div class="lvl2 f">planner · docs-writer</div>
+        <div class="lvl2 f">task-runner</div>
+        <div class="lvl2 d">gates/ <span class="c">— опц.</span></div>
+        <div class="lvl1 d">workflows/</div>
+        <div class="lvl2 f">dev-pipeline.md</div>
+        <div class="lvl2 f">exploratory.md</div>
+        <div class="lvl1 d">state-templates/</div>
+        <div style="height:12px"></div>
+        <div class="d">overlays/ios-swift/</div>
+        <div class="lvl1 f">manifest.yaml <span class="c">роли, tool-агенты, executing, gitignore</span></div>
+        <div class="lvl1 f">detect.yaml <span class="c">*.xcodeproj, Package.swift…</span></div>
+        <div class="lvl1 f">claude-block.md <span class="c">build/test/lint cmd</span></div>
+        <div class="lvl1 f">loop.md <span class="c">расширение workflow</span></div>
+        <div class="lvl1 d">agents/ <span class="c">13 шт.</span></div>
+        <div class="lvl1 d">state/</div>
+      </div>
+    </div>
+
+    <!-- ENGINE -->
+    <div class="col">
+      <div class="col-h">Движок <i>apply/engine.go</i></div>
+      <ol class="steps" id="steps">
+        <li data-files="a-base" aria-selected="true">base-агенты → .claude/agents/
+          <em>Без namespace. <code>gates/*</code> пропускаются, если не задан <code>--with-gates</code>. Модель из frontmatter резолвится через реестр алиасов.</em></li>
+        <li data-files="a-ov">overlay-агенты → .claude/agents/
+          <em>Если overlay'ев ≥2 — имена namespace-ятся коротким ником: <code>implementer</code> → <code>implementer-ios</code>.</em></li>
+        <li data-files="loop">AGENT_LOOP.md — тонкий роутер
+          <em>Только базовый router-блок: таблица «ключевые слова → workflow-файл». Никакого overlay-контента.</em></li>
+        <li data-files="wf">workflows/&lt;template&gt;.md
+          <em>По одному файлу на уникальный <code>loop_template</code>. Базовый workflow + <code>loop.md</code> каждого overlay как отдельные managed-блоки.</em></li>
+        <li data-files="claude">CLAUDE.md — 5 типов блоков
+          <em>doctrine (base) + stack-config на overlay + авто-таблицы <b>Consilium</b> (роль→агент→источник), <b>Executing</b> (агент→зона файлов) и <b>Stop list</b> — сводка необратимого, на чём раннер обязан остановиться и спросить.</em></li>
+        <li data-files="state">state-файлы
+          <em>Создаются только если отсутствуют — существующие не трогаются. <code>--minimal</code> выключает docs/.</em></li>
+        <li data-files="cfg">.gitignore + .zprof.yaml
+          <em>Дописывает <code>thoughts/</code>, <code>.zprof/runs/</code>, бэкап-маски и gitignore-вклад каждого overlay. Манифест фиксирует overlay'и в порядке приоритета и <code>managed_agents</code> — что zprof записал сам, чтобы на следующем apply убрать упразднённое и не тронуть твоё.</em></li>
+      </ol>
+      <div class="stepnote" id="note"></div>
+    </div>
+
+    <!-- TARGET -->
+    <div class="col">
+      <div class="col-h">Проект <i>после apply</i></div>
+      <div class="files" id="files">
+        <div data-g="a-base a-ov">.claude/</div>
+        <div class="ind" data-g="a-base a-ov">agents/</div>
+        <div class="ind2" data-g="a-base">planner.md</div>
+        <div class="ind2" data-g="a-base">docs-writer.md</div>
+        <div class="ind2" data-g="a-base">task-runner.md</div>
+        <div class="ind2" data-g="a-ov">architect-ios.md</div>
+        <div class="ind2" data-g="a-ov">implementer-ios.md</div>
+        <div class="ind2" data-g="a-ov">tester-ios.md</div>
+        <div class="ind2" data-g="a-ov">xcode-runner-ios.md</div>
+        <div class="ind2" data-g="a-ov">…</div>
+        <div data-g="loop">AGENT_LOOP.md</div>
+        <div data-g="wf">workflows/</div>
+        <div class="ind" data-g="wf">dev-pipeline.md</div>
+        <div class="ind" data-g="wf">exploratory.md</div>
+        <div data-g="claude">CLAUDE.md</div>
+        <div data-g="state">todo.md</div>
+        <div data-g="state">lessons.md</div>
+        <div data-g="state">followup.md</div>
+        <div data-g="state">docs/PROJECT_SPEC.md</div>
+        <div data-g="state">docs/adr/0000-template.md</div>
+        <div data-g="state">thoughts/.gitkeep</div>
+        <div data-g="cfg">.gitignore</div>
+        <div data-g="cfg">.zprof.yaml</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="panel card">
+      <h4>Managed-блоки — почему sync не убивает твой текст</h4>
+      <pre><span class="c">&lt;!-- zprof:begin overlay=ios-swift block=stack-config --&gt;</span>
+<span class="k">stack:</span>
+  <span class="k">ios-swift:</span>
+    <span class="k">build_cmd:</span> <span class="s">"xcodebuild -scheme &lt;X&gt; build"</span>
+    <span class="k">test_cmd:</span>  <span class="s">"xcodebuild test -destination …"</span>
+<span class="c">&lt;!-- zprof:end overlay=ios-swift block=stack-config --&gt;</span>
+
+<span class="m">↓ всё, что снаружи маркеров — твоё, не трогается</span></pre>
+      <p><code>zprof sync</code> перерисовывает только содержимое между маркерами. Если внутри блока нашлась ручная правка — три режима: <code>overwrite</code> (с <code>.bak</code>), <code>preserve</code>, <code>interactive</code>.</p>
+    </div>
+
+    <div class="panel card">
+      <h4>Namespace при мульти-стеке</h4>
+      <p>Базовые роли общие, overlay-роли получают короткий ник из карты в лоадере — чтобы в промптах читалось <code>architect-ios</code>, а не <code>architect-ios-swift</code>.</p>
+      <table>
+        <tr><th>overlay</th><th>суффикс</th></tr>
+        <tr><td>ios-swift</td><td>-ios</td></tr>
+        <tr><td>backend-python</td><td>-py</td></tr>
+        <tr><td>frontend-web</td><td>-web</td></tr>
+        <tr><td>re-macho</td><td>-macho</td></tr>
+        <tr><td>systems-rust</td><td>-rust</td></tr>
+        <tr><td>systems-cpp</td><td>-cpp</td></tr>
+      </table>
+      <p style="margin-top:10px;font-size:13px">Порядок аргументов <code>zprof apply a b c</code> = приоритет при коллизии имён. Лимит v1 — 3 overlay'я.</p>
+    </div>
+
+    <div class="panel card">
+      <h4>Резолвер моделей — overlay'и не стареют</h4>
+      <p>В frontmatter агента лежит алиас тира, не точный ID. Точный подставляет CLI при apply — новый релиз моделей чинится одним <code>zprof update</code>.</p>
+      <table>
+        <tr><th>alias</th><th>exact id</th></tr>
+        <tr><td>opus</td><td>claude-opus-4-8</td></tr>
+        <tr><td>opus-1m</td><td>claude-opus-4-7[1m]</td></tr>
+        <tr><td>opus-4-6</td><td>claude-opus-4-6[1m]</td></tr>
+        <tr><td>sonnet</td><td>claude-sonnet-5</td></tr>
+        <tr><td>haiku</td><td>claude-haiku-4-5…</td></tr>
+        <tr><td>fable</td><td>claude-fable-5</td></tr>
+      </table>
+      <p style="margin-top:10px;font-size:13px">Override — в <code>.zprof.yaml</code> (<code>model_overrides:</code>) или императивно: <code>zprof agents set architect --model opus-1m</code>.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ ACT II ============================ -->
+<section id="loop">
+  <div class="sec-head">
+    <div class="num">02 / ЦИКЛ</div>
+    <div>
+      <h2>Агентский цикл и где он течёт</h2>
+      <p>Каждый <code>Task()</code> возвращает финальное сообщение сабагента прямо в main-контекст. Наивный пайплайн из 5–7 агентов по 3–5k токенов = <b>15–35k мусора за итерацию</b>. Через 3–4 итерации main перегружен, компакция рвёт continuity. Нажми кнопку — увидишь разницу.</p>
+      <p>Но прятать <i>вывод</i> мало: пока петлю крутит main — читает роутер, выбирает маршрут, диспатчит по одному — она копит маршрутные решения и осколки задачи. Поэтому контроллер цикла переехал целиком в <code>task-runner</code>. Граница: <b>мутация кода — раннеру, git и чтение — main</b>.</p>
+    </div>
+  </div>
+
+  <div class="loopbar">
+    <button class="btn" id="leakbtn" aria-pressed="false">▶ показать «без изоляции»</button>
+    <span class="hint" id="leakhint">режим: изоляция включена — main видит одну схему на весь pipeline</span>
+  </div>
+
+  <div class="stage" id="stage">
+  <svg class="diagram" viewBox="0 0 1180 596" role="img" aria-label="Схема агентского цикла zprof">
+    <defs>
+      <marker id="ar" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#e8a33d"/>
+      </marker>
+      <marker id="ar-t" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#5fd6c5"/>
+      </marker>
+      <marker id="ar-m" markerWidth="9" markerHeight="9" refX="7.5" refY="4" orient="auto">
+        <path d="M0,0 L8,4 L0,8 z" fill="#e0577f"/>
+      </marker>
+      <linearGradient id="mainfill" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#1b242d"/><stop offset="1" stop-color="#121820"/>
+      </linearGradient>
+    </defs>
+
+    <!-- ---------- MAIN SESSION ---------- -->
+    <g>
+      <rect x="34" y="196" width="242" height="188" rx="3" fill="url(#mainfill)" stroke="#e8a33d" stroke-width="1.4"/>
+      <text class="node-t" x="52" y="228" fill="#e8a33d" font-size="12">MAIN SESSION</text>
+      <text class="node-s" x="52" y="252">контекст, который нельзя</text>
+      <text class="node-s" x="52" y="266">засорять</text>
+      <line x1="52" y1="284" x2="258" y2="284" stroke="#26323d"/>
+      <text class="node-s" x="52" y="306" fill="#8a99a8">читает на старте итерации:</text>
+      <text class="node-s" x="52" y="324" fill="#5fd6c5">followup.md · хвост run-лога</text>
+      <text class="node-s" x="52" y="340" fill="#5fd6c5">lessons.md · top-3</text>
+      <text class="node-s" x="52" y="364" fill="#5d6b78">и ничего больше</text>
+    </g>
+
+    <!-- ---------- ROUTER = контракт main ---------- -->
+    <g class="clean">
+      <rect x="342" y="66" width="212" height="96" rx="3" fill="#141a20" stroke="#26323d"/>
+      <text class="node-t" x="358" y="94" font-size="11">AGENT_LOOP.md</text>
+      <text class="node-s" x="358" y="114">контракт main, 46 строк</text>
+      <text class="node-s" x="358" y="132" fill="#8a99a8">мутация кода → раннеру</text>
+      <text class="node-s" x="358" y="148" fill="#8a99a8">git, чтение → main сама</text>
+    </g>
+
+    <!-- ---------- WORKFLOW: читает РАННЕР ---------- -->
+    <g class="clean">
+      <rect x="342" y="216" width="212" height="148" rx="3" fill="#141a20" stroke="#26323d"/>
+      <text class="node-t" x="358" y="244" font-size="11">workflows/</text>
+      <text class="node-t" x="358" y="262" font-size="11" fill="#5fd6c5">dev-pipeline.md</text>
+      <line x1="358" y1="276" x2="538" y2="276" stroke="#26323d"/>
+      <text class="node-s" x="358" y="296" fill="#e8a33d">читает РАННЕР, не main</text>
+      <text class="node-s" x="358" y="314">+ ios-swift блок:</text>
+      <text class="node-s" x="358" y="330" fill="#8a99a8">xcodegen обязателен,</text>
+      <text class="node-s" x="358" y="346" fill="#8a99a8">pbxproj не открывать</text>
+    </g>
+
+    <!-- ---------- ORCHESTRATOR + inner pipeline ---------- -->
+    <g>
+      <rect x="640" y="52" width="466" height="392" rx="3" fill="#0f141a" stroke="#5fd6c5" stroke-dasharray="4 5" stroke-width="1.2"/>
+      <text class="node-s" x="660" y="76" fill="#5fd6c5">ГРАНИЦА ИЗОЛЯЦИИ — тут остаются все 15–35k токенов</text>
+
+      <rect x="662" y="94" width="422" height="52" rx="3" fill="#151d24" stroke="#5fd6c5"/>
+      <text class="node-t" x="680" y="120" font-size="11" fill="#5fd6c5">task-runner</text>
+      <text class="node-s" x="680" y="136">sonnet · сам роутит, сам ведёт журнал · Task-in-Task</text>
+
+      <!-- inner agents -->
+      <g>
+        <rect x="686" y="168" width="374" height="34" rx="2" fill="#141a20" stroke="#26323d"/>
+        <text class="node-t" x="702" y="190" font-size="10">planner</text>
+        <text class="node-s" x="820" y="190">→ plan-N.md</text>
+        <text class="node-s" x="1010" y="190" fill="#5d6b78">sonnet</text>
+
+        <rect x="686" y="212" width="374" height="34" rx="2" fill="#141a20" stroke="#26323d"/>
+        <text class="node-t" x="702" y="234" font-size="10">architect-ios</text>
+        <text class="node-s" x="820" y="234">→ docs/adr/NNNN.md</text>
+        <text class="node-s" x="1010" y="234" fill="#5d6b78">opus</text>
+
+        <rect x="686" y="256" width="374" height="34" rx="2" fill="#141a20" stroke="#26323d"/>
+        <text class="node-t" x="702" y="278" font-size="10">implementer-ios</text>
+        <text class="node-s" x="820" y="278">→ commit SHA</text>
+        <text class="node-s" x="1010" y="278" fill="#5d6b78">opus-4-6</text>
+
+        <rect x="686" y="300" width="374" height="34" rx="2" fill="#141a20" stroke="#26323d"/>
+        <text class="node-t" x="702" y="322" font-size="10">tester-ios</text>
+        <text class="node-s" x="820" y="322">→ passing tests</text>
+        <text class="node-s" x="1010" y="322" fill="#5d6b78">sonnet</text>
+
+        <rect x="686" y="344" width="374" height="34" rx="2" fill="#141a20" stroke="#26323d"/>
+        <text class="node-t" x="702" y="366" font-size="10">reviewer-ios</text>
+        <text class="node-s" x="820" y="366">→ PR-ready / замечания</text>
+        <text class="node-s" x="1010" y="366" fill="#5d6b78">opus</text>
+      </g>
+      <!-- inner chain arrows -->
+      <g stroke="#37485a" stroke-width="1" marker-end="url(#ar)" opacity=".55">
+        <path d="M673,185 L673,229 L682,229" fill="none"/>
+        <path d="M673,229 L673,273 L682,273" fill="none"/>
+        <path d="M673,273 L673,317 L682,317" fill="none"/>
+        <path d="M673,317 L673,361 L682,361" fill="none"/>
+      </g>
+      <text class="node-s" x="662" y="410" fill="#8a99a8">verdict=failed на любом шаге → pipeline рвётся немедленно</text>
+      <text class="node-s" x="662" y="428" fill="#8a99a8">≥5 параллельных агентов → main дёргает Workflow tool (T4), не fan-out Task'ов</text>
+    </g>
+
+    <!-- ---------- ARROWS: main → контракт → workflow → task-runner ---------- -->
+    <g class="clean">
+      <g fill="none" stroke="#e8a33d" stroke-width="1.4" marker-end="url(#ar)">
+        <!-- 1 · main читает свой контракт -->
+        <path class="flow" d="M276,250 C310,250 310,114 336,114"/>
+        <!-- 2 · main спавнит раннера — единственный её dispatch; идёт ПОД workflow-боксом -->
+        <path class="flow" d="M276,344 C420,430 580,430 660,152"/>
+      </g>
+      <!-- 3 · workflow читает уже раннер, обратным ходом -->
+      <g fill="none" stroke="#5fd6c5" stroke-width="1.3" marker-end="url(#ar-t)">
+        <path class="flow" d="M700,152 C640,180 600,212 558,238"/>
+      </g>
+      <text class="node-s" x="288" y="196" fill="#e8a33d">1 · читает контракт</text>
+      <text class="node-s" x="300" y="410" fill="#e8a33d">2 · ОДИН dispatch на задачу —</text>
+      <text class="node-s" x="300" y="426" fill="#e8a33d">больше main не диспатчит ничего</text>
+      <text class="node-s" x="556" y="204" fill="#5fd6c5">3 · раннер читает сам</text>
+    </g>
+
+    <!-- ---------- clean return ---------- -->
+    <g class="clean">
+      <g fill="none" stroke="#5fd6c5" stroke-width="1.6" marker-end="url(#ar-t)">
+        <path class="flow" d="M873,444 C873,520 300,500 158,468 L158,392"/>
+      </g>
+      <rect class="tokplate" x="520" y="470" width="330" height="96" rx="3" fill="#0d1418" stroke="#5fd6c5"/>
+      <text class="node-t" x="538" y="494" font-size="10" fill="#5fd6c5">4 · TERSE HANDOFF — ~150 токенов</text>
+      <text class="node-s" x="538" y="514" fill="#d7dee5">verdict: done | blocked | failed</text>
+      <text class="node-s" x="538" y="530" fill="#d7dee5">artifact: &lt;путь / commit SHA&gt;</text>
+      <text class="node-s" x="538" y="546" fill="#d7dee5">run_log: .zprof/runs/&lt;id&gt;.md</text>
+      <text class="node-s" x="538" y="562" fill="#d7dee5">question + resume_hint — при blocked</text>
+    </g>
+
+    <!-- ---------- leak variant ---------- -->
+    <g class="leak">
+      <g fill="none" stroke="#e0577f" stroke-width="1.3" marker-end="url(#ar-m)" opacity=".9">
+        <path class="flow" d="M686,185 C480,185 300,150 280,206"/>
+        <path class="flow" d="M686,229 C480,229 300,200 280,236"/>
+        <path class="flow" d="M686,273 C480,273 320,270 280,272"/>
+        <path class="flow" d="M686,317 C480,317 300,330 280,310"/>
+        <path class="flow" d="M686,361 C480,361 300,390 280,344"/>
+      </g>
+      <rect x="470" y="470" width="430" height="96" rx="3" fill="#1a0d13" stroke="#e0577f"/>
+      <text class="node-t" x="490" y="494" font-size="10" fill="#e0577f">БЕЗ ИЗОЛЯЦИИ — 5 dispatch'ей в main напрямую</text>
+      <text class="node-s" x="490" y="516" fill="#d7dee5">каждый агент вываливает analysis + rationale + куски кода</text>
+      <text class="node-s" x="490" y="534" fill="#d7dee5">5–7 агентов × 3–5k токенов = 15 000…35 000 за итерацию</text>
+      <text class="node-s" x="490" y="552" fill="#e0577f">через 3–4 итерации: компакция, потеря continuity</text>
+    </g>
+
+    <!-- ---------- followup writeback ---------- -->
+    <g class="clean">
+      <rect x="60" y="470" width="242" height="96" rx="3" fill="#141a20" stroke="#26323d"/>
+      <text class="node-t" x="78" y="494" font-size="10">5 · .zprof/runs/&lt;id&gt;.md</text>
+      <text class="node-s" x="78" y="514">журнал ведёт раннер, строка</text>
+      <text class="node-s" x="78" y="530">на шаг, ≤120 символов</text>
+      <text class="node-s" x="78" y="550" fill="#e8a33d">main читает хвост по запросу</text>
+      <g fill="none" stroke="#e8a33d" stroke-width="1.4" marker-end="url(#ar)">
+        <path class="flow" d="M146,392 L146,464"/>
+        <path class="flow" d="M60,512 C22,506 22,330 30,300"/>
+      </g>
+      <text class="node-s" x="12" y="416" fill="#e8a33d" text-anchor="middle" transform="rotate(-90 12 416)">6 · след. итерация</text>
+    </g>
+  </svg>
+  </div>
+
+  <div class="tokrow">
+    <div class="tok bad"><b id="t1">15 000–35 000</b><span>токенов / итерация без изоляции</span></div>
+    <div class="tok"><b>~150</b><span>токенов на один dispatch (T1)</span></div>
+    <div class="tok"><b>≤500</b><span>токенов на весь pipeline (T3)</span></div>
+    <div class="tok"><b>≤120</b><span>символов на строку run-лога</span></div>
+  </div>
+
+  <h3 style="margin-top:44px">Четыре уровня изоляции — работают вместе</h3>
+  <div class="tiers">
+    <div class="tier"><b>T1</b><h4>Terse handoff</h4><p>У каждого агента в frontmatter обязательный <code>return_format</code>. Тело промпта кончается жёстким правилом: analysis и rationale — только в <code>artifact</code>, финальное сообщение = ровно схема. Скалярные extras (<code>confidence</code>, <code>notes</code>) разрешены, оркестратор парсит только базовые поля.</p></div>
+    <div class="tier"><b>T2</b><h4>Artifact-first</h4><p>Всё содержательное живёт файлами: <code>plan-N.md</code>, <code>docs/adr/</code>, <code>reports/</code>, <code>todo.md</code>. Main перечитывает только <code>followup.md</code> + top-3 из <code>lessons.md</code>. Планы и ADR читаются точечно, когда нужно решать.</p></div>
+    <div class="tier"><b>T3</b><h4>Task-runner</h4><p>Один агент владеет всем циклом: сам роутит, сам гоняет цепочку, сам ведёт журнал, отдаёт main одну схему. Поглотил оба прежних оркестратора — глубина вложенности не выросла. Упёрся в стоп-лист → <code>verdict=blocked</code> с вопросом, ответ уходит новому раннеру через <code>resume_from</code> + <code>decision</code>.</p></div>
+    <div class="tier"><b>T4</b><h4>Workflow tool</h4><p>Для fan-out на ≥5 агентов (мульти-гипотезы в RE, sweep по файлам, миграции) <code>loop.md</code> предписывает дёрнуть <code>Workflow(...)</code> вместо параллельных Task'ов. Исполняется в фоне, main получает одно агрегированное сообщение; <code>isolation: worktree</code> разводит параллельных implementer'ов по файлам.</p></div>
+  </div>
+
+  <h3 style="margin-top:44px">Три правила, которые main обязан соблюдать</h3>
+  <ul class="rules">
+    <li><b>Не цитировать</b> вывод сабагента. Только пересказ схемы: verdict + one_line + путь к artifact. Никогда не вставлять фрагменты artifact'а в разговор.</li>
+    <li><b>≤3 строки в followup.md</b> после каждого dispatch'а — записал status, дропнул ответ сабагента из рабочей памяти.</li>
+    <li><b>Никогда не диспатчить роли напрямую.</b> <code>implementer</code>, <code>tester</code>, <code>architect</code> — собственность раннера. Main спавнит только его.</li>
+    <li><b>Вопрос при <code>blocked</code> передаётся дословно.</b> Пересказ — это уже интерпретация решения, которое принимает человек.</li>
+  </ul>
+</section>
+
+<!-- ============================ ACT III ============================ -->
+<section id="overlays">
+  <div class="sec-head">
+    <div class="num">03 / КАТАЛОГ</div>
+    <div>
+      <h2>Девять overlay'ев, две формы цикла</h2>
+      <p>Dev-overlay'и поставляют 7 stack-aware ролей плюс tool-агенты и гоняются через <code>dev-pipeline</code>. RE-overlay заменяет роли на lifecycle-агентов и идёт через <code>exploratory</code> — на выходе markdown-отчёт, а не PR.</p>
+    </div>
+  </div>
+
+  <div class="ovgrid">
+    <div class="ov"><h4>ios-swift</h4><div class="ns">-ios · *.xcodeproj, Package.swift</div>
+      <ul><li>xcode-runner · spm-manager</li><li>simulator-driver</li><li>xcodegen-driver</li><li>testflight-shipper</li><li>swiftlint-checker</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>backend-kotlin-jvm</h4><div class="ns">-backend-kotlin-jvm · build.gradle.kts</div>
+      <ul><li>gradle-runner</li><li>ktlint-checker</li><li>init-kotlin-jvm</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>kotlin-multiplatform</h4><div class="ns">-kotlin-multiplatform</div>
+      <ul><li>gradle-runner · adb-driver</li><li>emulator-driver · xcode-runner</li><li>ktlint · detekt · init-kmp</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>backend-python</h4><div class="ns">-py · pyproject.toml</div>
+      <ul><li>uv-manager · pytest-runner</li><li>alembic-manager</li><li>ruff-checker · mypy-checker</li><li>init-fastapi</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>frontend-web</h4><div class="ns">-web · package.json</div>
+      <ul><li>pnpm-manager · vite-runner</li><li>vitest-runner</li><li>playwright-runner</li><li>eslint-checker · tsc-checker</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>systems-rust</h4><div class="ns">-rust · Cargo.toml</div>
+      <ul><li>cargo-runner · cargo-manager</li><li>clippy · rustfmt</li><li>miri-checker · init-rust</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov"><h4>systems-cpp</h4><div class="ns">-cpp · CMakeLists.txt</div>
+      <ul><li>cmake-runner · conan-manager</li><li>clang-tidy-checker</li><li>sanitizer-runner · lldb-driver</li><li>init-cpp</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+
+    <div class="ov" style="border-color:#9d8cf0"><h4>re-macho</h4><div class="ns" style="color:#9d8cf0">-macho · Mach-O, .ipa, .dSYM</div>
+      <ul><li>intake → unpacker → explorer</li><li>hypothesizer → verifier</li><li>otool · class-dump · lldb-attach</li><li>frida · hopper · entitlements</li><li>report-writer</li></ul>
+      <div class="wf" style="color:#9d8cf0">exploratory · выход = reports/*.md</div></div>
+
+    <div class="ov"><h4>issue-loop-github-strict</h4><div class="ns">-issue-loop-github-strict</div>
+      <ul><li>planner · spec-maintainer</li><li>pr-shepherd · integration-gate</li><li>ci-devops · wiki-keeper</li></ul>
+      <div class="wf">dev-pipeline</div></div>
+  </div>
+</section>
+
+<footer>
+  <span>zprof · docs/zprof-visual.html</span>
+  <span>источники: apply/engine.go · overlay/loader.go · models/registry.go · specs/2026-07-16-zprof-design.md</span>
+</footer>
+
+</div>
+
+<script>
+/* ---------- ACT I: stepper ---------- */
+(function(){
+  const steps = document.querySelectorAll('#steps li');
+  const files = document.querySelectorAll('#files div');
+  const note  = document.getElementById('note');
+
+  const notes = {
+    'a-base': ['ШАГ 01 · base-агенты', 'Пишутся как есть, без суффиксов — они не зависят от стека. Директория <code>gates/</code> копируется только при <code>--with-gates</code>. Алиас модели из frontmatter резолвится в точный ID прямо при записи файла.'],
+    'a-ov':   ['ШАГ 02 · overlay-агенты', 'Один overlay — имена как в репо. Два и больше — включается namespace по короткому нику. Per-project <code>model_overrides</code> из <code>.zprof.yaml</code> применяются к уже namespace-нутому имени.'],
+    'loop':   ['ШАГ 03 · AGENT_LOOP.md', 'Намеренно тонкий: единственный managed-блок с router-таблицей. Overlay сюда ничего не добавляет — иначе при трёх стеках роутер разбухнет и main начнёт читать его целиком каждую итерацию.'],
+    'wf':     ['ШАГ 04 · workflows/', 'Файл на каждый уникальный <code>loop_template</code>. Внутри: базовый workflow-блок + по одному блоку-расширению от каждого overlay, который на него ссылается. Два стека на dev-pipeline → один файл с двумя расширениями.'],
+    'claude': ['ШАГ 05 · CLAUDE.md', 'Doctrine-блок из base, stack-config на каждый overlay, плюс две авто-генерируемые таблицы: Consilium (роль → агент → источник, с отдельной секцией tool-агентов) и Executing (агент → зона владения файлами из <code>executing:</code> манифеста).'],
+    'state':  ['ШАГ 06 · state-файлы', 'Создаются только при отсутствии — твой существующий <code>todo.md</code> переживёт apply. <code>--minimal</code> пропускает <code>docs/PROJECT_SPEC.md</code> и <code>docs/adr/</code>.'],
+    'cfg':    ['ШАГ 07 · gitignore + манифест', 'В .gitignore дописываются <code>thoughts/</code>, маски бэкапов и gitignore-вклад каждого overlay (для ios — DerivedData, xcuserdata, *.xcodeproj/). <code>.zprof.yaml</code> фиксирует список overlay\'ев в порядке приоритета, язык, флаги gates/minimal и model_overrides.']
+  };
+
+  function select(li){
+    steps.forEach(s => s.setAttribute('aria-selected', s === li));
+    const key = li.dataset.files;
+    files.forEach(f => {
+      const on = f.dataset.g.split(' ').includes(key);
+      f.classList.toggle('on', on);
+      f.classList.toggle('dim', !on);
+    });
+    note.innerHTML = '<b>' + notes[key][0] + '</b>' + notes[key][1];
+  }
+  steps.forEach(li => {
+    li.addEventListener('click', () => select(li));
+    li.addEventListener('mouseenter', () => select(li));
+  });
+  select(steps[0]);
+})();
+
+/* ---------- ACT II: leak toggle ---------- */
+(function(){
+  const btn   = document.getElementById('leakbtn');
+  const stage = document.getElementById('stage');
+  const hint  = document.getElementById('leakhint');
+  btn.addEventListener('click', () => {
+    const on = btn.getAttribute('aria-pressed') !== 'true';
+    btn.setAttribute('aria-pressed', on);
+    stage.classList.toggle('leaking', on);
+    btn.textContent = on ? '■ вернуть изоляцию' : '▶ показать «без изоляции»';
+    hint.textContent = on
+      ? 'режим: изоляции нет — каждый агент пишет свой выхлоп напрямую в main'
+      : 'режим: изоляция включена — main видит одну схему на весь pipeline';
+  });
+})();
+</script>
+</body>
+</html>
