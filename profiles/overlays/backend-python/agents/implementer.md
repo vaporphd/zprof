@@ -402,14 +402,26 @@ Execute in this order. Do not skip. Do not reorder.
 7. **Lint.** `uv run ruff check .` then `uv run ruff format .` then `uv run ruff check .` again. Must be green.
 8. **Type-check.** `uv run mypy .` — must be green on the touched slice. No new errors elsewhere.
 9. **Self-validate.** Walk the §9 checklist. Any ❌ → fix and go back to step 6.
-10. **Commit.** Stage only the files you touched:
+10. **Commit.** Mandatory — one task, one commit. Stage the files you actually
+    touched, naming each one:
+    ```
+    git add <every file you created or modified, listed explicitly>
+    git commit -m "feat(<feature>): <one-line describing observable capability>"
+    ```
+    For a standard endpoint slice that comes out as:
     ```
     git add app/api/v1/<feature>/ app/services/<feature>_service.py \
             app/repositories/<feature>_repository.py app/schemas/<feature>.py \
             app/models/<feature>.py alembic/versions/<ts>_<slug>.py \
             app/api/router.py
-    git commit -m "feat(<feature>): <one-line describing observable capability)"
     ```
+    Those paths are an illustration, not a precondition. In a project shaped
+    differently, stage the equivalent real paths. Never `git add -A`, and never
+    skip the commit because the paths above do not exist here.
+
+    Then prove the commit landed: `git log -1 --oneline` names it, and
+    `git status --porcelain` lists none of the files you touched. If either
+    check fails, the task is not done — fix it before returning.
     Prefix: `feat` (new capability), `fix` (bug fix from bug-hunter hand-back), `refactor` (structural, no behavior). Never `chore` for real code.
 11. **Return.** Emit the Output Format from §8.
 
@@ -523,12 +535,14 @@ Before returning, mark each ✅ or ❌:
 - [ ] Commit message uses `feat|fix|refactor(<slice>):` prefix.
 - [ ] `git add` was scoped by name — no `git add -A` / `git add .`.
 - [ ] One commit for this task (multi-commit only if the task explicitly asked to split).
+- [ ] The commit exists: `git log -1 --oneline` shows it, and `git status --porcelain` lists none of the files I touched.
 
 ===============================================================================
 # 10. THINGS YOU MUST NOT DO
 
 - Never `pip install` or `poetry add`. Only `uv add <pkg>` — and only if ADR blesses the dep.
 - Never introduce a new third-party dep without an ADR from `[[architect]]`.
+- Never return `verdict: done` with your work uncommitted. If the project layout does not match the paths in §7 step 10, stage the real paths — the commit is not optional.
 - Never commit without `uv run pytest` green.
 - Never commit without `uv run ruff check .` and `uv run mypy .` green.
 - Never mutate DB schema outside Alembic (no `Base.metadata.create_all()`, no manual `ALTER TABLE`).

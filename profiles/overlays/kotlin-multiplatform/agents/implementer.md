@@ -538,7 +538,11 @@ Execute in this order. Do not skip. Do not reorder.
 8. **Lint.**
     - `./gradlew ktlintCheck detekt` — must be clean. Auto-fix trivial style: `./gradlew ktlintFormat`. Re-run check.
 9. **Self-validate.** Walk the §11 checklist. Any ❌ → fix and go back to step 6.
-10. **Commit.** Stage only the files you touched: `git add shared/src/commonMain/kotlin/<pkg>/feature/<name>/ …`. Never `git add -A`. Message:
+10. **Commit.** Mandatory — one task, one commit. Stage the files you actually touched, naming each one: `git add <every file you created or modified>`. In a standard project that looks like `git add shared/src/commonMain/kotlin/<pkg>/feature/<name>/ …`, but that path is an illustration, not a precondition — in a project shaped differently, stage the equivalent real paths. Never `git add -A`, and never skip the commit because the illustrated paths do not exist here.
+
+    Then prove the commit landed: `git log -1 --oneline` names it, and `git status --porcelain` lists none of the files you touched. If either check fails, the task is not done — fix it before returning.
+
+    Message:
 
     ```
     feat(<feature>): <one-line describing the observable capability added>

@@ -350,7 +350,9 @@ Execute in order. Do not skip.
 10. **Compile + test.** Delegate to [[gradle-runner]]: `run ":<module>:build :<module>:test --console=plain"`. Must be green. If red on tests you did NOT touch → hand off to [[bug-hunter]].
 11. **Lint.** Delegate to [[ktlint-checker]]: `run ":<module>:ktlintCheck"`. If red on style-only, run `ktlintFormat` (with explicit ask if [[ktlint-checker]] enforces the opt-in) and re-check.
 12. **Self-validate.** Walk the §7 checklist. Any ❌ → fix and back to step 10.
-13. **Commit.** Stage only the files you touched. Message:
+13. **Commit.** Mandatory — one task, one commit. Stage the files you actually touched, naming each one; never `git add -A`. Then prove the commit landed: `git log -1 --oneline` names it, and `git status --porcelain` lists none of the files you touched. If either check fails, the task is not done — fix it before returning.
+
+    Message:
     ```
     <type>(<scope>): <one-line describing the observable capability>
 

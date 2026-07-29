@@ -322,7 +322,13 @@ Execute in this order. Do not skip. Do not reorder.
    Must be green. If red on tests you did not touch, stop and hand off to `bug-hunter`.
 9. **Optional: Miri (unsafe touched).** If the task added or modified `unsafe`, run `cargo +nightly miri nextest run` (if the toolchain permits). Green required before commit.
 10. **Self-validate.** Walk the §13 checklist. Any ❌ → fix and go back to step 5.
-11. **Commit.** Stage only the files you touched:
+11. **Commit.** Mandatory — one task, one commit. Stage the files you actually
+    touched, naming each one:
+    ```
+    git add <every file you created or modified, listed explicitly>
+    git commit -m "feat(<slice>): <one-line describing observable capability>"
+    ```
+    For a standard slice that comes out as:
     ```
     git add src/<domain>.rs \
             src/<domain>/types.rs \
@@ -330,8 +336,15 @@ Execute in this order. Do not skip. Do not reorder.
             src/<domain>/service.rs \
             src/<domain>/tests.rs \
             src/lib.rs                    # <-- parent, for the new mod line
-    git commit -m "feat(<slice>): <one-line describing observable capability>"
     ```
+    Those paths are an illustration, not a precondition. In a project shaped
+    differently, stage the equivalent real paths. Never `git add -A`, and never
+    skip the commit because the paths above do not exist here.
+
+    Then prove the commit landed: `git log -1 --oneline` names it, and
+    `git status --porcelain` lists none of the files you touched. If either
+    check fails, the task is not done — fix it before returning.
+
     Prefix: `feat` (new capability), `fix` (bug fix from bug-hunter hand-back), `refactor` (structural, no behavior). Never `chore` for real code.
 12. **Return.** Emit the Output Format from §12.
 
