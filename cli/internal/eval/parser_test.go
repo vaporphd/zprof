@@ -42,6 +42,26 @@ func TestParseSessionFixture(t *testing.T) {
 	require.Equal(t, "", orphan.Status) // no task-notification recorded
 }
 
+func TestExtractWorkingDirAcceptsEnglishAndRussianHints(t *testing.T) {
+	// Main-session prompts are written in Russian per project spec §11 —
+	// "Рабочий каталог:" must be recognized exactly like the English
+	// "Working directory:" phrasing, or every relative artifact path in a
+	// Russian-authored dispatch resolves against `zprof eval`'s own cwd
+	// instead of the subagent's project root.
+	cases := map[string]string{
+		"Working directory: /Users/alex/proj\nDo the thing.":        "/Users/alex/proj",
+		"Рабочий каталог: /Users/alex/proj\nСделай штуку.":           "/Users/alex/proj",
+		"РАБОЧИЙ КАТАЛОГ: /Users/alex/proj":                          "/Users/alex/proj",
+		"  `Рабочий каталог: /Users/alex/proj`  ":                    "/Users/alex/proj",
+		"Some unrelated prompt line with no directory hint at all.": "",
+	}
+	for input, want := range cases {
+		t.Run(input, func(t *testing.T) {
+			require.Equal(t, want, extractWorkingDir(input))
+		})
+	}
+}
+
 func TestGuessRole(t *testing.T) {
 	cases := map[string]string{
 		"Architect run 1 for MoodJournal":         "architect",

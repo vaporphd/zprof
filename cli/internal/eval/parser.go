@@ -162,10 +162,13 @@ func processAssistant(line []byte, ts time.Time, meta *SessionMeta, dispatches m
 }
 
 // workingDirRe matches a "Working directory: <path>" hint in a subagent
-// prompt. The orchestrator uses this phrasing across role prompts to tell
-// each subagent which project root it should treat as `.`. Case-insensitive,
-// tolerant of surrounding backticks and trailing punctuation.
-var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*working\\s+directory:\\s*`?([^`\\s].*?)`?\\s*$")
+// prompt, in either of the two languages role prompts are written in: the
+// English "Working directory:" phrasing and the Russian "Рабочий каталог:"
+// equivalent mandated by the project spec (main-session prompts are written
+// in Russian; see docs/superpowers/specs/2026-07-16-zprof-design.md §11).
+// Case-insensitive, tolerant of surrounding backticks and trailing
+// punctuation.
+var workingDirRe = regexp.MustCompile("(?im)^[\\s`]*(?:working\\s+directory|рабочий\\s+каталог):\\s*`?([^`\\s].*?)`?\\s*$")
 
 // extractWorkingDir returns the trimmed path from the first
 // "Working directory: X" line in prompt, or empty when absent.
@@ -240,22 +243,22 @@ func processUserToolResult(line []byte, dispatches map[string]*Dispatch) {
 	var env struct {
 		Message struct {
 			Content []struct {
-				Type       string `json:"type"`
-				ToolUseID  string `json:"tool_use_id"`
-				IsError    bool   `json:"is_error"`
-				Content    []struct {
+				Type      string `json:"type"`
+				ToolUseID string `json:"tool_use_id"`
+				IsError   bool   `json:"is_error"`
+				Content   []struct {
 					Type string `json:"type"`
 					Text string `json:"text"`
 				} `json:"content"`
 			} `json:"content"`
 		} `json:"message"`
 		ToolUseResult struct {
-			Status             string `json:"status"`
-			AgentType          string `json:"agentType"`
-			ResolvedModel      string `json:"resolvedModel"`
-			TotalDurationMs    int64  `json:"totalDurationMs"`
-			TotalTokens        int    `json:"totalTokens"`
-			TotalToolUseCount  int    `json:"totalToolUseCount"`
+			Status            string `json:"status"`
+			AgentType         string `json:"agentType"`
+			ResolvedModel     string `json:"resolvedModel"`
+			TotalDurationMs   int64  `json:"totalDurationMs"`
+			TotalTokens       int    `json:"totalTokens"`
+			TotalToolUseCount int    `json:"totalToolUseCount"`
 		} `json:"toolUseResult"`
 	}
 	if err := json.Unmarshal(line, &env); err != nil {
