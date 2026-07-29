@@ -12,8 +12,17 @@ detect:
     - "tasks/todo.md"
     - "followup.md"
   any_regex:
+    # The convention variables live in PROJECT_SPEC.md — that is where
+    # state/project-spec-section.md writes them. Matching them in CLAUDE.md
+    # alone left this rule aimed at the wrong file.
+    - path: "docs/PROJECT_SPEC.md"
+      match: "ISSUE_TRACKER:\\s*GitHub|MERGE_GATE|INTEGRATION_SCOPE"
+    # INTEGRATION_SCOPE also reaches CLAUDE.md through claude-block.md, and a
+    # project may declare ISSUE_TRACKER there by hand. AUTO_MERGE used to be
+    # listed here; nothing emits it any more, so it was dropped rather than
+    # left to rot as an alternative that can never fire.
     - path: "CLAUDE.md"
-      match: "ISSUE_TRACKER:\\s*GitHub|AUTO_MERGE|MERGE_GATE|INTEGRATION_SCOPE"
+      match: "ISSUE_TRACKER:\\s*GitHub|INTEGRATION_SCOPE"
     - path: "AGENT_LOOP.md"
       match: "plan-reviewer|pr-shepherd|integration-tester|spec-maintainer"
   confidence: medium
