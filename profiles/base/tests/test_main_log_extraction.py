@@ -100,11 +100,11 @@ class TestAsyncDispatch:
     def test_async_launch_and_completion(self):
         dispatches, _ = _extract_main_log(
             "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
-        # Should have: 1 async_launched + 2 notifications (queue-op + user)
+        # 1 async_launched + 1 completed (queue-op and user deduplicated)
         launches = [d for d in dispatches if d.get("status") == "async_launched"]
         completions = [d for d in dispatches if d.get("status") == "completed"]
         assert len(launches) == 1
-        assert len(completions) >= 1
+        assert len(completions) == 1
 
     def test_async_launch_not_complete(self):
         dispatches, _ = _extract_main_log(
@@ -117,7 +117,7 @@ class TestAsyncDispatch:
         dispatches, _ = _extract_main_log(
             "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
         completions = [d for d in dispatches if d["status"] == "completed"]
-        assert len(completions) >= 1
+        assert len(completions) == 1
         assert completions[0]["dispatch_complete"] is True
 
     def test_async_dispatch_id_matches(self):
@@ -139,8 +139,8 @@ class TestLegacyTaskNotification:
     def test_legacy_dispatch_extracted(self):
         dispatches, _ = _extract_main_log(
             "sess-legacy-001", FIXTURES / "task_notification_legacy.jsonl", _empty_sess())
-        # queue-operation + user message = 2 notifications
-        assert len(dispatches) >= 1
+        # queue-operation + user message deduplicated to 1 notification
+        assert len(dispatches) == 1
 
     def test_legacy_dispatch_id(self):
         dispatches, _ = _extract_main_log(
@@ -206,17 +206,73 @@ class TestCompactBoundary:
         assert meta["unparsed_lines"] == 0
 
 
-class TestMultiNotify:
-    """Same task-id notified twice — seq increments."""
+class TestNotificationDedup:
+    """Claude Code writes every notification twice — queue-op + user.
+    The second must be silently dropped, not counted as seq=2."""
 
-    def test_two_notifications_different_seq(self):
+    def test_duplicate_notification_deduped(self):
         dispatches, _ = _extract_main_log(
-            "sess-multi-001", FIXTURES / "multi_notify.jsonl", _empty_sess())
-        notifications = [d for d in dispatches if d.get("seq", 0) > 0]
-        assert len(notifications) >= 2
-        seqs = sorted(d["seq"] for d in notifications)
-        assert seqs[0] == 1
-        assert seqs[1] == 2
+            "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
+        completions = [d for d in dispatches if d["status"] == "completed"]
+        # The fixture has queue-op AND user with same dispatch_id+status
+        assert len(completions) == 1
+        assert completions[0]["seq"] == 1  # first (and only) notification
+
+    def test_legacy_duplicate_deduped(self):
+        dispatches, _ = _extract_main_log(
+            "sess-legacy-001", FIXTURES / "task_notification_legacy.jsonl", _empty_sess())
+        assert len(dispatches) == 1
+        assert dispatches[0]["seq"] == 1
+
+
+class TestMultiNotify:
+    """Same task-id notified twice via SendMessage resume.
+
+    This requires two extraction passes (different invocations) because
+    within one pass, same (dispatch_id, status) is deduped.
+    """
+
+    def test_cross_invocation_seq_persisted(self, tmp_path):
+        """Invocation 1 gets seq=1; invocation 2 (resume) gets seq=2."""
+        log = tmp_path / "session.jsonl"
+        # Write first notification batch
+        lines_1 = [
+            json.dumps({"type": "summary", "sessionId": "s1",
+                        "timestamp": "2026-08-01T14:00:00Z", "version": "2.1.220"}),
+            json.dumps({"type": "user", "message": {"role": "user",
+                        "content": "<task-notification>\n<task-id>agent1</task-id>\n"
+                                   "<tool-use-id>toolu_01Multi</tool-use-id>\n"
+                                   "<status>completed</status>\n"
+                                   "<summary>First pass</summary>\n</task-notification>"},
+                        "timestamp": "2026-08-01T14:05:00Z",
+                        "sessionId": "s1", "version": "2.1.220"}),
+        ]
+        log.write_text("\n".join(lines_1) + "\n")
+
+        sess = _empty_sess()
+        d1, m1 = _extract_main_log("s1", log, sess)
+        assert len(d1) == 1
+        assert d1[0]["seq"] == 1
+
+        # Persist state (simulates what _collect_session does)
+        sess["main_log_offset"] = m1["offset"]
+        sess["main_log_size"] = m1["size"]
+        sess["main_log_head_sha"] = m1["head_sha"]
+        sess["notify_seq"] = m1["notify_seq"]
+
+        # Append second notification (after SendMessage resume)
+        with open(log, "a") as f:
+            f.write(json.dumps({"type": "user", "message": {"role": "user",
+                    "content": "<task-notification>\n<task-id>agent1</task-id>\n"
+                               "<tool-use-id>toolu_01Multi</tool-use-id>\n"
+                               "<status>completed</status>\n"
+                               "<summary>Second pass</summary>\n</task-notification>"},
+                    "timestamp": "2026-08-01T14:15:00Z",
+                    "sessionId": "s1", "version": "2.1.220"}) + "\n")
+
+        d2, m2 = _extract_main_log("s1", log, sess)
+        assert len(d2) == 1
+        assert d2[0]["seq"] == 2  # persisted notify_seq ensures seq=2
 
     def test_launch_has_seq_zero(self):
         dispatches, _ = _extract_main_log(
@@ -387,6 +443,98 @@ class TestParseTaskNotificationXml:
     def test_missing_tool_use_id_returns_none(self):
         xml = "<task-notification><task-id>abc</task-id></task-notification>"
         assert _parse_task_notification_xml(xml) is None
+
+
+class TestTerminalStatuses:
+    """dispatch_complete must be True for all terminal statuses,
+    not just 'completed'. Real data has 'failed', 'killed', 'stopped'."""
+
+    def test_failed_is_terminal(self, tmp_path):
+        log = tmp_path / "failed.jsonl"
+        lines = [
+            json.dumps({"type": "summary", "sessionId": "s1",
+                        "timestamp": "2026-08-01T10:00:00Z", "version": "2.1.220"}),
+            json.dumps({"type": "user", "message": {"role": "user",
+                        "content": "<task-notification>\n<task-id>a1</task-id>\n"
+                                   "<tool-use-id>toolu_01Failed</tool-use-id>\n"
+                                   "<status>failed</status>\n"
+                                   "<summary>Agent failed</summary>\n</task-notification>"},
+                        "timestamp": "2026-08-01T10:05:00Z",
+                        "sessionId": "s1", "version": "2.1.220"}),
+        ]
+        log.write_text("\n".join(lines) + "\n")
+        dispatches, _ = _extract_main_log("s1", log, _empty_sess())
+        assert len(dispatches) == 1
+        assert dispatches[0]["status"] == "failed"
+        assert dispatches[0]["dispatch_complete"] is True
+
+    def test_killed_is_terminal(self, tmp_path):
+        log = tmp_path / "killed.jsonl"
+        lines = [
+            json.dumps({"type": "summary", "sessionId": "s1",
+                        "timestamp": "2026-08-01T10:00:00Z", "version": "2.1.220"}),
+            json.dumps({"type": "user", "message": {"role": "user",
+                        "content": "<task-notification>\n<task-id>a2</task-id>\n"
+                                   "<tool-use-id>toolu_01Killed</tool-use-id>\n"
+                                   "<status>killed</status>\n"
+                                   "<summary>Agent killed</summary>\n</task-notification>"},
+                        "timestamp": "2026-08-01T10:05:00Z",
+                        "sessionId": "s1", "version": "2.1.220"}),
+        ]
+        log.write_text("\n".join(lines) + "\n")
+        dispatches, _ = _extract_main_log("s1", log, _empty_sess())
+        assert dispatches[0]["dispatch_complete"] is True
+
+    def test_stopped_is_terminal(self, tmp_path):
+        log = tmp_path / "stopped.jsonl"
+        lines = [
+            json.dumps({"type": "summary", "sessionId": "s1",
+                        "timestamp": "2026-08-01T10:00:00Z", "version": "2.1.220"}),
+            json.dumps({"type": "user", "message": {"role": "user",
+                        "content": "<task-notification>\n<task-id>a3</task-id>\n"
+                                   "<tool-use-id>toolu_01Stopped</tool-use-id>\n"
+                                   "<status>stopped</status>\n"
+                                   "<summary>Agent stopped</summary>\n</task-notification>"},
+                        "timestamp": "2026-08-01T10:05:00Z",
+                        "sessionId": "s1", "version": "2.1.220"}),
+        ]
+        log.write_text("\n".join(lines) + "\n")
+        dispatches, _ = _extract_main_log("s1", log, _empty_sess())
+        assert dispatches[0]["dispatch_complete"] is True
+
+    def test_async_launched_is_not_terminal(self):
+        dispatches, _ = _extract_main_log(
+            "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
+        launch = [d for d in dispatches if d["status"] == "async_launched"][0]
+        assert launch["dispatch_complete"] is False
+
+    def test_sync_completed_via_toolUseResult(self, tmp_path):
+        """toolUseResult with status='failed' should be dispatch_complete=True."""
+        log = tmp_path / "sync_fail.jsonl"
+        lines = [
+            json.dumps({"type": "summary", "sessionId": "s1",
+                        "timestamp": "2026-08-01T10:00:00Z", "version": "2.1.220"}),
+            json.dumps({"type": "assistant", "message": {"role": "assistant",
+                        "content": [{"type": "tool_use", "id": "toolu_01SyncFail",
+                                     "name": "Agent",
+                                     "input": {"subagent_type": "impl", "prompt": "x"}}]},
+                        "timestamp": "2026-08-01T10:00:01Z", "sessionId": "s1",
+                        "version": "2.1.220"}),
+            json.dumps({"type": "user", "message": {"role": "user",
+                        "content": [{"type": "tool_result",
+                                     "tool_use_id": "toolu_01SyncFail",
+                                     "content": "Error."}]},
+                        "toolUseResult": {"status": "failed",
+                                          "agentType": "impl",
+                                          "resolvedModel": "claude-sonnet-5"},
+                        "timestamp": "2026-08-01T10:00:30Z", "sessionId": "s1",
+                        "version": "2.1.220"}),
+        ]
+        log.write_text("\n".join(lines) + "\n")
+        dispatches, _ = _extract_main_log("s1", log, _empty_sess())
+        assert len(dispatches) == 1
+        assert dispatches[0]["status"] == "failed"
+        assert dispatches[0]["dispatch_complete"] is True
 
 
 class TestSkillToolUseResult:

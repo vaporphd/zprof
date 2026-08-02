@@ -197,6 +197,8 @@ class Collector:
         sess["main_log_head_sha"] = meta["head_sha"]
         if meta.get("harness_version"):
             sess["harness_version"] = meta["harness_version"]
+        if meta.get("notify_seq"):
+            sess["notify_seq"] = meta["notify_seq"]
         if meta.get("unparsed_lines", 0) > 0:
             _log_error(self.agentlog,
                        f"session {session_id}: {meta['unparsed_lines']} unparsed lines (format drift?)")
@@ -211,6 +213,10 @@ class Collector:
 # ---------------------------------------------------------------------------
 
 _HEAD_BYTES = 4096  # bytes to hash for file-identity check
+
+# Statuses that mean the dispatch is still in flight.
+# Everything else (completed, failed, killed, stopped, ...) is terminal.
+_IN_FLIGHT_STATUSES = frozenset({"async_launched", "running", "pending", "in_progress"})
 
 
 def _sha256_head(path: Path, nbytes: int = _HEAD_BYTES) -> str:
@@ -335,8 +341,15 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
     # Track pending tool_use dispatches from assistant messages
     # key = tool_use_id, value = info from the assistant's tool_use block
     pending_dispatches: dict[str, dict] = {}
-    # Track notification sequence per dispatch_id for multi-notify
-    notify_seq: dict[str, int] = {}
+    # Track notification sequence per dispatch_id for multi-notify.
+    # Persisted across hook invocations so a SendMessage resume in
+    # invocation 2 gets seq=2, not seq=1.
+    notify_seq: dict[str, int] = dict(sess.get("notify_seq", {}))
+    # Dedup set: (dispatch_id, status) pairs already emitted in THIS pass.
+    # Claude Code writes every task-notification twice (~15ms apart) —
+    # once as queue-operation, once as user message.  Without dedup
+    # every async dispatch produces seq=1 AND seq=2.
+    seen_notifications: set[tuple[str, str]] = set()
     dispatches: list[dict] = []
     harness_version = meta["harness_version"]
     truncated = False
@@ -417,7 +430,7 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
                 "role": tur.get("agentType") or pending.get("subagent_type", ""),
                 "model_resolved": tur.get("resolvedModel", ""),
                 "status": status,
-                "dispatch_complete": (status == "completed"),
+                "dispatch_complete": status not in _IN_FLIGHT_STATUSES,
                 "ts_utc": record.get("timestamp", ""),
                 "seq": 0,
             }
@@ -462,15 +475,25 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
             notif = _parse_task_notification_xml(notification_text)
             if notif:
                 tool_use_id = notif["tool_use_id"]
-                # Increment seq for repeated notifications on same dispatch
+                notif_status = notif.get("status", "completed")
+
+                # Dedup: Claude Code writes every notification twice
+                # (~15ms apart) — once as queue-operation, once as user
+                # message.  Skip the duplicate.
+                dedup_key = (tool_use_id, notif_status)
+                if dedup_key in seen_notifications:
+                    continue
+                seen_notifications.add(dedup_key)
+
+                # Increment seq for genuinely new notifications
                 notify_seq[tool_use_id] = notify_seq.get(tool_use_id, 0) + 1
                 seq = notify_seq[tool_use_id]
 
                 dispatch = {
                     "dispatch_id": tool_use_id,
                     "session_id": session_id,
-                    "status": notif.get("status", "completed"),
-                    "dispatch_complete": (notif.get("status", "") == "completed"),
+                    "status": notif_status,
+                    "dispatch_complete": notif_status not in _IN_FLIGHT_STATUSES,
                     "ts_utc": record.get("timestamp", ""),
                     "seq": seq,
                     "agent_id": notif.get("task_id", ""),
@@ -493,6 +516,7 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
     meta["head_sha"] = _sha256_head(path, min(_HEAD_BYTES, file_size))
     meta["harness_version"] = harness_version
     meta["truncated"] = truncated
+    meta["notify_seq"] = notify_seq
 
     return dispatches, meta
 
