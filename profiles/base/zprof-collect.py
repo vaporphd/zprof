@@ -280,7 +280,7 @@ def _parse_task_notification_xml(text: str) -> dict | None:
         return None
     body = m.group(1)
     result = {}
-    for tag in ("task-id", "tool-use-id", "status", "summary",
+    for tag in ("task-id", "tool-use-id", "status", "summary", "result",
                 "subagent_tokens", "tool_uses", "duration_ms"):
         tm = re.search(rf"<{re.escape(tag)}>(.*?)</{re.escape(tag)}>", body, re.DOTALL)
         if tm:
@@ -405,12 +405,26 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
             if not isinstance(tur, dict):
                 continue
 
-            # Find the matching tool_use_id from the tool_result in content
+            # Find the matching tool_use_id and returned text from the
+            # tool_result in content.  The item's "content" field holds the
+            # subagent's return text (first text block only — trailing blocks
+            # are harness bookkeeping per parser.go:300).
             tool_use_id = ""
+            returned_text = ""
             if isinstance(content, list):
                 for item in content:
                     if isinstance(item, dict) and item.get("type") == "tool_result":
                         tool_use_id = item.get("tool_use_id", "")
+                        # Extract returned text from tool_result content
+                        tr_content = item.get("content", "")
+                        if isinstance(tr_content, str) and tr_content:
+                            returned_text = tr_content
+                        elif isinstance(tr_content, list) and tr_content:
+                            first = tr_content[0]
+                            if isinstance(first, dict) and first.get("type") == "text":
+                                returned_text = first.get("text", "")
+                            elif isinstance(first, str):
+                                returned_text = first
                         if tool_use_id:
                             break
 
@@ -446,6 +460,10 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
                 "ts_utc": record.get("timestamp", ""),
                 "seq": 0,
             }
+
+            # Attach returned text for Class A checks (sync path)
+            if returned_text:
+                dispatch["returned"] = returned_text
 
             if is_async:
                 dispatch["dispatch_complete"] = False
@@ -510,6 +528,9 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
                     "seq": seq,
                     "agent_id": notif.get("task_id", ""),
                 }
+                # Attach returned text from <result> for Class A checks
+                if "result" in notif:
+                    dispatch["returned"] = notif["result"]
                 # Legacy fields from older task-notification format
                 if "subagent_tokens" in notif:
                     dispatch["total_tokens"] = notif["subagent_tokens"]
@@ -542,7 +563,8 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
     """Read a subagent transcript and sum token usage across assistant turns.
 
     Returns dict with keys: tokens_input, tokens_output, tokens_cache_read,
-    tokens_cache_creation, model (from last assistant turn), truncated (bool).
+    tokens_cache_creation, model (from last assistant turn), truncated (bool),
+    returned (text content of last assistant message — the subagent's return).
     """
     result = {
         "tokens_input": 0,
@@ -551,6 +573,7 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
         "tokens_cache_creation": 0,
         "model": "",
         "truncated": False,
+        "returned": "",
     }
     if not jsonl_path.exists():
         return result
@@ -592,6 +615,19 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
         m = msg.get("model", "")
         if m:
             result["model"] = m
+
+        # Extract text content — keep the last assistant message's text
+        # (this is the subagent's return text for Class A checks)
+        msg_content = msg.get("content", [])
+        if isinstance(msg_content, str) and msg_content:
+            result["returned"] = msg_content
+        elif isinstance(msg_content, list):
+            for ci in msg_content:
+                if isinstance(ci, dict) and ci.get("type") == "text":
+                    text = ci.get("text", "")
+                    if text:
+                        result["returned"] = text
+                        break  # first text block only
 
         # Sum usage
         usage = msg.get("usage", {})
@@ -720,6 +756,10 @@ def _collect_subagent_transcripts(
             if tool_use_id and tool_use_id in dispatch_by_id:
                 for idx in dispatch_by_id[tool_use_id]:
                     dispatches[idx].update(enrichment)
+                    # Return text from transcript's last assistant message.
+                    # Only backfill if sync path didn't already populate it.
+                    if not dispatches[idx].get("returned") and transcript_data.get("returned"):
+                        dispatches[idx]["returned"] = transcript_data["returned"]
             else:
                 # No matching dispatch from main log — create one from meta
                 # alone.  Outcome is unknown (killed session recovery path),
@@ -735,6 +775,8 @@ def _collect_subagent_transcripts(
                     "ts_utc": "",
                 }
                 dispatch.update(enrichment)
+                if transcript_data.get("returned"):
+                    dispatch["returned"] = transcript_data["returned"]
                 dispatches.append(dispatch)
 
             agents_done.add(agent_id)
@@ -780,8 +822,10 @@ _SCHEMA_FIELDS = [
     "ext",
 ]
 
-# Known roles for next_is_reachable checks.
-_KNOWN_ROLES = frozenset({
+# Hardcoded fallback roles for next_is_reachable checks.
+# Known limitation: this set is incomplete.  _get_known_roles() augments it
+# dynamically from .claude/agents/*.md filenames in the project directory.
+_BUILTIN_ROLES = frozenset({
     "implementer", "reviewer", "architect", "planner", "tester",
     "debugger", "explorer", "Explore", "Plan", "code-reviewer",
     "general-purpose", "claude", "python-pro", "typescript-pro",
@@ -789,6 +833,24 @@ _KNOWN_ROLES = frozenset({
     "feature-dev:code-architect", "feature-dev:code-explorer",
     "feature-dev:code-reviewer",
 })
+
+
+def _get_known_roles(cwd: str) -> frozenset[str]:
+    """Return the set of known roles, augmented by .claude/agents/*.md.
+
+    Scans the project's .claude/agents/ directory for agent definition
+    files and adds their stem names (without .md) to the builtin set.
+    """
+    roles = set(_BUILTIN_ROLES)
+    agents_dir = Path(cwd) / ".claude" / "agents"
+    if agents_dir.is_dir():
+        try:
+            for entry in agents_dir.iterdir():
+                if entry.suffix == ".md" and entry.is_file():
+                    roles.add(entry.stem)
+        except OSError:
+            pass
+    return frozenset(roles)
 
 _machine_id_cache: str | None = None
 
@@ -945,7 +1007,8 @@ def _redact_secrets(value, patterns: list[tuple[str, "re.Pattern[str]"]]) -> tup
     return value, 0
 
 
-def _class_a_checks(returned: str | None, cwd: str) -> dict:
+def _class_a_checks(returned: str | None, cwd: str,
+                     known_roles: frozenset[str] | None = None) -> dict:
     """Run Class A contract compliance checks on return text.
 
     Returns dict with has_preamble, return_parsed, artifact_exists,
@@ -993,12 +1056,13 @@ def _class_a_checks(returned: str | None, cwd: str) -> dict:
             break
 
     # next_is_reachable: check if next: value is a known role
+    roles = known_roles if known_roles is not None else _BUILTIN_ROLES
     for line in lines:
         stripped = line.strip()
         if stripped.lower().startswith("next:"):
             next_val = stripped.split(":", 1)[1].strip()
             if next_val:
-                result["next_is_reachable"] = next_val in _KNOWN_ROLES
+                result["next_is_reachable"] = next_val in roles
             break
 
     return result
@@ -1023,6 +1087,7 @@ def _normalize_dispatch(
     project_id: str,
     project_id_provisional: bool,
     redaction_patterns: list[tuple[str, "re.Pattern[str]"]],
+    known_roles: frozenset[str] | None = None,
 ) -> tuple[dict, int]:
     """Transform a raw dispatch dict into a schema-compliant row.
 
@@ -1036,10 +1101,8 @@ def _normalize_dispatch(
         "machine_id": machine_id,
         "project_id": project_id,
     }
-    if project_id_provisional:
-        norm["project_id_provisional"] = True
-
     # Copy known fields from raw, applying defaults
+    norm["protocol_version"] = raw.get("protocol_version")
     norm["ts_utc"] = raw.get("ts_utc", "")
     norm["session_id"] = session_id
     norm["dispatch_id"] = _make_composite_id(session_id, raw.get("dispatch_id", ""))
@@ -1072,13 +1135,19 @@ def _normalize_dispatch(
     norm["transcript_captured"] = raw.get("transcript_captured", False)
     norm["transcript_truncated"] = raw.get("transcript_truncated")
 
-    # Extension
-    norm["ext"] = raw.get("ext")
+    # Extension — merge project_id_provisional into ext (not a core field)
+    ext = raw.get("ext")
+    if project_id_provisional:
+        if ext is None:
+            ext = {}
+        ext = dict(ext)  # copy to avoid mutating raw
+        ext["project_id_provisional"] = True
+    norm["ext"] = ext
 
     # Class A checks
     returned = raw.get("returned")
     cwd = raw.get("cwd", "")
-    checks = _class_a_checks(returned, cwd)
+    checks = _class_a_checks(returned, cwd, known_roles=known_roles)
     norm.update(checks)
 
     # Remove None values for cleaner JSONL (optional fields)
@@ -1137,6 +1206,9 @@ def _normalize_and_write(
     # Redaction patterns
     redaction_patterns = _load_redaction_patterns(cwd)
 
+    # Known roles (dynamic from .claude/agents/*.md + builtins)
+    known_roles = _get_known_roles(cwd)
+
     # Dedup set
     dispatches_path = agentlog / "dispatches.jsonl"
     seen = _load_dedup_set(dispatches_path)
@@ -1159,6 +1231,7 @@ def _normalize_and_write(
                 project_id=project_id,
                 project_id_provisional=provisional,
                 redaction_patterns=redaction_patterns,
+                known_roles=known_roles,
             )
             total_redactions += redact_count
 

@@ -27,8 +27,12 @@ _redact_secrets = zprof_collect._redact_secrets
 _class_a_checks = zprof_collect._class_a_checks
 _get_machine_id = zprof_collect._get_machine_id
 _get_project_id = zprof_collect._get_project_id
+_get_known_roles = zprof_collect._get_known_roles
 _normalize_and_write = zprof_collect._normalize_and_write
 _load_redaction_patterns = zprof_collect._load_redaction_patterns
+_extract_main_log = zprof_collect._extract_main_log
+
+FIXTURES = pathlib.Path(__file__).parent / "fixtures"
 
 
 REQUIRED_FIELDS = [
@@ -102,7 +106,29 @@ class TestNormalizedRowFields:
             harness_version="2.1.220", machine_id="test-machine",
             project_id="abc123", project_id_provisional=False,
             redaction_patterns=[])
-        assert norm["ext"] == {"custom": "data", "nested": {"a": 1}}
+        assert norm["ext"]["custom"] == "data"
+        assert norm["ext"]["nested"] == {"a": 1}
+
+    def test_project_id_provisional_in_ext(self):
+        """project_id_provisional belongs in ext, not top-level."""
+        raw = _make_raw_dispatch()
+        norm, _ = _normalize_dispatch(
+            raw, session_id="sess-test-001",
+            harness_version="2.1.220", machine_id="test-machine",
+            project_id="abc123", project_id_provisional=True,
+            redaction_patterns=[])
+        assert "project_id_provisional" not in norm  # not top-level
+        assert norm["ext"]["project_id_provisional"] is True
+
+    def test_project_id_provisional_merges_into_existing_ext(self):
+        raw = _make_raw_dispatch(ext={"custom": "data"})
+        norm, _ = _normalize_dispatch(
+            raw, session_id="sess-test-001",
+            harness_version="2.1.220", machine_id="test-machine",
+            project_id="abc123", project_id_provisional=True,
+            redaction_patterns=[])
+        assert norm["ext"]["custom"] == "data"
+        assert norm["ext"]["project_id_provisional"] is True
 
     def test_spawn_depth_defaults_to_1(self):
         raw = _make_raw_dispatch()
@@ -475,3 +501,122 @@ class TestEndToEndNormalization:
         assert "has_preamble" in row
         assert row["has_preamble"] is False
         assert row["return_parsed"] is True
+
+
+def _empty_sess():
+    return {
+        "main_log_offset": 0,
+        "main_log_size": 0,
+        "main_log_head_sha": "",
+        "agents_done": [],
+    }
+
+
+class TestReturnedTextExtraction:
+    """Critical fix: returned text must flow from extraction through to Class A."""
+
+    def test_sync_dispatch_extracts_returned_text(self):
+        """Sync fixture with verdict in tool_result content."""
+        dispatches, meta = _extract_main_log(
+            "sess-verdict-001",
+            FIXTURES / "sync_with_verdict.jsonl",
+            _empty_sess(),
+        )
+        assert len(dispatches) == 1
+        assert "returned" in dispatches[0]
+        assert "verdict: done" in dispatches[0]["returned"]
+
+    def test_sync_returned_text_plain_string(self):
+        """Original sync fixture has plain string content (no verdict)."""
+        dispatches, meta = _extract_main_log(
+            "sess-sync-001",
+            FIXTURES / "sync_dispatch.jsonl",
+            _empty_sess(),
+        )
+        assert len(dispatches) == 1
+        assert dispatches[0].get("returned") == "Found 42 files in the project."
+
+    def test_extraction_through_normalization_populates_class_a(self, tmp_path):
+        """Integration: extract -> normalize -> Class A checks are populated."""
+        agentlog = tmp_path / "agentlog"
+        agentlog.mkdir()
+
+        dispatches, meta = _extract_main_log(
+            "sess-verdict-001",
+            FIXTURES / "sync_with_verdict.jsonl",
+            _empty_sess(),
+        )
+
+        _normalize_and_write(
+            agentlog, dispatches,
+            session_id="sess-verdict-001",
+            harness_version=meta.get("harness_version", ""),
+            payload={"cwd": str(tmp_path)},
+        )
+
+        dispatches_file = agentlog / "dispatches.jsonl"
+        assert dispatches_file.exists()
+        row = json.loads(dispatches_file.read_text().strip())
+
+        # Class A checks should be populated from the returned text
+        assert row["return_parsed"] is True
+        assert row["has_preamble"] is False
+
+    def test_extraction_through_normalization_no_verdict(self, tmp_path):
+        """When returned text has no verdict, return_parsed should be False."""
+        agentlog = tmp_path / "agentlog"
+        agentlog.mkdir()
+
+        dispatches, meta = _extract_main_log(
+            "sess-sync-001",
+            FIXTURES / "sync_dispatch.jsonl",
+            _empty_sess(),
+        )
+
+        _normalize_and_write(
+            agentlog, dispatches,
+            session_id="sess-sync-001",
+            harness_version=meta.get("harness_version", ""),
+            payload={"cwd": str(tmp_path)},
+        )
+
+        dispatches_file = agentlog / "dispatches.jsonl"
+        row = json.loads(dispatches_file.read_text().strip())
+        assert row["return_parsed"] is False
+
+
+class TestDynamicRoles:
+    """next_is_reachable should discover roles from .claude/agents/*.md."""
+
+    def test_builtin_role_reachable(self):
+        returned = "verdict: done\nnext: reviewer"
+        checks = _class_a_checks(returned, cwd="/nonexistent")
+        assert checks["next_is_reachable"] is True
+
+    def test_unknown_role_not_reachable(self):
+        returned = "verdict: done\nnext: some-custom-agent-xyz"
+        checks = _class_a_checks(returned, cwd="/nonexistent")
+        assert checks["next_is_reachable"] is False
+
+    def test_dynamic_role_from_agents_dir(self, tmp_path):
+        """Roles discovered from .claude/agents/*.md should be reachable."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "my-custom-agent.md").write_text("# Custom agent\n")
+
+        roles = _get_known_roles(str(tmp_path))
+        assert "my-custom-agent" in roles
+
+        returned = "verdict: done\nnext: my-custom-agent"
+        checks = _class_a_checks(returned, cwd=str(tmp_path), known_roles=roles)
+        assert checks["next_is_reachable"] is True
+
+    def test_builtin_roles_preserved_with_dynamic(self, tmp_path):
+        """Dynamic discovery should augment, not replace, builtin roles."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        (agents_dir / "custom.md").write_text("# Custom\n")
+
+        roles = _get_known_roles(str(tmp_path))
+        assert "reviewer" in roles  # builtin
+        assert "custom" in roles  # dynamic
