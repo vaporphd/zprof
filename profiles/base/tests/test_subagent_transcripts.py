@@ -202,6 +202,34 @@ class TestExtractSubagentTranscript:
         assert result["tokens_input"] == 300
         assert result["tokens_output"] == 125
 
+    def test_truncated_false_for_valid_file(self):
+        result = _extract_subagent_transcript(FIXTURES / "subagent_transcript.jsonl")
+        assert result["truncated"] is False
+
+    def test_truncated_true_for_broken_last_line(self, tmp_path):
+        """Last line is incomplete JSON => truncated=True."""
+        f = tmp_path / "truncated.jsonl"
+        valid_line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "role": "assistant", "model": "claude-opus-5",
+                "content": [], "usage": {"input_tokens": 100, "output_tokens": 50,
+                                         "cache_read_input_tokens": 0,
+                                         "cache_creation_input_tokens": 0},
+            },
+        })
+        f.write_text(valid_line + "\n" + '{"type":"assistant","message":{"role":"ass')
+        result = _extract_subagent_transcript(f)
+        assert result["truncated"] is True
+        # Should still extract tokens from the valid line
+        assert result["tokens_input"] == 100
+
+    def test_truncated_false_for_empty(self, tmp_path):
+        f = tmp_path / "empty.jsonl"
+        f.write_text("")
+        result = _extract_subagent_transcript(f)
+        assert result["truncated"] is False
+
 
 # -----------------------------------------------------------------------
 # _gzip_copy unit tests
@@ -243,11 +271,13 @@ class TestCollectSubagentTranscripts:
     def test_enriches_matching_dispatch(self, tmp_path):
         """When main log dispatch matches meta.json toolUseId, enrich it."""
         agent_id = "deadbeef01234567"
+        parent_agent_id = "a54a62add7dc3a394"
+        parent_tool_use_id = "toolu_01ParentToolUseAAAAAAAA"
         tool_use_id = "toolu_01AsyncDispatchAAAAAAAAA"
         meta = _make_meta_json(
             agent_type="implementer",
             tool_use_id=tool_use_id,
-            parent_agent_id="a54a62add7dc3a394",
+            parent_agent_id=parent_agent_id,
             spawn_depth=2,
         )
         tp, agentlog = _setup_subagents_dir(
@@ -258,6 +288,15 @@ class TestCollectSubagentTranscripts:
                 cache_read=40000, cache_creation=2000, turns=3,
             ),
         )
+        # Create parent's meta.json so parent_dispatch_id can be resolved
+        subagents_dir = pathlib.Path(tp).with_suffix("") / "subagents"
+        parent_meta = _make_meta_json(
+            agent_type="orchestrator",
+            tool_use_id=parent_tool_use_id,
+        )
+        (subagents_dir / f"agent-{parent_agent_id}.meta.json").write_text(
+            json.dumps(parent_meta))
+
         sess = _empty_sess()
         # Simulate a dispatch from main log extraction
         dispatches = [{
@@ -276,7 +315,8 @@ class TestCollectSubagentTranscripts:
         d = dispatches[0]
         assert d["role"] == "implementer"
         assert d["spawn_depth"] == 2
-        assert d["parent_dispatch_id"] == "harness:session:a54a62add7dc3a394"
+        assert d["parent_dispatch_id"] == parent_tool_use_id
+        assert d["agent_id"] == agent_id
         assert d["transcript_captured"] is True
         assert d["transcript_ref"].startswith("transcripts/")
         assert d["transcript_ref"].endswith(".jsonl.gz")
@@ -460,6 +500,170 @@ class TestCollectSubagentTranscripts:
         assert "parent_dispatch_id" not in d
         assert d["spawn_depth"] == 1
 
+    def test_unresolved_parent_when_parent_meta_missing(self, tmp_path):
+        """When parentAgentId's meta.json is missing, use unresolved: prefix."""
+        agent_id = "deadbeef01234567"
+        parent_agent_id = "missing_parent_abcde"
+        meta = _make_meta_json(
+            agent_type="impl",
+            tool_use_id="toolu_01Unresolved",
+            parent_agent_id=parent_agent_id,
+            spawn_depth=2,
+        )
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta)
+        # Do NOT create parent's meta.json
+        sess = _empty_sess()
+        dispatches = []
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        d = dispatches[0]
+        assert d["parent_dispatch_id"] == f"unresolved:{parent_agent_id}"
+
+    def test_role_guard_no_blank_overwrite(self, tmp_path):
+        """Empty agentType in meta should not overwrite a correct role from main log."""
+        agent_id = "deadbeef01234567"
+        tool_use_id = "toolu_01RoleGuard"
+        meta = _make_meta_json(
+            agent_type="",  # empty agentType
+            tool_use_id=tool_use_id,
+            spawn_depth=1,
+        )
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta)
+        sess = _empty_sess()
+        dispatches = [{
+            "dispatch_id": tool_use_id,
+            "session_id": "session-id",
+            "role": "implementer",  # correct role from Task 3
+            "status": "completed",
+            "dispatch_complete": True,
+            "seq": 0,
+        }]
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        # role should still be "implementer", not overwritten to ""
+        assert dispatches[0]["role"] == "implementer"
+
+    def test_spawn_depth_guard_no_zero_overwrite(self, tmp_path):
+        """spawn_depth=0 or missing should not overwrite existing value."""
+        agent_id = "deadbeef01234567"
+        tool_use_id = "toolu_01DepthGuard"
+        # meta with spawnDepth=0 (abnormal)
+        meta = {"agentType": "impl", "toolUseId": tool_use_id, "spawnDepth": 0}
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta)
+        sess = _empty_sess()
+        dispatches = [{
+            "dispatch_id": tool_use_id,
+            "session_id": "session-id",
+            "role": "impl",
+            "spawn_depth": 2,  # existing correct value
+            "status": "completed",
+            "dispatch_complete": True,
+            "seq": 0,
+        }]
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        # spawn_depth should still be 2, not overwritten to 0
+        assert dispatches[0]["spawn_depth"] == 2
+
+    def test_agent_id_set_on_matched_dispatch(self, tmp_path):
+        """Matched dispatches should have agent_id set."""
+        agent_id = "deadbeef01234567"
+        tool_use_id = "toolu_01AgentIdTest"
+        meta = _make_meta_json(tool_use_id=tool_use_id)
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta)
+        sess = _empty_sess()
+        dispatches = [{
+            "dispatch_id": tool_use_id,
+            "session_id": "session-id",
+            "role": "implementer",
+            "status": "completed",
+            "dispatch_complete": True,
+            "seq": 0,
+        }]
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        assert dispatches[0]["agent_id"] == agent_id
+
+    def test_truncated_transcript_sets_dispatch_incomplete(self, tmp_path):
+        """Meta-only dispatch with truncated transcript is dispatch_complete=False."""
+        agent_id = "deadbeef01234567"
+        meta = _make_meta_json(
+            agent_type="impl",
+            tool_use_id="toolu_01Truncated",
+        )
+        # Create a truncated transcript
+        valid_line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "role": "assistant", "model": "claude-opus-5",
+                "content": [{"type": "text", "text": "x"}],
+                "usage": {"input_tokens": 100, "output_tokens": 50,
+                           "cache_read_input_tokens": 0,
+                           "cache_creation_input_tokens": 0},
+            },
+        })
+        truncated_content = valid_line + "\n" + '{"type":"assistant","mess'
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta,
+            transcript_content=truncated_content)
+        sess = _empty_sess()
+        dispatches = []  # no matching dispatch from main log
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        assert len(dispatches) == 1
+        d = dispatches[0]
+        assert d["dispatch_complete"] is False
+        assert d["status"] == "unknown"
+        assert d["transcript_truncated"] is True
+        # Should still extract tokens from valid lines
+        assert d["tokens_input"] == 100
+
+    def test_truncated_transcript_sets_flag_on_matched(self, tmp_path):
+        """Matched dispatch with truncated transcript gets transcript_truncated."""
+        agent_id = "deadbeef01234567"
+        tool_use_id = "toolu_01TruncMatched"
+        meta = _make_meta_json(tool_use_id=tool_use_id)
+        valid_line = json.dumps({
+            "type": "assistant",
+            "message": {
+                "role": "assistant", "model": "claude-opus-5",
+                "content": [], "usage": {"input_tokens": 50, "output_tokens": 25,
+                                         "cache_read_input_tokens": 0,
+                                         "cache_creation_input_tokens": 0},
+            },
+        })
+        truncated_content = valid_line + "\n" + '{"broken'
+        tp, agentlog = _setup_subagents_dir(
+            tmp_path, agent_id=agent_id, meta=meta,
+            transcript_content=truncated_content)
+        sess = _empty_sess()
+        dispatches = [{
+            "dispatch_id": tool_use_id,
+            "session_id": "session-id",
+            "status": "completed",
+            "dispatch_complete": True,
+            "seq": 0,
+        }]
+
+        _collect_subagent_transcripts(
+            agentlog, "session-id", tp, set(), sess, dispatches)
+
+        assert dispatches[0]["transcript_truncated"] is True
+
 
 class TestCollectSubagentToolResults:
     """Tool-results directory copy."""
@@ -537,6 +741,8 @@ class TestEndToEndWithMainLog:
 
         # Set up subagent transcript for the async agent
         agent_id = "abcdef1234567890a"
+        parent_agent_id = "root_session_id"
+        parent_tool_use_id = "toolu_01RootToolUseAAAAAAAA"
         subagents_dir = session_dir / "subagents"
         subagents_dir.mkdir(parents=True)
 
@@ -544,7 +750,7 @@ class TestEndToEndWithMainLog:
             "agentType": "implementer",
             "description": "Task 1: implement feature",
             "toolUseId": "toolu_01AsyncDispatchAAAAAAAAA",
-            "parentAgentId": "root_session_id",
+            "parentAgentId": parent_agent_id,
             "spawnDepth": 1,
         }
         (subagents_dir / f"agent-{agent_id}.meta.json").write_text(json.dumps(meta))
@@ -554,6 +760,10 @@ class TestEndToEndWithMainLog:
                 input_tokens=25000, output_tokens=8000,
                 cache_read=100000, cache_creation=3000, turns=2,
             ))
+        # Create parent's meta.json so parent_dispatch_id can be resolved
+        parent_meta = {"agentType": "orchestrator", "toolUseId": parent_tool_use_id}
+        (subagents_dir / f"agent-{parent_agent_id}.meta.json").write_text(
+            json.dumps(parent_meta))
 
         agentlog = tmp_path / ".agentlog"
         agentlog.mkdir()
@@ -576,7 +786,8 @@ class TestEndToEndWithMainLog:
         assert comp["transcript_captured"] is True
         assert comp["role"] == "implementer"
         assert comp["spawn_depth"] == 1
-        assert comp["parent_dispatch_id"] == "harness:session:root_session_id"
+        assert comp["parent_dispatch_id"] == parent_tool_use_id
+        assert comp["agent_id"] == agent_id
         assert comp["model_resolved"] == "claude-opus-5"
         # 2 turns: 25000*2 = 50000
         assert comp["tokens_input"] == 50000
@@ -587,6 +798,7 @@ class TestEndToEndWithMainLog:
         assert len(launches) >= 1
         launch = launches[0]
         assert launch["transcript_captured"] is True
+        assert launch["agent_id"] == agent_id
 
         # Transcript file should exist
         gz = agentlog / "transcripts" / f"{agent_id}.jsonl.gz"

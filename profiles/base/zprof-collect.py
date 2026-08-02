@@ -536,7 +536,7 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
     """Read a subagent transcript and sum token usage across assistant turns.
 
     Returns dict with keys: tokens_input, tokens_output, tokens_cache_read,
-    tokens_cache_creation, model (from last assistant turn).
+    tokens_cache_creation, model (from last assistant turn), truncated (bool).
     """
     result = {
         "tokens_input": 0,
@@ -544,6 +544,7 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
         "tokens_cache_read": 0,
         "tokens_cache_creation": 0,
         "model": "",
+        "truncated": False,
     }
     if not jsonl_path.exists():
         return result
@@ -552,6 +553,19 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
         raw = jsonl_path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return result
+
+    # Check if the last non-empty line is valid JSON (truncation detection)
+    last_line = ""
+    for line in reversed(raw.split("\n")):
+        line = line.strip()
+        if line:
+            last_line = line
+            break
+    if last_line:
+        try:
+            json.loads(last_line)
+        except json.JSONDecodeError:
+            result["truncated"] = True
 
     for line in raw.split("\n"):
         line = line.strip()
@@ -640,7 +654,19 @@ def _collect_subagent_transcripts(
             tool_use_id = meta.get("toolUseId", "")
             agent_type = meta.get("agentType", "")
             parent_agent_id = meta.get("parentAgentId", "")
-            spawn_depth = meta.get("spawnDepth", 1)
+            spawn_depth = meta.get("spawnDepth")
+
+            # Resolve parent_dispatch_id: parentAgentId is an agent_id (hex),
+            # not a toolUseId.  Read the parent's meta.json to get its
+            # toolUseId so parent_dispatch_id is joinable with dispatch_id.
+            parent_dispatch_id = ""
+            if parent_agent_id:
+                parent_meta_file = subagents_dir / f"agent-{parent_agent_id}.meta.json"
+                try:
+                    parent_meta = json.loads(parent_meta_file.read_text())
+                    parent_dispatch_id = parent_meta.get("toolUseId", "")
+                except (OSError, json.JSONDecodeError):
+                    parent_dispatch_id = f"unresolved:{parent_agent_id}"
 
             # Read the corresponding transcript JSONL
             transcript_file = subagents_dir / f"agent-{agent_id}.jsonl"
@@ -657,15 +683,22 @@ def _collect_subagent_transcripts(
                 except OSError:
                     _log_error(agentlog, f"failed to gzip-copy transcript for agent {agent_id}")
 
-            # Enrich matching dispatch dicts
+            # Enrich matching dispatch dicts — only set fields when
+            # the value is meaningful to avoid blanking correct data
+            # from Task 3's main-log extraction.
             enrichment = {
-                "role": agent_type,
-                "spawn_depth": spawn_depth,
+                "agent_id": agent_id,
                 "transcript_ref": transcript_ref,
                 "transcript_captured": bool(transcript_ref),
             }
-            if parent_agent_id:
-                enrichment["parent_dispatch_id"] = f"harness:session:{parent_agent_id}"
+            if agent_type:
+                enrichment["role"] = agent_type
+            if spawn_depth is not None and spawn_depth > 0:
+                enrichment["spawn_depth"] = spawn_depth
+            if parent_dispatch_id:
+                enrichment["parent_dispatch_id"] = parent_dispatch_id
+            if transcript_data["truncated"]:
+                enrichment["transcript_truncated"] = True
 
             # Token data from transcript (more accurate than main log)
             if transcript_data["tokens_input"] or transcript_data["tokens_output"]:
@@ -682,13 +715,16 @@ def _collect_subagent_transcripts(
                 for idx in dispatch_by_id[tool_use_id]:
                     dispatches[idx].update(enrichment)
             else:
-                # No matching dispatch from main log — create one from meta alone
+                # No matching dispatch from main log — create one from meta
+                # alone.  Outcome is unknown (killed session recovery path),
+                # so mark dispatch_complete based on transcript truncation.
+                is_truncated = transcript_data["truncated"]
                 dispatch = {
                     "dispatch_id": tool_use_id or f"meta:{agent_id}",
                     "session_id": session_id,
                     "agent_id": agent_id,
-                    "status": "completed",
-                    "dispatch_complete": True,
+                    "status": "completed" if not is_truncated else "unknown",
+                    "dispatch_complete": not is_truncated,
                     "seq": 0,
                     "ts_utc": "",
                 }
