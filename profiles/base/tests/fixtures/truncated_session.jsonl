@@ -1,0 +1,4 @@
+{"type":"summary","sessionId":"sess-trunc-001","timestamp":"2026-08-01T12:00:00.000Z","version":"2.1.220"}
+{"type":"assistant","message":{"role":"assistant","model":"claude-sonnet-5","content":[{"type":"tool_use","id":"toolu_01TruncDispatchAAAAAAAA","name":"Agent","input":{"description":"Run task","subagent_type":"implementer","prompt":"Do something."}}]},"uuid":"t1u2v3","timestamp":"2026-08-01T12:00:01.000Z","sessionId":"sess-trunc-001","version":"2.1.220"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_01TruncDispatchAAAAAAAA","content":"Done."}]},"uuid":"w4x5y6","timestamp":"2026-08-01T12:00:30.000Z","toolUseResult":{"status":"completed","agentType":"implementer","resolvedModel":"claude-sonnet-5","totalDurationMs":25000,"totalTokens":30000,"totalToolUseCount":8},"sessionId":"sess-trunc-001","version":"2.1.220"}
+{"type":"assistant","message":{"role":"assist
