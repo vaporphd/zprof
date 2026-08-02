@@ -39,6 +39,12 @@ type Base struct {
 	// Router is the thin AGENT_LOOP.md router content, loaded from the file
 	// named by the manifest's `router:` key.
 	Router string
+	// CollectorScript is the raw contents of zprof-collect.py, deployed
+	// verbatim to <project>/.claude/zprof-collect.py on apply.
+	CollectorScript []byte
+	// TelemetrySchema is the raw contents of telemetry.yaml (the
+	// .agentlog/dispatches.jsonl schema), deployed as <project>/.agentlog/schema.json.
+	TelemetrySchema []byte
 }
 
 // readAgents walks dir and returns a map of agent name (relative path, without
@@ -149,7 +155,12 @@ func LoadOverlay(dir string) (*Overlay, error) {
 // LoadBase loads the base profile directory (base/) into a Base: its
 // manifest.yaml, agents/*.md, workflows/*.md, state-templates/*.md, and the
 // router file named by the manifest's `router:` key.
-// claude-block-base.md is optional.
+// claude-block-base.md, zprof-collect.py, and telemetry.yaml are all
+// optional: callers that only need the manifest/agents/workflows (doctor's
+// expectedAgentNames, minimal test fixtures) must not fail to load a base
+// profile that predates telemetry support. deployCollector (apply package)
+// is what makes them effectively required for `zprof apply`, by skipping
+// its writes when the content is absent.
 func LoadBase(dir string) (*Base, error) {
 	m, err := manifest.LoadOverlay(filepath.Join(dir, "manifest.yaml"))
 	if err != nil {
@@ -179,6 +190,14 @@ func LoadBase(dir string) (*Base, error) {
 		}
 		router = string(data)
 	}
+	collectorScript, err := os.ReadFile(filepath.Join(dir, "zprof-collect.py"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read zprof-collect.py: %w", err)
+	}
+	telemetrySchema, err := os.ReadFile(filepath.Join(dir, "telemetry.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read telemetry.yaml: %w", err)
+	}
 	return &Base{
 		Manifest:        m,
 		Agents:          agents,
@@ -186,6 +205,8 @@ func LoadBase(dir string) (*Base, error) {
 		Workflows:       workflows,
 		StateTemplates:  stateTemplates,
 		Router:          router,
+		CollectorScript: collectorScript,
+		TelemetrySchema: telemetrySchema,
 	}, nil
 }
 

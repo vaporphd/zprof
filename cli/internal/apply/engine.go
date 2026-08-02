@@ -144,6 +144,13 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	}
 	res.StateFiles = state
 
+	// 5.5. Deploy telemetry collector (zprof-collect.py + .agentlog/schema.json)
+	collectorFiles, err := deployCollector(opts)
+	if err != nil {
+		return nil, fmt.Errorf("deploy collector: %w", err)
+	}
+	res.UpdatedFiles = append(res.UpdatedFiles, collectorFiles...)
+
 	// 6. .gitignore append (base entries + per-overlay contributions).
 	if err := ensureGitignore(opts.ProjectDir, opts.Overlays); err != nil {
 		return nil, err
@@ -285,7 +292,7 @@ func ensureGitignore(dir string, overlays []*overlay.Overlay) error {
 		return err
 	}
 	content := string(data)
-	entries := []string{"thoughts/", ".zprof/runs/", "*.zprof.bak-*", ".zprof.yaml.bak-*"}
+	entries := []string{"thoughts/", ".zprof/runs/", "*.zprof.bak-*", ".zprof.yaml.bak-*", ".agentlog/"}
 	for _, o := range overlays {
 		if o == nil || o.Manifest == nil {
 			continue
