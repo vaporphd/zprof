@@ -7,7 +7,7 @@ Modes: subagent-stop | stop | session-start
 Reads JSON payload from stdin. Writes to $ZPROF_AGENTLOG or <cwd>/.agentlog/.
 Always exits 0. Errors go to collect.log.
 """
-import fcntl, hashlib, json, os, re, sys, time, traceback
+import fcntl, gzip, hashlib, json, os, re, shutil, sys, time, traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -182,15 +182,6 @@ class Collector:
             self.state.increment_losses()
             return
         dispatches, meta = _extract_main_log(session_id, tp, sess)
-        # Store dispatches as raw JSONL for later normalization (Task 5)
-        if dispatches:
-            raw_path = self.agentlog / "raw" / f"{session_id}.jsonl"
-            raw_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(raw_path, "a") as f:
-                for d in dispatches:
-                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
         # Update watermarks
         sess["main_log_offset"] = meta["offset"]
         sess["main_log_size"] = meta["size"]
@@ -204,7 +195,22 @@ class Collector:
                        f"session {session_id}: {meta['unparsed_lines']} unparsed lines (format drift?)")
         if meta.get("truncated"):
             sess["transcript_truncated"] = True
-        # Task 4 fills this in: copy subagent transcripts
+        # Task 4: copy subagent transcripts and enrich dispatch dicts
+        _collect_subagent_transcripts(
+            self.agentlog, session_id, transcript_path,
+            running_agents, sess, dispatches,
+        )
+        # Store dispatches as raw JSONL for later normalization (Task 5).
+        # Written AFTER transcript enrichment so the raw file has the
+        # most complete version of each dispatch dict.
+        if dispatches:
+            raw_path = self.agentlog / "raw" / f"{session_id}.jsonl"
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(raw_path, "a") as f:
+                for d in dispatches:
+                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
         # Task 5 fills this in: normalize to dispatches.jsonl
 
 
@@ -519,6 +525,199 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
     meta["notify_seq"] = notify_seq
 
     return dispatches, meta
+
+
+# ---------------------------------------------------------------------------
+# Subagent transcript extraction (Task 4)
+# ---------------------------------------------------------------------------
+
+
+def _extract_subagent_transcript(jsonl_path: Path) -> dict:
+    """Read a subagent transcript and sum token usage across assistant turns.
+
+    Returns dict with keys: tokens_input, tokens_output, tokens_cache_read,
+    tokens_cache_creation, model (from last assistant turn).
+    """
+    result = {
+        "tokens_input": 0,
+        "tokens_output": 0,
+        "tokens_cache_read": 0,
+        "tokens_cache_creation": 0,
+        "model": "",
+    }
+    if not jsonl_path.exists():
+        return result
+
+    try:
+        raw = jsonl_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return result
+
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+
+        msg = record.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("role") != "assistant":
+            continue
+
+        # Extract model — keep the last one seen
+        m = msg.get("model", "")
+        if m:
+            result["model"] = m
+
+        # Sum usage
+        usage = msg.get("usage", {})
+        if not isinstance(usage, dict):
+            continue
+        result["tokens_input"] += usage.get("input_tokens", 0)
+        result["tokens_output"] += usage.get("output_tokens", 0)
+        result["tokens_cache_read"] += usage.get("cache_read_input_tokens", 0)
+        result["tokens_cache_creation"] += usage.get("cache_creation_input_tokens", 0)
+
+    return result
+
+
+def _gzip_copy(src: Path, dst: Path):
+    """Copy src file to dst, gzip-compressing the content."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    with open(src, "rb") as f_in, gzip.open(dst, "wb") as f_out:
+        shutil.copyfileobj(f_in, f_out)
+
+
+def _collect_subagent_transcripts(
+    agentlog: Path,
+    session_id: str,
+    transcript_path: str,
+    running_agents: set,
+    sess: dict,
+    dispatches: list[dict],
+):
+    """Copy subagent transcripts and enrich dispatch dicts with transcript data.
+
+    Finds the subagents/ directory next to the main transcript, reads
+    meta.json files to correlate with dispatch_id (toolUseId), extracts
+    token breakdown and model from the transcript JSONL, gzip-copies the
+    transcript to .agentlog/transcripts/, and copies new tool-results.
+    """
+    tp = Path(transcript_path)
+    # subagents dir: transcript path without .jsonl extension + /subagents/
+    subagents_dir = tp.with_suffix("") / "subagents"
+    agents_done = set(sess.get("agents_done", []))
+
+    # Build lookup: dispatch_id -> dispatch dict index for enrichment
+    dispatch_by_id: dict[str, list[int]] = {}
+    for i, d in enumerate(dispatches):
+        did = d.get("dispatch_id", "")
+        if did:
+            dispatch_by_id.setdefault(did, []).append(i)
+
+    if subagents_dir.is_dir():
+        for meta_file in sorted(subagents_dir.glob("agent-*.meta.json")):
+            # agent-<agentId>.meta.json → agentId
+            agent_id = meta_file.name[len("agent-"):-len(".meta.json")]
+            if not agent_id:
+                continue
+            if agent_id in agents_done:
+                continue
+            if agent_id in running_agents:
+                continue
+
+            # Read meta.json
+            try:
+                meta = json.loads(meta_file.read_text())
+            except (OSError, json.JSONDecodeError):
+                _log_error(agentlog, f"failed to read meta.json for agent {agent_id}")
+                continue
+
+            tool_use_id = meta.get("toolUseId", "")
+            agent_type = meta.get("agentType", "")
+            parent_agent_id = meta.get("parentAgentId", "")
+            spawn_depth = meta.get("spawnDepth", 1)
+
+            # Read the corresponding transcript JSONL
+            transcript_file = subagents_dir / f"agent-{agent_id}.jsonl"
+            transcript_data = _extract_subagent_transcript(transcript_file)
+
+            # Gzip-copy transcript to .agentlog/transcripts/
+            transcript_ref = ""
+            if transcript_file.exists():
+                gz_name = f"{agent_id}.jsonl.gz"
+                gz_path = agentlog / "transcripts" / gz_name
+                try:
+                    _gzip_copy(transcript_file, gz_path)
+                    transcript_ref = f"transcripts/{gz_name}"
+                except OSError:
+                    _log_error(agentlog, f"failed to gzip-copy transcript for agent {agent_id}")
+
+            # Enrich matching dispatch dicts
+            enrichment = {
+                "role": agent_type,
+                "spawn_depth": spawn_depth,
+                "transcript_ref": transcript_ref,
+                "transcript_captured": bool(transcript_ref),
+            }
+            if parent_agent_id:
+                enrichment["parent_dispatch_id"] = f"harness:session:{parent_agent_id}"
+
+            # Token data from transcript (more accurate than main log)
+            if transcript_data["tokens_input"] or transcript_data["tokens_output"]:
+                enrichment["tokens_input"] = transcript_data["tokens_input"]
+                enrichment["tokens_output"] = transcript_data["tokens_output"]
+                enrichment["tokens_cache_read"] = transcript_data["tokens_cache_read"]
+                enrichment["tokens_cache_creation"] = transcript_data["tokens_cache_creation"]
+
+            # Model from transcript (actual model used, more accurate)
+            if transcript_data["model"]:
+                enrichment["model_resolved"] = transcript_data["model"]
+
+            if tool_use_id and tool_use_id in dispatch_by_id:
+                for idx in dispatch_by_id[tool_use_id]:
+                    dispatches[idx].update(enrichment)
+            else:
+                # No matching dispatch from main log — create one from meta alone
+                dispatch = {
+                    "dispatch_id": tool_use_id or f"meta:{agent_id}",
+                    "session_id": session_id,
+                    "agent_id": agent_id,
+                    "status": "completed",
+                    "dispatch_complete": True,
+                    "seq": 0,
+                    "ts_utc": "",
+                }
+                dispatch.update(enrichment)
+                dispatches.append(dispatch)
+
+            agents_done.add(agent_id)
+
+    # Mark dispatches that have no transcript as transcript_captured=false
+    for d in dispatches:
+        if "transcript_captured" not in d:
+            d["transcript_captured"] = False
+
+    # Copy tool-results
+    tool_results_dir = tp.with_suffix("") / "tool-results"
+    if tool_results_dir.is_dir():
+        dest_tr = agentlog / "tool-results"
+        dest_tr.mkdir(parents=True, exist_ok=True)
+        for f in tool_results_dir.iterdir():
+            if f.is_file():
+                dest_file = dest_tr / f.name
+                if not dest_file.exists():
+                    try:
+                        shutil.copy2(f, dest_file)
+                    except OSError:
+                        pass
+
+    # Update state
+    sess["agents_done"] = sorted(agents_done)
 
 
 def _log_error(agentlog: Path, msg: str):
