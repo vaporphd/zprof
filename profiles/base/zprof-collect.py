@@ -7,7 +7,7 @@ Modes: subagent-stop | stop | session-start
 Reads JSON payload from stdin. Writes to $ZPROF_AGENTLOG or <cwd>/.agentlog/.
 Always exits 0. Errors go to collect.log.
 """
-import fcntl, gzip, hashlib, json, os, re, shutil, sys, time, traceback
+import fcntl, gzip, hashlib, json, os, platform, re, shutil, subprocess, sys, time, traceback
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -211,7 +211,13 @@ class Collector:
                     f.write(json.dumps(d, ensure_ascii=False) + "\n")
                 f.flush()
                 os.fsync(f.fileno())
-        # Task 5 fills this in: normalize to dispatches.jsonl
+        # Task 5: normalize and write to dispatches.jsonl
+        _normalize_and_write(
+            self.agentlog, dispatches,
+            session_id=session_id,
+            harness_version=meta.get("harness_version", sess.get("harness_version", "")),
+            payload=self.payload,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -754,6 +760,433 @@ def _collect_subagent_transcripts(
 
     # Update state
     sess["agents_done"] = sorted(agents_done)
+
+
+# ---------------------------------------------------------------------------
+# Normalization, redaction, Class A checks (Task 5)
+# ---------------------------------------------------------------------------
+
+# Schema fields that every normalized row must carry.
+_SCHEMA_FIELDS = [
+    "schema_version", "harness", "harness_version", "protocol_version",
+    "machine_id", "project_id", "ts_utc",
+    "session_id", "dispatch_id", "seq", "parent_dispatch_id", "spawn_depth",
+    "role", "overlay", "config_hash", "model_requested", "model_resolved",
+    "verdict", "status", "dispatch_complete",
+    "tokens_input", "tokens_output", "tokens_cache_read",
+    "tokens_cache_creation", "tool_uses", "duration_ms",
+    "artifact_exists", "has_preamble", "next_is_reachable", "return_parsed",
+    "transcript_ref", "transcript_captured", "transcript_truncated",
+    "ext",
+]
+
+# Known roles for next_is_reachable checks.
+_KNOWN_ROLES = frozenset({
+    "implementer", "reviewer", "architect", "planner", "tester",
+    "debugger", "explorer", "Explore", "Plan", "code-reviewer",
+    "general-purpose", "claude", "python-pro", "typescript-pro",
+    "frontend-developer", "backend-developer", "fullstack-developer",
+    "feature-dev:code-architect", "feature-dev:code-explorer",
+    "feature-dev:code-reviewer",
+})
+
+_machine_id_cache: str | None = None
+
+
+def _get_machine_id() -> str:
+    """Stable machine identifier.  macOS: platform.node().
+    Linux: /etc/machine-id.  Fallback: hostname.
+    """
+    global _machine_id_cache
+    if _machine_id_cache is not None:
+        return _machine_id_cache
+    mid = ""
+    if sys.platform == "linux":
+        try:
+            mid = Path("/etc/machine-id").read_text().strip()
+        except OSError:
+            pass
+    if not mid:
+        mid = platform.node() or "unknown"
+    _machine_id_cache = mid
+    return mid
+
+
+def _get_project_id(cwd: str) -> tuple[str, bool]:
+    """Derive project_id from git root commit hash.
+
+    Returns (project_id, provisional).  If git fails, falls back to
+    hash of machine_id:cwd with provisional=True.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "--max-parents=0", "HEAD"],
+            capture_output=True, text=True, timeout=5,
+            cwd=cwd,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            roots = sorted(result.stdout.strip().split())
+            root_sha = roots[0]
+            pid = hashlib.sha256(root_sha.encode()).hexdigest()[:16]
+            return pid, False
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    # Fallback: hash of machine_id:cwd
+    fallback = f"{_get_machine_id()}:{cwd}"
+    pid = hashlib.sha256(fallback.encode()).hexdigest()[:16]
+    return pid, True
+
+
+def _load_redaction_patterns(project_cwd: str | None = None) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Load redaction patterns from telemetry.yaml and optional .zprof.yaml.
+
+    Returns list of (pattern_name, compiled_regex) tuples.
+    """
+    patterns: list[tuple[str, "re.Pattern[str]"]] = []
+
+    # Load from telemetry.yaml (bundled next to this script)
+    telemetry_yaml = Path(__file__).parent / "telemetry.yaml"
+    if telemetry_yaml.exists():
+        patterns.extend(_parse_redaction_patterns_from_yaml(telemetry_yaml))
+
+    # Load from project's .zprof.yaml if present
+    if project_cwd:
+        zprof_yaml = Path(project_cwd) / ".zprof.yaml"
+        if zprof_yaml.exists():
+            patterns.extend(_parse_redaction_patterns_from_yaml(zprof_yaml))
+
+    return patterns
+
+
+def _parse_redaction_patterns_from_yaml(path: Path) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Parse redaction_patterns from a YAML file (stdlib-only parser)."""
+    results = []
+    try:
+        text = path.read_text()
+    except OSError:
+        return results
+
+    in_section = False
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("redaction_patterns:"):
+            in_section = True
+            continue
+        if in_section:
+            if stripped.startswith("- "):
+                # Extract the pattern string (YAML list item)
+                raw_pat = stripped[2:].strip()
+                # Remove quotes if present
+                if (raw_pat.startswith('"') and raw_pat.endswith('"')) or \
+                   (raw_pat.startswith("'") and raw_pat.endswith("'")):
+                    raw_pat = raw_pat[1:-1]
+                # Unescape YAML double-quoted backslashes
+                raw_pat = raw_pat.replace("\\\\", "\\")
+                # Derive a short name from the pattern
+                name = _pattern_name(raw_pat)
+                try:
+                    compiled = re.compile(raw_pat)
+                    results.append((name, compiled))
+                except re.error:
+                    pass
+            elif stripped and not stripped.startswith("#"):
+                # Next YAML key — end of redaction_patterns section
+                in_section = False
+
+    return results
+
+
+def _pattern_name(pattern: str) -> str:
+    """Derive a short human-readable name from a regex pattern."""
+    # Take the first recognisable prefix
+    for prefix in ("AWS_", "GITHUB_TOKEN", "sk-", "ghp_", "Bearer",
+                   "BEGIN", "password", "api_key"):
+        if prefix in pattern:
+            return prefix
+    # Fallback: first 20 chars
+    return pattern[:20]
+
+
+def _redact_secrets(value, patterns: list[tuple[str, "re.Pattern[str]"]]) -> tuple:
+    """Recursively redact secrets from strings/dicts/lists.
+
+    Returns (redacted_value, total_count).
+    """
+    if not patterns:
+        return value, 0
+
+    if isinstance(value, str):
+        count = 0
+        result = value
+        for name, pat in patterns:
+            new_result, n = pat.subn(f"⟦redacted:{name}⟧", result)
+            count += n
+            result = new_result
+        return result, count
+
+    if isinstance(value, dict):
+        total = 0
+        out = {}
+        for k, v in value.items():
+            rv, c = _redact_secrets(v, patterns)
+            out[k] = rv
+            total += c
+        return out, total
+
+    if isinstance(value, list):
+        total = 0
+        out = []
+        for item in value:
+            rv, c = _redact_secrets(item, patterns)
+            out.append(rv)
+            total += c
+        return out, total
+
+    return value, 0
+
+
+def _class_a_checks(returned: str | None, cwd: str) -> dict:
+    """Run Class A contract compliance checks on return text.
+
+    Returns dict with has_preamble, return_parsed, artifact_exists,
+    next_is_reachable.
+    """
+    result = {
+        "has_preamble": None,
+        "return_parsed": None,
+        "artifact_exists": None,
+        "next_is_reachable": None,
+    }
+    if returned is None:
+        return result
+
+    lines = returned.split("\n")
+
+    # Find first verdict: line
+    verdict_idx = None
+    for i, line in enumerate(lines):
+        if line.strip().lower().startswith("verdict:"):
+            verdict_idx = i
+            break
+
+    # return_parsed: true if verdict: line exists
+    result["return_parsed"] = verdict_idx is not None
+
+    # has_preamble: true if non-whitespace text before first verdict: line
+    if verdict_idx is not None:
+        preamble = "\n".join(lines[:verdict_idx]).strip()
+        result["has_preamble"] = len(preamble) > 0
+    else:
+        result["has_preamble"] = None
+
+    # artifact_exists: check if referenced artifact path exists
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("artifact:"):
+            artifact_path = stripped.split(":", 1)[1].strip()
+            if artifact_path:
+                # Try absolute path first, then relative to cwd
+                p = Path(artifact_path)
+                if not p.is_absolute():
+                    p = Path(cwd) / artifact_path
+                result["artifact_exists"] = p.exists()
+            break
+
+    # next_is_reachable: check if next: value is a known role
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("next:"):
+            next_val = stripped.split(":", 1)[1].strip()
+            if next_val:
+                result["next_is_reachable"] = next_val in _KNOWN_ROLES
+            break
+
+    return result
+
+
+def _make_composite_id(session_id: str, raw_id: str) -> str:
+    """Prefix a raw dispatch/parent ID with claude-code:<session>:."""
+    if not raw_id:
+        return ""
+    if raw_id.startswith("unresolved:") or raw_id.startswith("meta:"):
+        return raw_id
+    if raw_id.startswith("claude-code:"):
+        return raw_id
+    return f"claude-code:{session_id}:{raw_id}"
+
+
+def _normalize_dispatch(
+    raw: dict,
+    session_id: str,
+    harness_version: str,
+    machine_id: str,
+    project_id: str,
+    project_id_provisional: bool,
+    redaction_patterns: list[tuple[str, "re.Pattern[str]"]],
+) -> tuple[dict, int]:
+    """Transform a raw dispatch dict into a schema-compliant row.
+
+    Returns (normalized_dict, redaction_count).
+    """
+    # Start with identity fields
+    norm = {
+        "schema_version": 1,
+        "harness": "claude-code",
+        "harness_version": harness_version,
+        "machine_id": machine_id,
+        "project_id": project_id,
+    }
+    if project_id_provisional:
+        norm["project_id_provisional"] = True
+
+    # Copy known fields from raw, applying defaults
+    norm["ts_utc"] = raw.get("ts_utc", "")
+    norm["session_id"] = session_id
+    norm["dispatch_id"] = _make_composite_id(session_id, raw.get("dispatch_id", ""))
+    norm["seq"] = raw.get("seq", 0)
+
+    parent_did = raw.get("parent_dispatch_id", "")
+    if parent_did:
+        norm["parent_dispatch_id"] = _make_composite_id(session_id, parent_did)
+
+    norm["spawn_depth"] = raw.get("spawn_depth", 1)
+    norm["role"] = raw.get("role", "")
+    norm["overlay"] = raw.get("overlay")
+    norm["config_hash"] = raw.get("config_hash")
+    norm["model_requested"] = raw.get("model_requested")
+    norm["model_resolved"] = raw.get("model_resolved")
+    norm["verdict"] = raw.get("verdict")
+    norm["status"] = raw.get("status")
+    norm["dispatch_complete"] = raw.get("dispatch_complete", False)
+
+    # Cost fields
+    norm["tokens_input"] = raw.get("tokens_input")
+    norm["tokens_output"] = raw.get("tokens_output")
+    norm["tokens_cache_read"] = raw.get("tokens_cache_read")
+    norm["tokens_cache_creation"] = raw.get("tokens_cache_creation")
+    norm["tool_uses"] = raw.get("tool_uses")
+    norm["duration_ms"] = raw.get("duration_ms")
+
+    # Provenance
+    norm["transcript_ref"] = raw.get("transcript_ref")
+    norm["transcript_captured"] = raw.get("transcript_captured", False)
+    norm["transcript_truncated"] = raw.get("transcript_truncated")
+
+    # Extension
+    norm["ext"] = raw.get("ext")
+
+    # Class A checks
+    returned = raw.get("returned")
+    cwd = raw.get("cwd", "")
+    checks = _class_a_checks(returned, cwd)
+    norm.update(checks)
+
+    # Remove None values for cleaner JSONL (optional fields)
+    norm = {k: v for k, v in norm.items() if v is not None}
+
+    # Redact secrets from all string values
+    norm, redaction_count = _redact_secrets(norm, redaction_patterns)
+
+    return norm, redaction_count
+
+
+def _load_dedup_set(dispatches_path: Path) -> set[tuple[str, int]]:
+    """Load existing (dispatch_id, seq) pairs from dispatches.jsonl."""
+    seen = set()
+    if not dispatches_path.exists():
+        return seen
+    try:
+        with open(dispatches_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                    did = row.get("dispatch_id", "")
+                    seq = row.get("seq", 0)
+                    seen.add((did, seq))
+                except json.JSONDecodeError:
+                    continue
+    except OSError:
+        pass
+    return seen
+
+
+def _normalize_and_write(
+    agentlog: Path,
+    dispatches: list[dict],
+    session_id: str,
+    harness_version: str,
+    payload: dict,
+):
+    """Normalize raw dispatches and append to dispatches.jsonl.
+
+    Fills identity fields, builds composite dispatch_id, runs Class A
+    checks, redacts secrets, dedup-checks, and appends new rows with fsync.
+    """
+    if not dispatches:
+        return
+
+    cwd = payload.get("cwd", os.getcwd())
+
+    # Identity
+    machine_id = _get_machine_id()
+    project_id, provisional = _get_project_id(cwd)
+
+    # Redaction patterns
+    redaction_patterns = _load_redaction_patterns(cwd)
+
+    # Dedup set
+    dispatches_path = agentlog / "dispatches.jsonl"
+    seen = _load_dedup_set(dispatches_path)
+
+    total_redactions = 0
+    rows_written = 0
+
+    with open(dispatches_path, "a") as f:
+        for raw in dispatches:
+            # Inject cwd for artifact_exists checks
+            raw_with_cwd = dict(raw)
+            if "cwd" not in raw_with_cwd:
+                raw_with_cwd["cwd"] = cwd
+
+            norm, redact_count = _normalize_dispatch(
+                raw_with_cwd,
+                session_id=session_id,
+                harness_version=harness_version,
+                machine_id=machine_id,
+                project_id=project_id,
+                project_id_provisional=provisional,
+                redaction_patterns=redaction_patterns,
+            )
+            total_redactions += redact_count
+
+            # Dedup
+            dedup_key = (norm.get("dispatch_id", ""), norm.get("seq", 0))
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+
+            f.write(json.dumps(norm, ensure_ascii=False) + "\n")
+            rows_written += 1
+
+        f.flush()
+        os.fsync(f.fileno())
+
+    if total_redactions > 0:
+        _log_info(agentlog,
+                  f"session {session_id}: redacted {total_redactions} secret(s) "
+                  f"across {rows_written} dispatch(es)")
+
+
+def _log_info(agentlog: Path, msg: str):
+    log = agentlog / "collect.log"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with open(log, "a") as f:
+        f.write(f"{ts} INFO {msg}\n")
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def _log_error(agentlog: Path, msg: str):
