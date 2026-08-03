@@ -2,11 +2,15 @@
 package doctor
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -64,6 +68,12 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //     currently active sources, so nothing will ever prune it
 //  10. .zprof/runs/ is covered by .gitignore
 //  11. .zprof/runs/ isn't piling up past runLogWarnThreshold files
+//  12. .agentlog/ is covered by .gitignore
+//  13. .agentlog/ isn't tracked by git (a different failure than #12 — a
+//     file added before the .gitignore entry existed stays tracked)
+//  14. settings.local.json wires up all three telemetry hooks
+//  15. python3 -c 'pass' actually runs (macOS without Xcode CLT hangs it)
+//  16. .agentlog/ is reminded to be vulnerable to `git clean -xdf`
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -90,6 +100,11 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkOrphanAgents(projectDir, repoDir, proj)...)
 	out = append(out, checkRunsGitignored(projectDir)...)
 	out = append(out, checkRunLogs(projectDir)...)
+	out = append(out, checkAgentlogGitignored(projectDir)...)
+	out = append(out, checkAgentlogNotTracked(projectDir)...)
+	out = append(out, checkTelemetryHooks(projectDir)...)
+	out = append(out, checkPython3Available()...)
+	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
 	return out, nil
 }
 
@@ -535,4 +550,199 @@ func checkRunLogs(projectDir string) []Issue {
 		}}
 	}
 	return nil
+}
+
+// checkAgentlogGitignored warns when the telemetry collector's data
+// directory can end up committed. Mirrors checkRunsGitignored: .agentlog/
+// holds per-machine collector output that may contain transcripts and other
+// secrets (design §4.3, §16) — useless in history and a leak risk if
+// committed.
+//
+// A project with no .gitignore at all is only flagged once .agentlog/
+// actually exists — before that there is nothing to leak, and the project
+// may not even be a git repo.
+func checkAgentlogGitignored(projectDir string) []Issue {
+	warn := func(path string) []Issue {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    path,
+			Message: "`.agentlog/` is not in .gitignore — telemetry logs (which may contain transcripts and secrets) will be committed; add the entry or run `zprof apply` again",
+		}}
+	}
+	p := filepath.Join(projectDir, ".gitignore")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		if info, statErr := os.Stat(filepath.Join(projectDir, ".agentlog")); statErr == nil && info.IsDir() {
+			return warn(projectDir)
+		}
+		return nil
+	}
+	if gitignoreCoversAgentlog(string(data)) {
+		return nil
+	}
+	return warn(p)
+}
+
+// gitignoreCoversAgentlog reports whether any active .gitignore pattern
+// excludes .agentlog/. Accepts the exact entry apply writes
+// (ensureGitignore, cli/internal/apply/engine.go), with or without
+// leading/trailing slashes. Comment lines never count.
+func gitignoreCoversAgentlog(content string) bool {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSuffix(strings.TrimPrefix(line, "/"), "/")
+		if line == ".agentlog" {
+			return true
+		}
+	}
+	return false
+}
+
+// checkAgentlogNotTracked errors when files under .agentlog/ are tracked by
+// git. This is a different failure than checkAgentlogGitignored: a file
+// `git add`ed before the .gitignore entry existed stays tracked forever,
+// .gitignore entry or not (design §4.3, §16) — those files (which may
+// contain transcripts or other secrets) keep shipping in every commit.
+//
+// Silent whenever git itself can't answer — not a repo, git not installed,
+// or any other failure to run `git ls-files`. There's nothing to diagnose
+// without a working git, and other checks own reporting a missing git.
+func checkAgentlogNotTracked(projectDir string) []Issue {
+	out, err := exec.Command("git", "-C", projectDir, "ls-files", ".agentlog/").Output()
+	if err != nil {
+		return nil
+	}
+	tracked := strings.TrimSpace(string(out))
+	if tracked == "" {
+		return nil
+	}
+	files := strings.Split(tracked, "\n")
+	return []Issue{{
+		Level: LevelError,
+		Path:  filepath.Join(projectDir, ".agentlog"),
+		Message: fmt.Sprintf(
+			"%d file(s) under .agentlog/ are tracked by git even though the directory should be gitignored — untrack them with `git rm -r --cached .agentlog` (they may contain transcripts or secrets): %s",
+			len(files), strings.Join(files, ", ")),
+	}}
+}
+
+// telemetryHookEvents are the three Claude Code hook events zprof wires up
+// to drive zprof-collect.py. Kept as a local literal — mirroring
+// internal/apply.telemetryHooks's keys — rather than importing internal/apply
+// for three string constants.
+var telemetryHookEvents = []string{"SubagentStop", "Stop", "SessionStart"}
+
+// checkTelemetryHooks warns when settings.local.json doesn't wire up all
+// three telemetry hooks with a zprof-collect.py command.
+//
+// Gated on the collector script actually being deployed
+// (.claude/zprof-collect.py) — same reasoning as checkTaskRunner's agentsDir
+// gate: a project that never applied a telemetry-shipping base profile has
+// nothing for the hooks to call, so there's nothing to warn about yet.
+func checkTelemetryHooks(projectDir string) []Issue {
+	if _, err := os.Stat(filepath.Join(projectDir, ".claude", "zprof-collect.py")); err != nil {
+		return nil
+	}
+
+	p := filepath.Join(projectDir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    p,
+			Message: "settings.local.json is missing — telemetry hooks (SubagentStop, Stop, SessionStart) are not installed; run `zprof apply`",
+		}}
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(data, &settings); err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    p,
+			Message: fmt.Sprintf("settings.local.json failed to parse: %v — cannot verify telemetry hooks are installed", err),
+		}}
+	}
+	hooks, _ := settings["hooks"].(map[string]any)
+	var missing []string
+	for _, event := range telemetryHookEvents {
+		if !hookArrayHasCollector(hooks[event]) {
+			missing = append(missing, event)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return []Issue{{
+		Level:   LevelWarn,
+		Path:    p,
+		Message: fmt.Sprintf("settings.local.json is missing telemetry hooks for %s — run `zprof apply` to (re)install the zprof-collect.py hooks", strings.Join(missing, ", ")),
+	}}
+}
+
+// hookArrayHasCollector reports whether a settings.local.json hooks[event]
+// value already contains a zprof-collect.py invocation. Mirrors
+// internal/apply.hasZprofHook's marshal-and-substring-check approach.
+func hookArrayHasCollector(v any) bool {
+	entries, ok := v.([]any)
+	if !ok {
+		return false
+	}
+	for _, e := range entries {
+		data, err := json.Marshal(e)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), "zprof-collect.py") {
+			return true
+		}
+	}
+	return false
+}
+
+// python3CheckTimeout bounds checkPython3Available so a broken python3 —
+// the exact failure mode it's checking for, see below — can't hang `zprof
+// doctor` itself.
+const python3CheckTimeout = 5 * time.Second
+
+// checkPython3Available warns when `python3 -c 'pass'` fails or hangs. On
+// macOS without Xcode Command Line Tools, /usr/bin/python3 is a shim that
+// opens a GUI "install command line developer tools" dialog instead of
+// running — which silently hangs any hook that shells out to it (design
+// §20). This is exactly the check `apply` runs before installing hooks;
+// doctor re-runs it so drift (e.g. CLT uninstalled after apply) is caught
+// too.
+func checkPython3Available() []Issue {
+	ctx, cancel := context.WithTimeout(context.Background(), python3CheckTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "python3", "-c", "pass").Run(); err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Message: "`python3 -c 'pass'` failed or timed out — telemetry hooks will not run; on macOS without Xcode Command Line Tools, /usr/bin/python3 opens a GUI install dialog instead of executing, which hangs any hook that calls it",
+		}}
+	}
+	return nil
+}
+
+// checkAgentlogCleanVulnerability reminds that .agentlog/ — gitignored and
+// living in the project's working tree by design, so the whole project can
+// be `cp -r`'d as one unit (design §4.3) — is destroyed by `git clean -xdf`
+// along with every other untracked file. Info level: this is an accepted,
+// documented risk with a cheap mitigation (back it up first), not a defect
+// to fix.
+//
+// Only fires once there's something to lose — an empty or absent directory
+// has nothing `git clean` could destroy.
+func checkAgentlogCleanVulnerability(projectDir string) []Issue {
+	dir := filepath.Join(projectDir, ".agentlog")
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) == 0 {
+		return nil
+	}
+	return []Issue{{
+		Level:   LevelInfo,
+		Path:    dir,
+		Message: "`.agentlog/` is gitignored and lives in the working tree — `git clean -xdf` deletes it along with everything else untracked; back it up first (`cp -r .agentlog /somewhere`)",
+	}}
 }
