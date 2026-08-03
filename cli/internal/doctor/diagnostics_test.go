@@ -4,6 +4,7 @@ package doctor
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -550,6 +551,204 @@ func TestCheckRunsGitignoredNoGitignore(t *testing.T) {
 	require.Equal(t, LevelWarn, issues[0].Level)
 }
 
+// --- .agentlog/ gitignored (telemetry stage 1) --------------------------
+
+func TestCheckAgentlogGitignoredWarnsWhenEntryMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+		[]byte("thoughts/\n*.zprof.bak-*\n"), 0o644))
+
+	issues := checkAgentlogGitignored(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, ".agentlog/")
+}
+
+func TestCheckAgentlogGitignoredAcceptsEntryVariants(t *testing.T) {
+	for _, entry := range []string{".agentlog/", ".agentlog", "/.agentlog/"} {
+		dir := t.TempDir()
+		require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+			[]byte("thoughts/\n"+entry+"\n"), 0o644))
+		require.Empty(t, checkAgentlogGitignored(dir), "entry %q should count as coverage", entry)
+	}
+}
+
+func TestCheckAgentlogGitignoredIgnoresCommentedEntry(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".gitignore"),
+		[]byte("# .agentlog/\nthoughts/\n"), 0o644))
+	require.Len(t, checkAgentlogGitignored(dir), 1, "a commented-out entry ignores nothing")
+}
+
+// No .gitignore at all: silent until .agentlog/ actually exists — the
+// project may not even be a git repo yet.
+func TestCheckAgentlogGitignoredNoGitignore(t *testing.T) {
+	dir := t.TempDir()
+	require.Empty(t, checkAgentlogGitignored(dir))
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	issues := checkAgentlogGitignored(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+}
+
+// --- .agentlog/ not tracked by git (telemetry stage 1) -------------------
+
+// A file `git add`ed before the .gitignore entry existed stays tracked
+// forever — a different failure than checkAgentlogGitignored, which only
+// looks at .gitignore content.
+func TestCheckAgentlogNotTrackedErrorsOnTrackedFile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", dir, "init", "-q", "-b", "main").Run())
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+	require.NoError(t, exec.Command("git", "-C", dir, "add", ".agentlog/dispatches.jsonl").Run())
+	require.NoError(t, exec.Command("git", "-C", dir, "-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "-q", "-m", "oops").Run())
+
+	issues := checkAgentlogNotTracked(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelError, issues[0].Level)
+	require.Contains(t, issues[0].Message, "dispatches.jsonl")
+}
+
+func TestCheckAgentlogNotTrackedSilentWhenUntracked(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", dir, "init", "-q", "-b", "main").Run())
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+
+	require.Empty(t, checkAgentlogNotTracked(dir))
+}
+
+// Without a working git (no repo here) there's nothing to diagnose —
+// silent rather than a wall of false positives.
+func TestCheckAgentlogNotTrackedSilentWithoutGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+
+	require.Empty(t, checkAgentlogNotTracked(dir))
+}
+
+// --- telemetry hooks in settings.local.json (telemetry stage 1) ----------
+
+func telemetryHookJSON(events ...string) string {
+	entries := make([]string, len(events))
+	for i, e := range events {
+		entries[i] = fmt.Sprintf(`"%s": [{"hooks": [{"type": "command", "command": "test -x zprof-collect.py && zprof-collect.py %s || true"}]}]`, e, e)
+	}
+	return "{\n  \"hooks\": {\n    " + strings.Join(entries, ",\n    ") + "\n  }\n}"
+}
+
+// Gated on the collector script being deployed — a project that never
+// applied a telemetry-shipping base profile has nothing for hooks to call.
+func TestCheckTelemetryHooksSilentWithoutCollector(t *testing.T) {
+	require.Empty(t, checkTelemetryHooks(t.TempDir()))
+}
+
+func TestCheckTelemetryHooksWarnsWhenSettingsMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+
+	issues := checkTelemetryHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "settings.local.json")
+}
+
+func TestCheckTelemetryHooksWarnsOnPartialInstall(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(telemetryHookJSON("SubagentStop", "Stop")), 0o644))
+
+	issues := checkTelemetryHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "SessionStart")
+}
+
+func TestCheckTelemetryHooksSilentWhenFullyInstalled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(telemetryHookJSON("SubagentStop", "Stop", "SessionStart")), 0o644))
+
+	require.Empty(t, checkTelemetryHooks(dir))
+}
+
+func TestCheckTelemetryHooksWarnsOnMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"), []byte("{not valid json"), 0o644))
+
+	issues := checkTelemetryHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "failed to parse")
+}
+
+// --- python3 availability (telemetry stage 1) -----------------------------
+
+// The dev/CI machine running this suite must have a working python3 — zprof
+// itself depends on it (design §20), so this is a fair assumption to bake
+// into the happy-path test rather than skip it.
+func TestCheckPython3AvailableHappyPath(t *testing.T) {
+	require.Empty(t, checkPython3Available())
+}
+
+func TestCheckPython3AvailableWarnsWhenMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	issues := checkPython3Available()
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "python3")
+}
+
+// --- git clean -xdf vulnerability reminder (telemetry stage 1) -----------
+
+func TestCheckAgentlogCleanVulnerabilitySilentWhenAbsent(t *testing.T) {
+	require.Empty(t, checkAgentlogCleanVulnerability(t.TempDir()))
+}
+
+func TestCheckAgentlogCleanVulnerabilitySilentWhenEmpty(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	require.Empty(t, checkAgentlogCleanVulnerability(dir))
+}
+
+func TestCheckAgentlogCleanVulnerabilityInfoWhenPopulated(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+
+	issues := checkAgentlogCleanVulnerability(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelInfo, issues[0].Level)
+	require.Contains(t, issues[0].Message, "git clean")
+}
+
+// --- wiring into Diagnose (telemetry stage 1) -----------------------------
+
+func TestDiagnoseWiresInAgentlogChecks(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelWarn, ".agentlog/"))
+	require.True(t, findIssue(issues, LevelInfo, "git clean"))
+}
+
 // --- doctor messages are English (project convention) -------------------
 
 func TestDoctorMessagesAreEnglish(t *testing.T) {
@@ -569,11 +768,29 @@ func TestDoctorMessagesAreEnglish(t *testing.T) {
 			filepath.Join(runs, ".zprof", "runs", fmt.Sprintf("r%02d.md", i)), []byte("x"), 0o644))
 	}
 
+	// Telemetry fixture: a git repo with a tracked .agentlog/ file (no
+	// .gitignore entry either), plus a deployed collector with no hooks
+	// wired up — trips all four project-state telemetry checks at once.
+	telemetry := t.TempDir()
+	require.NoError(t, exec.Command("git", "-C", telemetry, "init", "-q", "-b", "main").Run())
+	require.NoError(t, os.MkdirAll(filepath.Join(telemetry, ".agentlog"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(telemetry, ".agentlog", "dispatches.jsonl"), []byte("{}\n"), 0o644))
+	require.NoError(t, exec.Command("git", "-C", telemetry, "add", ".agentlog/dispatches.jsonl").Run())
+	require.NoError(t, exec.Command("git", "-C", telemetry, "-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "-q", "-m", "oops").Run())
+	require.NoError(t, os.MkdirAll(filepath.Join(telemetry, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(telemetry, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+
 	var all []Issue
 	all = append(all, runner...)
 	all = append(all, checkStopLists([]string{"demo"}, repo)...)
 	all = append(all, checkRunLogs(runs)...)
 	all = append(all, checkRunsGitignored(runs)...)
+	all = append(all, checkAgentlogGitignored(telemetry)...)
+	all = append(all, checkAgentlogNotTracked(telemetry)...)
+	all = append(all, checkTelemetryHooks(telemetry)...)
+	all = append(all, checkPython3Available()...)
+	all = append(all, checkAgentlogCleanVulnerability(telemetry)...)
 	require.NotEmpty(t, all)
 
 	for _, i := range all {

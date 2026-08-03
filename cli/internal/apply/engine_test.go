@@ -1,6 +1,7 @@
 package apply
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -58,6 +59,52 @@ func TestApplyIdempotent(t *testing.T) {
 	require.NoError(t, err)
 	claude2, _ := os.ReadFile(filepath.Join(proj, "CLAUDE.md"))
 	require.Equal(t, string(claude1), string(claude2))
+}
+
+func TestApplyDeploysCollectorAndSchema(t *testing.T) {
+	proj := t.TempDir()
+	b, o := loadTestRepo(t)
+	opts := ApplyOpts{
+		ProjectDir: proj,
+		Base:       b,
+		Overlays:   []*overlay.Overlay{o},
+		Project:    &manifest.ProjectManifest{Overlays: []string{"fake-ios"}, Language: "ru"},
+		MergeMode:  managed.ModeOverwrite,
+	}
+	_, err := Apply(opts)
+	require.NoError(t, err)
+
+	gi, err := os.ReadFile(filepath.Join(proj, ".gitignore"))
+	require.NoError(t, err)
+	require.Contains(t, string(gi), ".agentlog/")
+
+	scriptPath := filepath.Join(proj, ".claude", "zprof-collect.py")
+	info, err := os.Stat(scriptPath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o755), info.Mode().Perm(), "collector script must be executable")
+
+	schemaPath := filepath.Join(proj, ".agentlog", "schema.json")
+	schemaData, err := os.ReadFile(schemaPath)
+	require.NoError(t, err)
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(schemaData, &schema), "schema.json must be valid JSON")
+	require.EqualValues(t, 1, schema["version"])
+
+	// Idempotent: a second Apply() doesn't duplicate the gitignore entry
+	// and leaves the script intact and still executable.
+	_, err = Apply(opts)
+	require.NoError(t, err)
+
+	gi2, err := os.ReadFile(filepath.Join(proj, ".gitignore"))
+	require.NoError(t, err)
+	require.Equal(t, 1, strings.Count(string(gi2), ".agentlog/"))
+
+	info2, err := os.Stat(scriptPath)
+	require.NoError(t, err)
+	require.Equal(t, os.FileMode(0o755), info2.Mode().Perm())
+	script2, err := os.ReadFile(scriptPath)
+	require.NoError(t, err)
+	require.Equal(t, b.CollectorScript, script2)
 }
 
 func TestWorkflowFileComposesBaseAndOverlay(t *testing.T) {

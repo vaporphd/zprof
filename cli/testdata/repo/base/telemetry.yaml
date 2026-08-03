@@ -1,0 +1,7 @@
+# Test-fixture stub for telemetry.yaml. The real schema lives at
+# profiles/base/telemetry.yaml; this stub only needs enough shape for
+# apply engine tests to assert schema.json deployment.
+version: 1
+
+core_fields:
+  - {name: schema_version, type: int, required: true}

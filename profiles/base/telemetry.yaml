@@ -1,0 +1,65 @@
+# profiles/base/telemetry.yaml
+# Core schema for .agentlog/dispatches.jsonl
+# All projects write these fields; cross-project comparison uses only these.
+version: 1
+
+core_fields:
+  # identity
+  - {name: schema_version,      type: int,    required: true}
+  - {name: harness,             type: string, required: true}  # "claude-code"
+  - {name: harness_version,     type: string, required: true}  # e.g. "2.1.220"
+  - {name: protocol_version,    type: string, required: false} # reserved for kimi etc
+  - {name: machine_id,          type: string, required: true}
+  - {name: project_id,          type: string, required: true}  # hash of root commit
+  - {name: ts_utc,              type: string, required: true}  # ISO 8601 with offset
+
+  # dispatch tree
+  - {name: session_id,          type: string, required: true}
+  - {name: dispatch_id,         type: string, required: true}  # <harness>:<session>:<native>
+  - {name: seq,                 type: int,    required: true,  default: 0}
+  - {name: parent_dispatch_id,  type: string, required: false}
+  - {name: spawn_depth,         type: int,    required: true,  default: 1}
+
+  # execution
+  - {name: role,                type: string, required: true}
+  - {name: overlay,             type: string, required: false}
+  - {name: config_hash,         type: string, required: false}
+  - {name: model_requested,     type: string, required: false}
+  - {name: model_resolved,      type: string, required: false}
+
+  # outcome
+  - {name: verdict,             type: string, required: false}
+  - {name: status,              type: string, required: false}
+  - {name: dispatch_complete,   type: bool,   required: true,  default: false}
+
+  # cost (four fields — no totalTokens shortcut)
+  - {name: tokens_input,        type: int,    required: false}
+  - {name: tokens_output,       type: int,    required: false}
+  - {name: tokens_cache_read,   type: int,    required: false}
+  - {name: tokens_cache_creation, type: int,  required: false}
+  - {name: tool_uses,           type: int,    required: false}
+  - {name: duration_ms,         type: int,    required: false}
+
+  # contract compliance (class A)
+  - {name: artifact_exists,     type: bool,   required: false}
+  - {name: has_preamble,        type: bool,   required: false}
+  - {name: next_is_reachable,   type: bool,   required: false}
+  - {name: return_parsed,       type: bool,   required: false}
+
+  # provenance
+  - {name: transcript_ref,      type: string, required: false}
+  - {name: transcript_captured, type: bool,   required: true,  default: false}
+  - {name: transcript_truncated,type: bool,   required: false}
+
+  # extension
+  - {name: ext,                 type: object, required: false}
+
+redaction_patterns:
+  - "AWS_[A-Z_]*=[^\\s]+"
+  - "GITHUB_TOKEN=[^\\s]+"
+  - "sk-[a-zA-Z0-9]{20,}"
+  - "ghp_[a-zA-Z0-9]{36,}"
+  - "Bearer [a-zA-Z0-9._\\-]+"
+  - "-----BEGIN [A-Z ]+ PRIVATE KEY-----"
+  - "password=[^\\s&]+"
+  - "api_key=[^\\s&]+"

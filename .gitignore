@@ -2,3 +2,5 @@ thoughts/
 .DS_Store
 cli/bin/
 .playwright-mcp/
+__pycache__/
+*.pyc
