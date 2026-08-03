@@ -12,15 +12,20 @@ import (
 
 func NewStatsCmd() *cobra.Command {
 	var (
-		outPath string
-		format  string
+		outPath   string
+		format    string
+		sessionID string
+		role      string
 	)
 	c := &cobra.Command{
 		Use:   "stats <agentlog-dir> [<agentlog-dir>...]",
 		Short: "Generate telemetry dashboard from .agentlog/ data",
 		Long: `Reads dispatches.jsonl from each .agentlog/ directory and produces
 a decision-oriented HTML dashboard with role health, economics,
-routes, and profile drift reports.`,
+routes, and profile drift reports.
+
+Use --session to filter to a single session (replaces zprof eval).
+Use --role to filter to a single role.`,
 		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, dir := range args {
@@ -28,6 +33,25 @@ routes, and profile drift reports.`,
 				dispatches, losses, err := stats.ReadDispatches(jsonlPath)
 				if err != nil {
 					return fmt.Errorf("read %s: %w", jsonlPath, err)
+				}
+
+				if sessionID != "" {
+					var filtered []stats.Dispatch
+					for _, d := range dispatches {
+						if d.SessionID == sessionID {
+							filtered = append(filtered, d)
+						}
+					}
+					dispatches = filtered
+				}
+				if role != "" {
+					var filtered []stats.Dispatch
+					for _, d := range dispatches {
+						if d.Role == role {
+							filtered = append(filtered, d)
+						}
+					}
+					dispatches = filtered
 				}
 
 				report := stats.Aggregate(dispatches, losses)
@@ -66,5 +90,7 @@ routes, and profile drift reports.`,
 	}
 	c.Flags().StringVar(&outPath, "out", "", "Output path (default: <agentlog-dir>/report.{html,json})")
 	c.Flags().StringVar(&format, "format", "html", `Output format: "html" or "json"`)
+	c.Flags().StringVar(&sessionID, "session", "", "Filter to a single session ID")
+	c.Flags().StringVar(&role, "role", "", "Filter to a single role")
 	return c
 }

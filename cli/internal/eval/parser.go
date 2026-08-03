@@ -13,6 +13,13 @@ import (
 	"time"
 )
 
+// Deprecated: ParseSession reads raw Claude Code JSONL directly. New code
+// should use stats.ReadDispatches on .agentlog/dispatches.jsonl instead —
+// the collector (zprof-collect.py) handles extraction, normalization, and
+// dedup. This function remains for backward compatibility with projects
+// that haven't run zprof apply yet. It will be removed once all consumers
+// migrate to .agentlog/.
+//
 // ParseSession reads a Claude Code session JSONL from path and returns the
 // dispatches + session meta it contains. Missing task-notifications are
 // tolerated — the Dispatch is emitted with Status="" so the eval report can
