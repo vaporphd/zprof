@@ -25,6 +25,7 @@ func main() {
 	root.AddCommand(cmd.NewAgentsCmd())
 	root.AddCommand(cmd.NewDoctorCmd())
 	root.AddCommand(cmd.NewEvalCmd())
+	root.AddCommand(cmd.NewStatsCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
