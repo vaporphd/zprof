@@ -151,6 +151,14 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	}
 	res.UpdatedFiles = append(res.UpdatedFiles, collectorFiles...)
 
+	// 5.6. Upsert telemetry hooks into .claude/settings.local.json so the
+	// collector actually fires (SubagentStop/Stop/SessionStart). Idempotent
+	// JSON upsert: never clobbers hooks or keys the user added by hand.
+	if err := EnsureHooks(opts.ProjectDir); err != nil {
+		return nil, fmt.Errorf("ensure telemetry hooks: %w", err)
+	}
+	res.UpdatedFiles = append(res.UpdatedFiles, filepath.Join(opts.ProjectDir, ".claude", "settings.local.json"))
+
 	// 6. .gitignore append (base entries + per-overlay contributions).
 	if err := ensureGitignore(opts.ProjectDir, opts.Overlays); err != nil {
 		return nil, err
