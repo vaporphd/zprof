@@ -183,6 +183,35 @@ func aggregateRoutes(completed, all []Dispatch) RoutesReport {
 		}
 	}
 	sort.Slice(rr.TesterLoops, func(i, j int) bool { return rr.TesterLoops[i].Rounds > rr.TesterLoops[j].Rounds })
+
+	// Transitions: group completed dispatches by session, sort by time, count role→role pairs
+	bySession := map[string][]Dispatch{}
+	for _, d := range completed {
+		bySession[d.SessionID] = append(bySession[d.SessionID], d)
+	}
+	transCount := map[[2]string]int{}
+	for _, ds := range bySession {
+		sort.Slice(ds, func(i, j int) bool { return ds[i].Timestamp.Before(ds[j].Timestamp) })
+		for i := 0; i < len(ds)-1; i++ {
+			from := ds[i].Role
+			to := ds[i+1].Role
+			if from == "" {
+				from = "unknown"
+			}
+			if to == "" {
+				to = "unknown"
+			}
+			transCount[[2]string{from, to}]++
+		}
+	}
+	for pair, n := range transCount {
+		rr.Transitions = append(rr.Transitions, Transition{From: pair[0], To: pair[1], Count: n})
+	}
+	sort.Slice(rr.Transitions, func(i, j int) bool { return rr.Transitions[i].Count > rr.Transitions[j].Count })
+	if len(rr.Transitions) > 20 {
+		rr.Transitions = rr.Transitions[:20]
+	}
+
 	return rr
 }
 

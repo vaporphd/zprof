@@ -63,11 +63,18 @@ type ModelEconomics struct {
 type RoutesReport struct {
 	ByStatus    map[string]int
 	TesterLoops []TesterLoop
+	Transitions []Transition
 }
 
 type TesterLoop struct {
 	SessionID string
 	Rounds    int
+}
+
+type Transition struct {
+	From  string
+	To    string
+	Count int
 }
 
 type DriftEntry struct {

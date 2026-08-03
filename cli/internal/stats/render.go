@@ -22,6 +22,7 @@ func RenderHTML(r *Report) string {
 	writeTelemetryHealth(&b, r)
 	writeEconomicsTable(&b, r)
 	writeContractSection(&b, r)
+	writeRoutesSection(&b, r)
 	writeDriftSection(&b, r)
 	writeReportCatalog(&b, r)
 	writeDefinitions(&b)
@@ -636,6 +637,7 @@ func writeNav(b *strings.Builder) {
 	fmt.Fprintln(b, `<a href="#health">Здоровье</a>`)
 	fmt.Fprintln(b, `<a href="#economics">Экономика</a>`)
 	fmt.Fprintln(b, `<a href="#contract">Контракт</a>`)
+	fmt.Fprintln(b, `<a href="#routes">Маршруты</a>`)
 	fmt.Fprintln(b, `<a href="#drift">Дрейф</a>`)
 	fmt.Fprintln(b, `<a href="#reports">Отчёты</a>`)
 	fmt.Fprintln(b, `<a href="#definitions">Ограничения</a>`)
@@ -832,6 +834,66 @@ func writeTelemetryHealth(b *strings.Builder, r *Report) {
 			fmt.Fprintln(b, `</div>`)
 		}
 		fmt.Fprintln(b, `</div>`)
+	}
+
+	fmt.Fprintln(b, `</section>`)
+}
+
+func writeRoutesSection(b *strings.Builder, r *Report) {
+	fmt.Fprintln(b, `<section class="section" id="routes">`)
+	fmt.Fprintln(b, `<header class="section-head">`)
+	fmt.Fprintln(b, `<div><p class="section-label">Где цепочка застревает</p><h2>Маршруты и переходы</h2></div>`)
+	fmt.Fprintln(b, `<p>Переходы между ролями, циклы тестера, статусы диспатчей.</p>`)
+	fmt.Fprintln(b, `</header>`)
+
+	// Status distribution
+	fmt.Fprintln(b, `<div class="metric-strip">`)
+	for _, st := range []string{"completed", "async_launched", "failed", "killed"} {
+		n := r.Routes.ByStatus[st]
+		if n == 0 {
+			continue
+		}
+		fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>%s</span></div>`, n, hesc(st))
+		fmt.Fprintln(b)
+	}
+	fmt.Fprintln(b, `</div>`)
+
+	// Tester loops
+	if len(r.Routes.TesterLoops) > 0 {
+		fmt.Fprintln(b, `<div style="margin-top:18px">`)
+		fmt.Fprintln(b, `<p class="section-label">Циклы тестера (≥3 прогонов в сессии)</p>`)
+		fmt.Fprintln(b, `<div class="table-wrap"><table>`)
+		fmt.Fprintln(b, `<thead><tr><th>Сессия</th><th class="num">Кругов</th></tr></thead><tbody>`)
+		for _, tl := range r.Routes.TesterLoops {
+			fmt.Fprintf(b, `<tr><td><code>%s</code></td><td class="num">%d</td></tr>`,
+				hesc(short8(tl.SessionID)), tl.Rounds)
+			fmt.Fprintln(b)
+		}
+		fmt.Fprintln(b, `</tbody></table></div></div>`)
+	}
+
+	// Transitions table
+	if len(r.Routes.Transitions) > 0 {
+		fmt.Fprintln(b, `<div style="margin-top:18px">`)
+		fmt.Fprintln(b, `<p class="section-label">Частые переходы (top 20)</p>`)
+		fmt.Fprintln(b, `<div class="table-wrap"><table>`)
+		fmt.Fprintln(b, `<thead><tr><th>Из</th><th></th><th>В</th><th class="num">Раз</th></tr></thead><tbody>`)
+		maxTrans := 0
+		if len(r.Routes.Transitions) > 0 {
+			maxTrans = r.Routes.Transitions[0].Count
+		}
+		for _, tr := range r.Routes.Transitions {
+			pct := 0
+			if maxTrans > 0 {
+				pct = tr.Count * 100 / maxTrans
+			}
+			fmt.Fprintf(b, `<tr><td><code>%s</code></td><td style="color:var(--faint)">→</td><td><code>%s</code></td>`,
+				hesc(tr.From), hesc(tr.To))
+			fmt.Fprintf(b, `<td class="num"><div class="share"><div class="share-track"><i style="width:%d%%"></i></div><span>%d</span></div></td>`,
+				pct, tr.Count)
+			fmt.Fprintln(b, `</tr>`)
+		}
+		fmt.Fprintln(b, `</tbody></table></div></div>`)
 	}
 
 	fmt.Fprintln(b, `</section>`)
