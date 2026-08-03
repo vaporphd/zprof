@@ -12,6 +12,7 @@ type Report struct {
 	CompletedCount  int
 	Sessions        int
 	Losses          Losses
+	TelHealth       TelemetryHealth
 	Health          []RoleHealth
 	Economics       EconomicsReport
 	Routes          RoutesReport
@@ -71,7 +72,29 @@ type TesterLoop struct {
 
 type DriftEntry struct {
 	ConfigHash     string
+	FirstSeen      time.Time
+	LastSeen       time.Time
 	Dispatches     int
+	Tokens         TokenBreakdown
 	AvgTokens      int
 	ComplianceRate float64
+	P50Duration    int64
+	P95Duration    int64
+}
+
+type TelemetryHealth struct {
+	TranscriptsCaptured int
+	TranscriptsTotal    int
+	TranscriptPct       float64
+	Truncated           int
+	UnknownRole         int
+	UnknownModel        int
+	ParseErrors         int
+	AsyncIncomplete     int
+	DailyDispatches     []DayCount
+}
+
+type DayCount struct {
+	Date  string
+	Count int
 }

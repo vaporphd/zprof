@@ -2,6 +2,7 @@ package stats
 
 import (
 	"sort"
+	"time"
 )
 
 func Aggregate(dispatches []Dispatch, losses Losses) *Report {
@@ -35,6 +36,7 @@ func Aggregate(dispatches []Dispatch, losses Losses) *Report {
 	r.Sessions = len(sessions)
 	r.CompletedCount = len(completed)
 
+	r.TelHealth = aggregateTelemetryHealth(dispatches)
 	r.Health = aggregateHealth(completed)
 	r.Economics = aggregateEconomics(completed)
 	r.Routes = aggregateRoutes(completed, dispatches)
@@ -187,9 +189,12 @@ func aggregateRoutes(completed, all []Dispatch) RoutesReport {
 func aggregateDrift(completed []Dispatch) []DriftEntry {
 	type acc struct {
 		count     int
-		totalTok  int
+		tokens    TokenBreakdown
 		compliant int
 		checked   int
+		durations []int64
+		first     time.Time
+		last      time.Time
 	}
 	m := map[string]*acc{}
 	for _, d := range completed {
@@ -203,7 +208,21 @@ func aggregateDrift(completed []Dispatch) []DriftEntry {
 			m[h] = a
 		}
 		a.count++
-		a.totalTok += d.TokensInput + d.TokensOutput + d.TokensCacheRead + d.TokensCacheCreation
+		a.tokens.Input += d.TokensInput
+		a.tokens.Output += d.TokensOutput
+		a.tokens.CacheRead += d.TokensCacheRead
+		a.tokens.CacheCreation += d.TokensCacheCreation
+		if d.DurationMs > 0 {
+			a.durations = append(a.durations, d.DurationMs)
+		}
+		if !d.Timestamp.IsZero() {
+			if a.first.IsZero() || d.Timestamp.Before(a.first) {
+				a.first = d.Timestamp
+			}
+			if d.Timestamp.After(a.last) {
+				a.last = d.Timestamp
+			}
+		}
 		if d.HasPreamble != nil {
 			a.checked++
 			if !*d.HasPreamble {
@@ -216,17 +235,69 @@ func aggregateDrift(completed []Dispatch) []DriftEntry {
 	}
 	var out []DriftEntry
 	for h, a := range m {
-		de := DriftEntry{ConfigHash: h, Dispatches: a.count}
+		de := DriftEntry{
+			ConfigHash: h,
+			Dispatches: a.count,
+			Tokens:     a.tokens,
+			FirstSeen:  a.first,
+			LastSeen:   a.last,
+		}
 		if a.count > 0 {
-			de.AvgTokens = a.totalTok / a.count
+			de.AvgTokens = a.tokens.Total() / a.count
 		}
 		if a.checked > 0 {
 			de.ComplianceRate = float64(a.compliant) / float64(a.checked) * 100
 		}
+		if len(a.durations) > 0 {
+			sort.Slice(a.durations, func(i, j int) bool { return a.durations[i] < a.durations[j] })
+			de.P50Duration = percentile(a.durations, 0.50)
+			de.P95Duration = percentile(a.durations, 0.95)
+		}
 		out = append(out, de)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Dispatches > out[j].Dispatches })
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeen.After(out[j].LastSeen) })
 	return out
+}
+
+func aggregateTelemetryHealth(dispatches []Dispatch) TelemetryHealth {
+	var th TelemetryHealth
+	daily := map[string]int{}
+
+	for _, d := range dispatches {
+		th.TranscriptsTotal++
+		if d.TranscriptCaptured {
+			th.TranscriptsCaptured++
+		}
+		if d.TranscriptTruncated != nil && *d.TranscriptTruncated {
+			th.Truncated++
+		}
+		if d.Role == "" {
+			th.UnknownRole++
+		}
+		if d.ModelResolved == "" || d.ModelResolved == "unknown" {
+			th.UnknownModel++
+		}
+		if !d.DispatchComplete && d.Status == "async_launched" {
+			th.AsyncIncomplete++
+		}
+		if !d.Timestamp.IsZero() {
+			day := d.Timestamp.UTC().Format("2006-01-02")
+			daily[day]++
+		}
+	}
+
+	if th.TranscriptsTotal > 0 {
+		th.TranscriptPct = float64(th.TranscriptsCaptured) * 100 / float64(th.TranscriptsTotal)
+	}
+
+	for day, count := range daily {
+		th.DailyDispatches = append(th.DailyDispatches, DayCount{Date: day, Count: count})
+	}
+	sort.Slice(th.DailyDispatches, func(i, j int) bool {
+		return th.DailyDispatches[i].Date < th.DailyDispatches[j].Date
+	})
+
+	return th
 }
 
 func percentile(sorted []int64, p float64) int64 {

@@ -19,8 +19,10 @@ func RenderHTML(r *Report) string {
 	writeTrustBlock(&b, r)
 	writeActionQueue(&b, r)
 	writeVolumeStrip(&b, r)
+	writeTelemetryHealth(&b, r)
 	writeEconomicsTable(&b, r)
 	writeContractSection(&b, r)
+	writeDriftSection(&b, r)
 	writeReportCatalog(&b, r)
 	writeDefinitions(&b)
 	fmt.Fprintln(&b, `</main></body></html>`)
@@ -631,8 +633,10 @@ func writeReportHeader(b *strings.Builder, r *Report) {
 func writeNav(b *strings.Builder) {
 	fmt.Fprintln(b, `<nav class="report-nav" aria-label="Sections">`)
 	fmt.Fprintln(b, `<a href="#actions">Действия</a>`)
+	fmt.Fprintln(b, `<a href="#health">Здоровье</a>`)
 	fmt.Fprintln(b, `<a href="#economics">Экономика</a>`)
 	fmt.Fprintln(b, `<a href="#contract">Контракт</a>`)
+	fmt.Fprintln(b, `<a href="#drift">Дрейф</a>`)
 	fmt.Fprintln(b, `<a href="#reports">Отчёты</a>`)
 	fmt.Fprintln(b, `<a href="#definitions">Ограничения</a>`)
 	fmt.Fprintln(b, `</nav>`)
@@ -768,6 +772,117 @@ func writeVolumeStrip(b *strings.Builder, r *Report) {
 	fmt.Fprintln(b)
 	fmt.Fprintln(b, `</div>`)
 	fmt.Fprintln(b, `</section>`)
+}
+
+func writeTelemetryHealth(b *strings.Builder, r *Report) {
+	th := r.TelHealth
+	fmt.Fprintln(b, `<section class="section" id="health">`)
+	fmt.Fprintln(b, `<header class="section-head">`)
+	fmt.Fprintln(b, `<div><p class="section-label">Можно ли верить остальным отчётам</p><h2>Здоровье телеметрии</h2></div>`)
+	fmt.Fprintln(b, `<p>Потери и пробелы, определяющие границы доверия ко всем остальным цифрам.</p>`)
+	fmt.Fprintln(b, `</header>`)
+
+	fmt.Fprintln(b, `<div class="metric-strip">`)
+	fmt.Fprintf(b, `<div class="metric"><strong>%.1f%%</strong><span>транскриптов захвачено</span></div>`, th.TranscriptPct)
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>без распознанной роли</span></div>`, th.UnknownRole)
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>без известной модели</span></div>`, th.UnknownModel)
+	fmt.Fprintln(b)
+	fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>обрезанных транскриптов</span></div>`, th.Truncated)
+	fmt.Fprintln(b)
+	fmt.Fprintln(b, `</div>`)
+
+	if r.Losses.ParseErrors > 0 || th.AsyncIncomplete > 0 {
+		fmt.Fprintln(b, `<div class="metric-strip" style="margin-top:1px">`)
+		fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>ошибок разбора (parse errors)</span></div>`, r.Losses.ParseErrors)
+		fmt.Fprintln(b)
+		fmt.Fprintf(b, `<div class="metric"><strong>%d</strong><span>async без завершения</span></div>`, th.AsyncIncomplete)
+		fmt.Fprintln(b)
+		fmt.Fprintln(b, `</div>`)
+	}
+
+	// Daily dispatch timeline
+	if len(th.DailyDispatches) > 1 {
+		maxDay := 0
+		for _, dc := range th.DailyDispatches {
+			if dc.Count > maxDay {
+				maxDay = dc.Count
+			}
+		}
+		fmt.Fprintln(b, `<div style="margin-top:18px">`)
+		fmt.Fprintln(b, `<p class="section-label">Диспатчи по дням</p>`)
+		fmt.Fprintln(b, `<div style="display:flex;align-items:flex-end;gap:2px;height:80px;margin-top:8px">`)
+		for _, dc := range th.DailyDispatches {
+			h := 4
+			if maxDay > 0 {
+				h = max(4, dc.Count*100/maxDay)
+			}
+			fmt.Fprintf(b, `<div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;height:100%%">`+
+				`<div style="width:100%%;height:%d%%;background:var(--blue);border-radius:2px 2px 0 0;min-height:2px" title="%s: %d"></div>`+
+				`</div>`, h, hesc(dc.Date), dc.Count)
+			fmt.Fprintln(b)
+		}
+		fmt.Fprintln(b, `</div>`)
+		// Date labels for first and last
+		if len(th.DailyDispatches) >= 2 {
+			fmt.Fprintf(b, `<div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:4px">`)
+			fmt.Fprintf(b, `<span>%s</span>`, hesc(th.DailyDispatches[0].Date[5:]))
+			fmt.Fprintf(b, `<span>%s</span>`, hesc(th.DailyDispatches[len(th.DailyDispatches)-1].Date[5:]))
+			fmt.Fprintln(b, `</div>`)
+		}
+		fmt.Fprintln(b, `</div>`)
+	}
+
+	fmt.Fprintln(b, `</section>`)
+}
+
+func writeDriftSection(b *strings.Builder, r *Report) {
+	if len(r.Drift) == 0 {
+		return
+	}
+	fmt.Fprintln(b, `<section class="section" id="drift">`)
+	fmt.Fprintln(b, `<header class="section-head">`)
+	fmt.Fprintln(b, `<div><p class="section-label">До / после правки контракта</p><h2>Дрейф конфигурации</h2></div>`)
+	fmt.Fprintln(b, `<p>Сравнение окон по config_hash. Показывает, стало ли лучше после изменения.</p>`)
+	fmt.Fprintln(b, `</header>`)
+
+	fmt.Fprintln(b, `<div class="table-wrap">`)
+	fmt.Fprintln(b, `<table>`)
+	fmt.Fprintln(b, `<thead><tr><th>config_hash</th><th class="num">Период</th><th class="num">Диспатчей</th><th class="num">Compliance</th><th class="num">Ср. токены</th><th class="num">p50 / p95</th></tr></thead>`)
+	fmt.Fprintln(b, `<tbody>`)
+	for _, de := range r.Drift {
+		period := ""
+		if !de.FirstSeen.IsZero() && !de.LastSeen.IsZero() {
+			period = fmt.Sprintf("%s → %s",
+				de.FirstSeen.UTC().Format("01-02"),
+				de.LastSeen.UTC().Format("01-02"))
+		}
+		compClass := "status-ready"
+		if de.ComplianceRate < 50 {
+			compClass = "status-fail"
+		} else if de.ComplianceRate < 90 {
+			compClass = "status-gap"
+		}
+		fmt.Fprintf(b, `<tr><td><code>%s</code></td><td class="num">%s</td><td class="num">%d</td>`,
+			hesc(short8(de.ConfigHash)), hesc(period), de.Dispatches)
+		fmt.Fprintf(b, `<td class="num"><span class="status %s">%.0f%%</span></td>`,
+			compClass, de.ComplianceRate)
+		fmt.Fprintf(b, `<td class="num">%s</td>`, hesc(fmtTokens(de.AvgTokens)))
+		fmt.Fprintf(b, `<td class="num">%s / %s</td>`,
+			hesc(fmtDuration(de.P50Duration)), hesc(fmtDuration(de.P95Duration)))
+		fmt.Fprintln(b, `</tr>`)
+	}
+	fmt.Fprintln(b, `</tbody></table>`)
+	fmt.Fprintln(b, `</div>`)
+	fmt.Fprintln(b, `</section>`)
+}
+
+func short8(s string) string {
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
 }
 
 func writeEconomicsTable(b *strings.Builder, r *Report) {
