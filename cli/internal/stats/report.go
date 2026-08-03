@@ -3,6 +3,7 @@ package stats
 import "time"
 
 type Report struct {
+	ProjectName     string
 	ProjectID       string
 	MachineID       string
 	Harness         string

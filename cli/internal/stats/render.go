@@ -41,16 +41,21 @@ type action struct {
 func generateActions(r *Report) []action {
 	var out []action
 
-	// P0: any role with preamble checked and compliance < 50%
+	// P0: consolidate all roles with compliance < 50% into ONE action
+	var failRoles []string
 	for _, h := range r.Health {
 		if h.PreambleChecked > 0 && h.ComplianceRate < 50 {
-			out = append(out, action{
-				severity: "P0",
-				title:    fmt.Sprintf("Контракт возврата нарушается у %s", h.Role),
-				detail:   fmt.Sprintf("Compliance %.0f%% при %d проверенных диспатчах.", h.ComplianceRate, h.PreambleChecked),
-				next:     fmt.Sprintf("Открыть последние нарушения %s, проверить return contract и scaffold.", h.Role),
-			})
+			failRoles = append(failRoles, h.Role)
 		}
+	}
+	if len(failRoles) > 0 {
+		roleList := strings.Join(failRoles, ", ")
+		out = append(out, action{
+			severity: "P0",
+			title:    "Контракт возврата системно нарушается",
+			detail:   fmt.Sprintf("Роли с compliance < 50%%: %s. Разбор по схеме при этом 100%%, проблема в форме ответа.", roleList),
+			next:     "Открыть 10 последних нарушений, сгруппировать по config_hash, проверить контракт и scaffold возврата.",
+		})
 	}
 
 	// P1: missing role > 10%
@@ -69,7 +74,7 @@ func generateActions(r *Report) []action {
 	// P1: top role by tokens if > 40% of total
 	totalTok := r.Economics.TotalTokens.Total()
 	if totalTok > 0 && len(r.Economics.ByRole) > 0 {
-		top := r.Economics.ByRole[0] // sorted descending by tokens
+		top := r.Economics.ByRole[0]
 		share := float64(top.Tokens.Total()) * 100 / float64(totalTok)
 		if share > 40 {
 			out = append(out, action{
@@ -81,8 +86,12 @@ func generateActions(r *Report) []action {
 		}
 	}
 
-	// P2: any role with P95/P50 ratio > 3
+	// P2: top 3 roles with P95/P50 ratio > 3
+	tailCount := 0
 	for _, re := range r.Economics.ByRole {
+		if tailCount >= 3 {
+			break
+		}
 		if re.P50Duration > 0 {
 			ratio := float64(re.P95Duration) / float64(re.P50Duration)
 			if ratio > 3 {
@@ -92,6 +101,7 @@ func generateActions(r *Report) []action {
 					detail:   fmt.Sprintf("p50 = %s, p95 = %s.", fmtDuration(re.P50Duration), fmtDuration(re.P95Duration)),
 					next:     "Показать top-10 runs по critical-path duration.",
 				})
+				tailCount++
 			}
 		}
 	}
@@ -134,7 +144,9 @@ func computeTrust(r *Report) (transcriptPct float64, unknownRolePct float64, tl 
 
 func writeHead(b *strings.Builder, r *Report) {
 	title := "zprof stats"
-	if r.ProjectID != "" {
+	if r.ProjectName != "" {
+		title = r.ProjectName + " — Agent Telemetry"
+	} else if r.ProjectID != "" {
 		title = r.ProjectID + " — Agent Telemetry"
 	}
 	fmt.Fprintf(b, `<!DOCTYPE html>
@@ -575,9 +587,12 @@ td.signal { max-width: 260px; color: var(--soft); font-size: 13px; }
 }
 
 func writeReportHeader(b *strings.Builder, r *Report) {
-	pid := r.ProjectID
-	if pid == "" {
-		pid = "unknown"
+	heading := r.ProjectName
+	if heading == "" {
+		heading = r.ProjectID
+	}
+	if heading == "" {
+		heading = "unknown"
 	}
 
 	days := 0
@@ -589,7 +604,7 @@ func writeReportHeader(b *strings.Builder, r *Report) {
 	fmt.Fprintln(b, `<div>`)
 	fmt.Fprintf(b, `<p class="eyebrow">Agent telemetry · decision report</p>`)
 	fmt.Fprintln(b)
-	fmt.Fprintf(b, `<h1>%s</h1>`, hesc(pid))
+	fmt.Fprintf(b, `<h1>%s</h1>`, hesc(heading))
 	fmt.Fprintln(b)
 	fmt.Fprintln(b, `</div>`)
 	fmt.Fprintln(b, `<div class="head-meta">`)
@@ -601,7 +616,9 @@ func writeReportHeader(b *strings.Builder, r *Report) {
 			hesc(r.TimeRange[1].UTC().Format("2006-01-02")))
 		fmt.Fprintln(b)
 	}
-	fmt.Fprintf(b, `<span>project_id: %s</span>`, hesc(pid))
+	if r.ProjectID != "" {
+		fmt.Fprintf(b, `<span>project_id: %s</span>`, hesc(r.ProjectID))
+	}
 	fmt.Fprintln(b)
 	if r.Harness != "" {
 		fmt.Fprintf(b, `<span>harness: %s</span>`, hesc(r.Harness))

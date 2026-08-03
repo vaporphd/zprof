@@ -32,6 +32,10 @@ routes, and profile drift reports.`,
 
 				report := stats.Aggregate(dispatches, losses)
 
+				absDir, _ := filepath.Abs(dir)
+				projectDir := filepath.Dir(absDir)
+				report.ProjectName = filepath.Base(projectDir)
+
 				var output []byte
 				var ext string
 				switch format {
