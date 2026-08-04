@@ -1,0 +1,57 @@
+{
+  "description": "Contract compliance checks for shakedown run",
+  "checks": [
+    {
+      "name": "task-runner returns verdict",
+      "type": "return_format",
+      "role": "task-runner",
+      "expect": "first line starts with 'verdict:'"
+    },
+    {
+      "name": "task-runner returns artifact",
+      "type": "return_format",
+      "role": "task-runner",
+      "expect": "contains 'artifact:'"
+    },
+    {
+      "name": "task-runner returns run_log",
+      "type": "return_format",
+      "role": "task-runner",
+      "expect": "contains 'run_log:'"
+    },
+    {
+      "name": "planner called",
+      "type": "dispatch_exists",
+      "role": "planner"
+    },
+    {
+      "name": "implementer called",
+      "type": "dispatch_exists",
+      "role": "implementer"
+    },
+    {
+      "name": "tester called",
+      "type": "dispatch_exists",
+      "role": "tester"
+    },
+    {
+      "name": "reviewer called",
+      "type": "dispatch_exists",
+      "role": "reviewer"
+    },
+    {
+      "name": "no preamble on any agent",
+      "type": "no_preamble",
+      "roles": ["planner", "implementer", "tester", "reviewer"]
+    },
+    {
+      "name": "run log exists",
+      "type": "file_exists",
+      "pattern": ".zprof/runs/*.md"
+    },
+    {
+      "name": "runner did not spawn runner",
+      "type": "no_recursive_runner"
+    }
+  ]
+}
