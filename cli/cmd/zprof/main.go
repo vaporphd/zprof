@@ -27,6 +27,7 @@ func main() {
 	root.AddCommand(cmd.NewEvalCmd())
 	root.AddCommand(cmd.NewStatsCmd())
 	root.AddCommand(cmd.NewShakedownCmd())
+	root.AddCommand(cmd.NewEvalTelemetryCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
