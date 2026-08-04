@@ -6,6 +6,7 @@ router: agent-loop-router.md
 roles: []
 tool_agents:
   - evaluator
+  - evaluator-telemetry
 stop_list:
   - "force-push, rebase или amend опубликованной ветки"
   - "удаление веток и тегов"

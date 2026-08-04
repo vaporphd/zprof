@@ -30,6 +30,16 @@ type ProjectManifest struct {
 	// orphans from an earlier profile version and get pruned on the next
 	// apply; anything not listed is user-authored and never touched.
 	ManagedAgents []string `yaml:"managed_agents,omitempty"`
+
+	// ABExperiments configures A/B tier experiments per role.
+	// task-runner calls zprof-collect.py pick-arm to get the model.
+	ABExperiments map[string]ABExperiment `yaml:"ab_experiments,omitempty"`
+}
+
+// ABExperiment defines the control and candidate models for a role.
+type ABExperiment struct {
+	Control   string `yaml:"control"`
+	Candidate string `yaml:"candidate"`
 }
 
 // LoadProject reads and parses a project manifest (.zprof.yaml) at path.

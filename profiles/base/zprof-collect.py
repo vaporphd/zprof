@@ -2,7 +2,7 @@
 """zprof telemetry collector — runs as Claude Code hook.
 
 Usage: zprof-collect.py <mode>
-Modes: subagent-stop | stop | session-start
+Modes: subagent-stop | stop | session-start | pick-arm
 
 Reads JSON payload from stdin. Writes to $ZPROF_AGENTLOG or <cwd>/.agentlog/.
 Always exits 0. Errors go to collect.log.
@@ -16,6 +16,11 @@ VERSION = "0.1.0"
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "stop"
+
+    if mode == "pick-arm":
+        _handle_pick_arm()
+        return
+
     raw = ""
     try:
         raw = sys.stdin.read()
@@ -38,6 +43,83 @@ def main():
         _log_error(agentlog, traceback.format_exc())
 
     sys.exit(0)
+
+
+def _handle_pick_arm():
+    """Deterministic A/B arm selection.
+
+    Reads JSON from stdin: {"role": "implementer", "task": "fix the bug"}
+    Reads .zprof.yaml for ab_experiments config.
+    Returns JSON to stdout: {"model": "sonnet", "arm": "control"} or {"model": "opus", "arm": "candidate"}
+
+    Deterministic: hash(project_id + role + task) mod 2.
+    Same task on same project always gets the same arm.
+    """
+    try:
+        raw = sys.stdin.read()
+        req = json.loads(raw)
+    except Exception:
+        print(json.dumps({"error": "invalid input", "model": None, "arm": None}))
+        sys.exit(0)
+
+    role = req.get("role", "")
+    task = req.get("task", "")
+    cwd = req.get("cwd", os.getcwd())
+
+    project_id = _get_project_id(cwd)
+    config = _load_ab_config(cwd)
+
+    if not config or role not in config:
+        print(json.dumps({"model": None, "arm": None, "reason": "no experiment for this role"}))
+        sys.exit(0)
+
+    experiment = config[role]
+    control = experiment.get("control", "")
+    candidate = experiment.get("candidate", "")
+
+    if not control or not candidate:
+        print(json.dumps({"model": None, "arm": None, "reason": "incomplete experiment config"}))
+        sys.exit(0)
+
+    key = f"{project_id}:{role}:{task}"
+    h = hashlib.sha256(key.encode()).hexdigest()
+    arm_index = int(h[:8], 16) % 2
+
+    if arm_index == 0:
+        print(json.dumps({"model": control, "arm": "control"}))
+    else:
+        print(json.dumps({"model": candidate, "arm": "candidate"}))
+    sys.exit(0)
+
+
+def _load_ab_config(cwd):
+    """Load ab_experiments from .zprof.yaml."""
+    zprof_yaml = Path(cwd) / ".zprof.yaml"
+    if not zprof_yaml.exists():
+        return None
+    try:
+        text = zprof_yaml.read_text()
+        in_ab = False
+        current_role = None
+        config = {}
+        for line in text.splitlines():
+            stripped = line.strip()
+            if stripped == "ab_experiments:":
+                in_ab = True
+                continue
+            if in_ab:
+                if not line.startswith(" ") and not line.startswith("\t") and stripped:
+                    break
+                if stripped.endswith(":") and not stripped.startswith("-") and not stripped.startswith("control") and not stripped.startswith("candidate"):
+                    current_role = stripped[:-1].strip()
+                    config[current_role] = {}
+                elif current_role and stripped.startswith("control:"):
+                    config[current_role]["control"] = stripped.split(":", 1)[1].strip()
+                elif current_role and stripped.startswith("candidate:"):
+                    config[current_role]["candidate"] = stripped.split(":", 1)[1].strip()
+        return config if config else None
+    except Exception:
+        return None
 
 
 class AgentlogLock:
