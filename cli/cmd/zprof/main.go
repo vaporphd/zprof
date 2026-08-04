@@ -26,6 +26,7 @@ func main() {
 	root.AddCommand(cmd.NewDoctorCmd())
 	root.AddCommand(cmd.NewEvalCmd())
 	root.AddCommand(cmd.NewStatsCmd())
+	root.AddCommand(cmd.NewShakedownCmd())
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
