@@ -21,10 +21,11 @@ var Roles = map[string]bool{
 	"tester":         true,
 	"bug-hunter":     true,
 	"refactor-agent": true,
-	"explorer":       true,
-	"reviewer":       true,
-	"auditor":        true,
-	"auditor-deep":   true,
+	"explorer":            true,
+	"reviewer":            true,
+	"frontend-developer":  true,
+	"auditor":             true,
+	"auditor-deep":        true,
 }
 
 // Gates are the base agents/gates/*.md that count as roles when

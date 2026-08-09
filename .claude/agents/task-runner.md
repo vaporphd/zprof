@@ -203,7 +203,7 @@ Acceptance criteria — не пожелания, а **проверяемые** �
 | Роль исполнителя | Аудитор |
 |---|---|
 | tester*, билд/линт tool-агенты, docs-writer | `auditor` (sonnet) |
-| implementer*, refactor-agent*, bug-hunter*, architect* | `auditor-deep` (opus) |
+| implementer*, refactor-agent*, bug-hunter*, architect*, frontend-developer* | `auditor-deep` (opus) |
 
 `*` — включая stack-суффиксы (`implementer-ios` → базовое имя `implementer`).
 Override: `.zprof.yaml` → `audit.model_by_role`.

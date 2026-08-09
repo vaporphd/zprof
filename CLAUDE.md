@@ -41,6 +41,7 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 | refactor-agent | refactor-agent | sonnet | restructure without behavior change |
 | explorer | explorer | sonnet | read-only codebase investigation |
 | docs-writer | docs-writer | sonnet | README, CLAUDE.md sections, wiki |
+| frontend-developer | frontend-developer | sonnet | UI components, pages; delegates to frontend-design skill |
 | auditor | auditor | sonnet | read-only step verification (mechanical) |
 | auditor-deep | auditor-deep | opus | read-only step verification (semantic) |
 
