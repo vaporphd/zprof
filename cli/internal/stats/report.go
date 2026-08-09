@@ -17,6 +17,7 @@ type Report struct {
 	Economics       EconomicsReport
 	Routes          RoutesReport
 	Drift           []DriftEntry
+	Audit           AuditReport
 }
 
 type RoleHealth struct {
@@ -104,4 +105,21 @@ type TelemetryHealth struct {
 type DayCount struct {
 	Date  string
 	Count int
+}
+
+type AuditReport struct {
+	TotalAudited    int
+	DoneClaims      int
+	FalseDone       int
+	FalseDoneRate   float64
+	AuditorTokens   TokenBreakdown
+	AuditorTokenPct float64
+	ByRole          []RoleAuditStats
+}
+
+type RoleAuditStats struct {
+	Role          string
+	DoneClaims    int
+	FalseDone     int
+	FalseDoneRate float64
 }

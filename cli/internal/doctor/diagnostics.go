@@ -105,6 +105,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkTelemetryHooks(projectDir)...)
 	out = append(out, checkPython3Available()...)
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
+	out = append(out, checkAuditConfig(projectDir, proj)...)
 	return out, nil
 }
 
@@ -723,6 +724,33 @@ func checkPython3Available() []Issue {
 		}}
 	}
 	return nil
+}
+
+// checkAuditConfig warns when audit.enabled is true but the auditor agent
+// files are missing from .claude/agents/. Without them task-runner tries to
+// dispatch a role that doesn't exist, producing an immediate verdict: failed.
+func checkAuditConfig(projectDir string, proj *manifest.ProjectManifest) []Issue {
+	if !proj.AuditEnabled() {
+		return nil
+	}
+	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	var out []Issue
+	for _, name := range []string{"auditor.md", "auditor-deep.md"} {
+		if _, err := os.Stat(filepath.Join(agentsDir, name)); err != nil {
+			out = append(out, Issue{
+				Level:   LevelWarn,
+				Path:    filepath.Join(agentsDir, name),
+				Message: fmt.Sprintf("audit.enabled is true but %s is missing — task-runner cannot dispatch the auditor; run `zprof apply`", name),
+			})
+		}
+	}
+	if proj.Audit.MaxDispatches > 0 && proj.Audit.MaxDispatches < 3 {
+		out = append(out, Issue{
+			Level:   LevelWarn,
+			Message: fmt.Sprintf("audit.max_dispatches is %d — at least 3 needed for a single executor+auditor+retry cycle", proj.Audit.MaxDispatches),
+		})
+	}
+	return out
 }
 
 // checkAgentlogCleanVulnerability reminds that .agentlog/ — gitignored and

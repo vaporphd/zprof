@@ -203,7 +203,23 @@ started: 2026-07-28T10:02 · overlays: ios-swift · route: dev-pipeline/bugfix
 verdict: done · artifact: PR #128
 ```
 
-### 8.2 Правила
+### 8.2 Секция Requirements (v2 — mea-auditor)
+
+При `audit.enabled: true` журнал включает секцию `## Requirements` — таблицу
+требований со статусами `pending / claimed / completed / blocked / untrusted`
+и ссылкой на evidence-файл аудитора. task-runner создаёт таблицу при старте
+(1–3 требования, декомпозиция задачи) и обновляет по вердиктам аудита.
+
+Переходы статусов:
+- `pending` → `claimed` (исполнитель заявил done)
+- `claimed` → `completed` (аудитор подтвердил: complete + clean)
+- `claimed` → `pending` (при resume: недоаудированное = недоказанное)
+- любой → `untrusted` (integrity violation)
+- любой → `blocked` (аудитор: проверка невозможна)
+
+Подробности: `profiles/base/agents/task-runner.md`, секция «Аудит шагов».
+
+### 8.3 Правила
 
 - Строка ≤120 символов, одна на шаг.
 - Вывод сабагентов не вставляется. Иначе журнал станет тем же мусором,
@@ -213,7 +229,7 @@ verdict: done · artifact: PR #128
   когда пользователь спросил.
 - Отсутствие секции `## Итог` означает, что раннер не дошёл до конца.
 
-### 8.3 Хранение
+### 8.4 Хранение
 
 `.zprof/runs/` попадает в `.gitignore`. Автоочистки в v1 нет;
 `zprof doctor` предупреждает при >50 файлов.
