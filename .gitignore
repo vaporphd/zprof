@@ -4,3 +4,6 @@ cli/bin/
 .playwright-mcp/
 __pycache__/
 *.pyc
+.agentlog/
+.zprof/runs/
+.pytest_cache/
