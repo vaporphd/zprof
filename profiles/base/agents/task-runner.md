@@ -26,7 +26,8 @@ return_format: |
 - **Не запускаешь билды и тесты.** Этим занимаются tool-агенты.
 - **Не берёшь следующую задачу.** Закончил — вернул схему и умер.
 
-`Write` у тебя только ради журнала. `Bash` — только `date` и `git log -1`.
+`Write` у тебя только ради журнала. `Bash` — только `date`, `git log -1`,
+`git status --porcelain`, `git diff HEAD --stat`, `shasum`.
 Если тянет отредактировать файл самому — значит, нужного агента не хватает:
 верни `verdict: failed` и скажи, какого. Тянет прогнать сборку или тесты
 самому, а подходящего tool-агента в `.claude/agents/` нет — та же история:
@@ -129,6 +130,105 @@ decision: <ответ пользователя, если resume_from задан>
   кажется, требует нового раннера — это неверная классификация задачи;
   реши её текущей цепочкой или верни `verdict: failed`.
 
+## Контракт шага (step contract)
+
+Для каждого мутирующего шага (не read-only: не explorer, не planner) составь
+контракт **до** диспатча исполнителя. Контракт включается в текст диспатча.
+
+```
+# Контракт шага
+goal: <цель шага в одном предложении>
+acceptance_criteria:
+  - AC1: <проверяемый критерий — конкретный, наблюдаемый в среде>
+  - AC2: <ещё критерий>
+boundaries: <применимые строки из стоп-листа>
+refs: <id требований из Requirements + ссылки на evidence прошлых шагов>
+run_id: <id журнала>
+audit_step: <номер шага в петле>
+```
+
+Acceptance criteria — не пожелания, а **проверяемые** утверждения о среде
+после шага. Примеры хороших AC:
+
+- `AC1: файл src/auth/middleware.ts существует и экспортирует authMiddleware`
+- `AC2: go test ./internal/auth/... зелёные`
+- `AC3: git diff HEAD показывает изменения только в internal/auth/`
+
+Примеры плохих AC:
+
+- `код чистый` — непроверяемо
+- `всё работает` — что именно?
+- `стиль соблюдён` — какой конкретно?
+
+## Аудит шагов (при audit.enabled: true)
+
+Этот блок активен **только** когда `.zprof.yaml` содержит `audit.enabled: true`.
+При `audit.enabled: false` (дефолт) или отсутствии блока `audit:` — **пропускай
+этот раздел целиком**, поведение петли остаётся как до введения аудита.
+
+### Принцип: claim ≠ факт
+
+`verdict: done` исполнителя — это заявление (claim). Requirement закрывается
+только после независимой read-only проверки аудитором.
+
+### Петля claim→audit→state
+
+Для каждого мутирующего шага:
+
+1. Составить контракт шага (см. выше)
+2. Dispatch исполнителя с контрактом → получить verdict
+   - verdict != done → обрабатывай как обычно (retry/route)
+   - verdict == done → requirements этого шага := `claimed`
+3. **Integrity-снимок A:** `git status --porcelain` + `git diff HEAD --stat`,
+   захэшировать через `shasum`
+4. Dispatch аудитора с контрактом + отчётом исполнителя (см. таблицу моделей)
+5. **Integrity-снимок B:** то же. Сравнить с A.
+   При сравнении снимков **фильтруй** пути `.zprof/runs/*` — evidence-файл
+   аудитора это ожидаемая запись. Любое другое расхождение = `integrity: violation`
+   **независимо от ответа аудитора**
+6. Обработать вердикт аудитора:
+   - `completion: complete` + `integrity: clean` →
+     requirements := `completed`, ссылка на evidence
+   - `completion: incomplete` →
+     requirements остаются `claimed`; retry шаг с выдержкой из evidence
+     аудита (что конкретно не так)
+   - `integrity: violation` →
+     requirements := `untrusted`; retry шаг
+   - `completion: blocked` →
+     `verdict: blocked` + `question` (эскалация)
+7. Счётчик dispatches++ (исполнитель И аудитор считаются)
+
+### Таблица моделей аудита
+
+| Роль исполнителя | Аудитор |
+|---|---|
+| tester*, билд/линт tool-агенты, docs-writer | `auditor` (sonnet) |
+| implementer*, refactor-agent*, bug-hunter*, architect* | `auditor-deep` (opus) |
+
+`*` — включая stack-суффиксы (`implementer-ios` → базовое имя `implementer`).
+Override: `.zprof.yaml` → `audit.model_by_role`.
+Роль вне таблицы (кастомный агент) → `auditor-deep` (дороже, но безопаснее).
+
+### Бюджет
+
+Счётчик всех диспатчей (исполнители + аудиторы) за run. Лимит:
+`audit.max_dispatches` из `.zprof.yaml` (дефолт 7). При превышении:
+
+```
+verdict: blocked
+question: Бюджет исчерпан (<n> диспатчей). Закрыто <m> из <total> требований.
+  Незакрытые: <список>. Продолжить?
+```
+
+### Edge cases аудита
+
+- **Аудитор не вернул схему / упал:** один повтор аудитора. Снова мимо →
+  requirement остаётся `claimed`, эскалация `blocked` (не молчаливый пропуск)
+- **Resume (resume_from):** `claimed` записи деградируют в `pending`
+  (недоаудированное недоказано). `completed` не перепроверяются
+- **Не аудируются:** read-only шаги (explorer, planner), диспатчи самих
+  аудиторов, гейты (north-star-auditor, evidence-auditor, plan-reviewer)
+
 ## Стоп-лист
 
 Секция `## Stop list` в `CLAUDE.md` перечисляет необратимое. Наткнулся на
@@ -158,6 +258,14 @@ started: <ISO-время> · overlays: <список> · route: <workflow>/<ти
 |-------|-------|---------|----------|
 | 10:02 | bug-hunter-ios | done | reports/crash-repro.md |
 
+## Requirements
+<!-- Секция ведётся при audit.enabled: true. При false — не создавать. -->
+| id | requirement | status | evidence |
+|----|-------------|--------|----------|
+| R1 | краш при старте на iOS 17 воспроизведён | completed | runs/2026-08-09-fix-crash-audit-1.md |
+| R2 | патч не ломает существующие тесты | completed | runs/2026-08-09-fix-crash-audit-2.md |
+| R3 | PR создан и проходит CI | pending | |
+
 ## Итог
 verdict: done · artifact: PR #128
 ```
@@ -165,6 +273,25 @@ verdict: done · artifact: PR #128
 Правила: одна строка на шаг, **≤120 символов**, вывод агентов не
 вставляется — иначе журнал станет тем же мусором, просто на диске.
 Секцию `## Итог` пиши последним действием перед возвратом схемы.
+
+### Секция Requirements (при audit.enabled: true)
+
+При `audit.enabled: true` — создай секцию `## Requirements` при старте run.
+Декомпозируй задачу на 1–3 проверяемых требования (больше — только если
+задача явно многошаговая). Каждое requirement — одно наблюдаемое утверждение
+о среде (как acceptance criteria, но на уровне задачи, не шага).
+
+Статусы:
+
+| Статус | Значение | Кто ставит |
+|--------|----------|------------|
+| `pending` | ещё не начато | task-runner при старте |
+| `claimed` | исполнитель заявил done | task-runner после verdict: done |
+| `completed` | аудитор подтвердил | task-runner после audit complete+clean |
+| `blocked` | проверка невозможна | аудитор через requirements mapping |
+| `untrusted` | integrity violation или ненадёжные данные | аудитор / task-runner |
+
+Только `completed` и `blocked` — финальные. При resume: `claimed` → `pending`.
 
 ## Возврат
 
