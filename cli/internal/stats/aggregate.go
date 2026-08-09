@@ -41,6 +41,7 @@ func Aggregate(dispatches []Dispatch, losses Losses) *Report {
 	r.Economics = aggregateEconomics(completed)
 	r.Routes = aggregateRoutes(completed, dispatches)
 	r.Drift = aggregateDrift(completed)
+	r.Audit = aggregateAudit(completed, r.Economics.TotalTokens.Total())
 	return r
 }
 
@@ -327,6 +328,78 @@ func aggregateTelemetryHealth(dispatches []Dispatch) TelemetryHealth {
 	})
 
 	return th
+}
+
+func aggregateAudit(completed []Dispatch, totalTokens int) AuditReport {
+	var ar AuditReport
+	roleM := map[string]*RoleAuditStats{}
+
+	for _, d := range completed {
+		ext := d.Ext
+		if ext == nil {
+			continue
+		}
+		audited, ok := ext["audited"]
+		if !ok {
+			continue
+		}
+
+		role := d.Role
+		if role == "" {
+			role = "unknown"
+		}
+		rs, exists := roleM[role]
+		if !exists {
+			rs = &RoleAuditStats{Role: role}
+			roleM[role] = rs
+		}
+
+		auditedStr, _ := audited.(string)
+		auditedBool, _ := audited.(bool)
+
+		if auditedStr == "true" || auditedBool {
+			ar.TotalAudited++
+		}
+
+		if d.Role == "auditor" || d.Role == "auditor-deep" {
+			tb := TokenBreakdown{
+				Input: d.TokensInput, Output: d.TokensOutput,
+				CacheRead: d.TokensCacheRead, CacheCreation: d.TokensCacheCreation,
+			}
+			ar.AuditorTokens.Input += tb.Input
+			ar.AuditorTokens.Output += tb.Output
+			ar.AuditorTokens.CacheRead += tb.CacheRead
+			ar.AuditorTokens.CacheCreation += tb.CacheCreation
+			continue
+		}
+
+		verdict, _ := ext["audit_verdict"].(string)
+		if d.Status == "completed" && (auditedStr == "true" || auditedBool) {
+			ar.DoneClaims++
+			rs.DoneClaims++
+			if verdict != "" && verdict != "complete/clean" {
+				ar.FalseDone++
+				rs.FalseDone++
+			}
+		}
+	}
+
+	if ar.DoneClaims > 0 {
+		ar.FalseDoneRate = float64(ar.FalseDone) * 100 / float64(ar.DoneClaims)
+	}
+	if totalTokens > 0 {
+		ar.AuditorTokenPct = float64(ar.AuditorTokens.Total()) * 100 / float64(totalTokens)
+	}
+
+	for _, rs := range roleM {
+		if rs.DoneClaims > 0 {
+			rs.FalseDoneRate = float64(rs.FalseDone) * 100 / float64(rs.DoneClaims)
+		}
+		ar.ByRole = append(ar.ByRole, *rs)
+	}
+	sort.Slice(ar.ByRole, func(i, j int) bool { return ar.ByRole[i].DoneClaims > ar.ByRole[j].DoneClaims })
+
+	return ar
 }
 
 func percentile(sorted []int64, p float64) int64 {

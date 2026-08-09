@@ -23,6 +23,8 @@ var Roles = map[string]bool{
 	"refactor-agent": true,
 	"explorer":       true,
 	"reviewer":       true,
+	"auditor":        true,
+	"auditor-deep":   true,
 }
 
 // Gates are the base agents/gates/*.md that count as roles when

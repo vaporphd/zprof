@@ -34,6 +34,18 @@ type ProjectManifest struct {
 	// ABExperiments configures A/B tier experiments per role.
 	// task-runner calls zprof-collect.py pick-arm to get the model.
 	ABExperiments map[string]ABExperiment `yaml:"ab_experiments,omitempty"`
+
+	// Audit configures the MEA-style step auditor in task-runner's loop.
+	Audit *AuditConfig `yaml:"audit,omitempty"`
+}
+
+// AuditConfig controls the blocking auditor in task-runner's dispatch loop.
+// When Enabled is false (the default), task-runner behaves identically to
+// the pre-auditor version — no auditor dispatches, no Requirements section.
+type AuditConfig struct {
+	Enabled        bool              `yaml:"enabled"`
+	MaxDispatches  int               `yaml:"max_dispatches,omitempty"`
+	ModelByRole    map[string]string `yaml:"model_by_role,omitempty"`
 }
 
 // ABExperiment defines the control and candidate models for a role.
@@ -93,6 +105,23 @@ func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
 	if m.ManagedAgents == nil {
 		m.ManagedAgents = prev.ManagedAgents
 	}
+	if m.Audit == nil {
+		m.Audit = prev.Audit
+	}
+}
+
+// AuditEnabled reports whether the blocking auditor is active.
+func (m *ProjectManifest) AuditEnabled() bool {
+	return m.Audit != nil && m.Audit.Enabled
+}
+
+// AuditMaxDispatches returns the dispatch budget for a single run.
+// Returns 7 when unconfigured.
+func (m *ProjectManifest) AuditMaxDispatches() int {
+	if m.Audit != nil && m.Audit.MaxDispatches > 0 {
+		return m.Audit.MaxDispatches
+	}
+	return 7
 }
 
 // ResolvedModel returns the exact model ID for a role from ModelOverrides.

@@ -129,7 +129,7 @@ func TestDiagnoseAgentResolvableModelIsClean(t *testing.T) {
 	agentsDir := filepath.Join(proj, ".claude", "agents", "gates")
 	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "auditor.md"),
-		[]byte("---\nname: auditor\nmodel: opus\n---\nBody.\n"), 0o644))
+		[]byte("---\nname: auditor\nmodel: opus\nreturn_format: |\n  completion: complete\n---\nBody.\n"), 0o644))
 	// task-runner is a role, so it must also declare a return_format.
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "agents", "task-runner.md"),
 		[]byte("---\nname: task-runner\nmodel: opus\nreturn_format: |\n  verdict: done\n---\nBody.\n"), 0o644))
