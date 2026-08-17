@@ -1,0 +1,11 @@
+name: zcode-harness
+detect:
+  any_file:
+    - "Cargo.toml"
+    - "rust-toolchain.toml"
+  any_regex:
+    - path: "Cargo.toml"
+      match: "name\\s*=\\s*\"zcode"
+    - path: "docs/superpowers/specs"
+      match: "zcode.*harness"
+  confidence: high

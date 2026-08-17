@@ -1,0 +1,28 @@
+name: zcode-harness
+display_name: "zcode — durable agent harness (Rust, tokio, serde, JSONL journal)"
+version: 0.1.0
+loop_template: dev-pipeline
+requires_base: ">= 0.1.0"
+roles:
+  - architect
+  - implementer
+  - tester
+  - bug-hunter
+  - refactor-agent
+  - explorer
+  - reviewer
+tool_agents:
+  - cargo-runner
+  - spec-reader
+  - reference-explorer
+
+stop_list:
+  - "публикация крейта на crates.io"
+  - "ломающая смена публичного API journal records (semver major)"
+  - "повышение MSRV"
+  - "добавление unsafe в ранее safe публичный API"
+  - "изменение формата journal JSONL без миграции (R5/N2)"
+  - "переписывание существующего append-only журнала"
+  - "удаление или перемещение _reference/ репозиториев"
+  - "внешние сетевые запросы к реальным LLM-провайдерам в тестах"
+  - "коммит секретов, API-ключей, токенов провайдеров"
