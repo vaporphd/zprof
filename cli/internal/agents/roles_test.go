@@ -18,7 +18,7 @@ func TestRoleOfPlainAndNamespaced(t *testing.T) {
 		"refactor-agent-ios": "refactor-agent",
 		// Tool-agents and user-authored files are not roles.
 		"xcode-runner":  "",
-		"pr-shepherd":   "",
+		"pr-shepherd":   "pr-shepherd",
 		"my-own-helper": "",
 		// A gate is only a role under its own name, never namespaced.
 		"plan-reviewer": "plan-reviewer",

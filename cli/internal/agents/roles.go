@@ -24,6 +24,8 @@ var Roles = map[string]bool{
 	"explorer":            true,
 	"reviewer":            true,
 	"frontend-developer":  true,
+	"pr-shepherd":         true,
+	"groomer":             true,
 	"auditor":             true,
 	"auditor-deep":        true,
 }

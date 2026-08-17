@@ -61,15 +61,45 @@ decision: <ответ пользователя, если resume_from задан>
    лишь частично — спрашивай про **остаток**, а не про то же самое.
 6. Заведи журнал (см. «Журнал»), если это не продолжение.
 
+## GitHub Issues
+
+Если проект на GitHub (`gh repo view` работает), привязывай работу к issues:
+
+### Взять задачу
+
+- Если `task` содержит номер issue (`#123`, `GH-123`) или URL — привяжись
+  к нему: `gh issue view <N>`, прочитай описание и acceptance criteria.
+- Если `task` — свободный текст без номера, проверь: есть ли открытый issue
+  с похожей формулировкой (`gh issue list -s open -S "<keywords>"`).
+  Нашёлся — привяжись. Не нашёлся — **создай**: `gh issue create --title
+  "<task>" --body "<context>"` с подходящими labels.
+- Запиши номер issue в журнал: `issue: #<N>`.
+
+### Отчитаться
+
+- При `verdict: done` — создай PR с `Closes #<N>` в описании (если есть
+  коммиты). Если PR уже создан раньше — обнови описание.
+- При `verdict: blocked` — добавь комментарий к issue:
+  `gh issue comment <N> --body "Blocked: <question>"`.
+- При `verdict: failed` — добавь комментарий с причиной.
+
+### Правила
+
+- **Не закрывай issue вручную** — закрытие происходит через merge PR.
+  Это в стоп-листе.
+- **Не мержь PR** — это тоже в стоп-листе. PR создаётся, но merge делает
+  человек.
+- Если `gh` недоступен — пропусти этот блок молча, не блокируйся.
+
 ## Роутинг
 
 Классифицируй задачу и выбери маршрут:
 
 | Тип | Цепочка |
 |---|---|
-| Новая фича | `planner → architect → implementer → tester → reviewer` |
-| Багфикс | `bug-hunter → tester → reviewer` |
-| Рефактор без новой функциональности | `refactor-agent → tester → reviewer` |
+| Новая фича | `planner → architect → implementer → tester → reviewer → pr-shepherd` |
+| Багфикс | `bug-hunter → tester → reviewer → pr-shepherd` |
+| Рефактор без новой функциональности | `refactor-agent → tester → reviewer → pr-shepherd` |
 | Только тесты | `tester` |
 | Только ревью | `reviewer` |
 | RE / анализ бинаря | `intake → unpacker → explorer → hypothesizer → verifier → report-writer` |
