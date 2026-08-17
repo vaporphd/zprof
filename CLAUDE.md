@@ -42,6 +42,8 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 | explorer | explorer | sonnet | read-only codebase investigation |
 | docs-writer | docs-writer | sonnet | README, CLAUDE.md sections, wiki |
 | frontend-developer | frontend-developer | sonnet | UI components, pages; delegates to frontend-design skill |
+| pr-shepherd | pr-shepherd | sonnet | pre-flight, delivery verification, post-merge stamp |
+| groomer | groomer | opus | spec/prompt → GitHub issues + plan-N.md + todo.md |
 | auditor | auditor | sonnet | read-only step verification (mechanical) |
 | auditor-deep | auditor-deep | opus | read-only step verification (semantic) |
 
