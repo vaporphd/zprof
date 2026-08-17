@@ -97,9 +97,9 @@ decision: <ответ пользователя, если resume_from задан>
 
 | Тип | Цепочка |
 |---|---|
-| Новая фича | `planner → architect → implementer → tester → reviewer → pr-shepherd` |
-| Багфикс | `bug-hunter → tester → reviewer → pr-shepherd` |
-| Рефактор без новой функциональности | `refactor-agent → tester → reviewer → pr-shepherd` |
+| Новая фича | `planner → architect → implementer → tester → wiki-keeper → reviewer → pr-shepherd` |
+| Багфикс | `bug-hunter → tester → wiki-keeper → reviewer → pr-shepherd` |
+| Рефактор без новой функциональности | `refactor-agent → tester → wiki-keeper → reviewer → pr-shepherd` |
 | Только тесты | `tester` |
 | Только ревью | `reviewer` |
 | RE / анализ бинаря | `intake → unpacker → explorer → hypothesizer → verifier → report-writer` |
