@@ -53,6 +53,9 @@ func RenderCard(c Card) string {
 	if len(c.Inputs.TranscriptsMissing) > 0 {
 		fmt.Fprintf(&b, "missing transcripts: %s\n", strings.Join(c.Inputs.TranscriptsMissing, ", "))
 	}
+	if c.Inputs.Legacy {
+		b.WriteString("legacy data: no tool events or no root verdict — collected before schema v2\n")
+	}
 	if c.RunLog == "" {
 		b.WriteString("run log: missing\n")
 	}

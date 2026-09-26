@@ -117,3 +117,27 @@ func TestScoreCmd_LatestFalseNeedsSelector(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "requires --run or --all-missing")
 }
+
+func TestScoreCmd_AllMissingSkipsLegacy(t *testing.T) {
+	proj, agentlog := setupScoreProject(t)
+	legacy := `{"schema_version":1,"harness":"claude-code","ts_utc":"2026-09-25T09:00:00Z","session_id":"s0","dispatch_id":"claude-code:s0:L0","seq":0,"role":"task-runner","status":"completed","dispatch_complete":true,"transcript_captured":true}
+{"schema_version":1,"harness":"claude-code","ts_utc":"","session_id":"s0","dispatch_id":"claude-code:s0:L1","seq":0,"parent_dispatch_id":"claude-code:s0:L0","role":"implementer","status":"completed","dispatch_complete":true,"transcript_captured":true}
+`
+	f, err := os.OpenFile(filepath.Join(agentlog, "dispatches.jsonl"), os.O_APPEND|os.O_WRONLY, 0o644)
+	require.NoError(t, err)
+	_, err = f.WriteString(legacy)
+	require.NoError(t, err)
+	require.NoError(t, f.Close())
+
+	out, err := runScore(t, "--project", proj, "--no-collect", "--all-missing")
+	require.NoError(t, err)
+	require.Contains(t, out, "skipped 1 legacy run(s) (collected before schema v2)")
+	data, _ := os.ReadFile(filepath.Join(agentlog, "scores.jsonl"))
+	require.Len(t, strings.Split(strings.TrimRight(string(data), "\n"), "\n"), 1)
+	require.NotContains(t, string(data), "claude-code:s0:L0")
+
+	// --run still scores it, with the legacy line visible.
+	out, err = runScore(t, "--project", proj, "--no-collect", "--run", "claude-code:s0:L0")
+	require.NoError(t, err)
+	require.Contains(t, out, "legacy data:")
+}

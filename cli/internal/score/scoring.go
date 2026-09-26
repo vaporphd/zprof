@@ -47,6 +47,10 @@ type Inputs struct {
 	ToolEvents         int      `json:"tool_events"`
 	TranscriptsMissing []string `json:"transcripts_missing"`
 	Confidence         string   `json:"confidence"`
+	// Legacy marks runs collected before schema v2: no root verdict, or
+	// several dispatches without a single tool event. P1–P5 read as 0 on
+	// such data, so the card is partial and --all-missing skips it.
+	Legacy bool `json:"legacy"`
 }
 
 // Card is one row of .agentlog/scores.jsonl.
@@ -230,7 +234,8 @@ func inputs(run Run) Inputs {
 		}
 	}
 	sort.Strings(in.TranscriptsMissing)
-	if len(in.TranscriptsMissing) > 0 {
+	in.Legacy = (in.ToolEvents == 0 && len(run.Dispatches) > 1) || run.Root.Verdict == ""
+	if len(in.TranscriptsMissing) > 0 || in.Legacy {
 		in.Confidence = "partial"
 	}
 	return in

@@ -85,7 +85,7 @@ session's finished dispatches are visible immediately.`,
 				return fmt.Errorf("--run and --all-missing are mutually exclusive")
 			}
 
-			var targets []score.Run
+			var targets []score.Card
 			switch {
 			case allMissing:
 				keys, err := score.ReadScoredKeys(filepath.Join(agentlog, "scores.jsonl"))
@@ -93,10 +93,20 @@ session's finished dispatches are visible immediately.`,
 					return err
 				}
 				hash := cfg.WeightsHash()
+				legacy := 0
 				for _, r := range runs {
-					if !keys[score.ScoreKey(score.Card{RunID: r.ID, WeightsHash: hash})] {
-						targets = append(targets, r)
+					if keys[score.ScoreKey(score.Card{RunID: r.ID, WeightsHash: hash})] {
+						continue
 					}
+					card := score.Compute(r, cfg, version)
+					if card.Inputs.Legacy {
+						legacy++
+						continue
+					}
+					targets = append(targets, card)
+				}
+				if legacy > 0 && !quiet {
+					fmt.Fprintf(out, "skipped %d legacy run(s) (collected before schema v2)\n", legacy)
 				}
 				if len(targets) == 0 {
 					if !quiet {
@@ -109,7 +119,7 @@ session's finished dispatches are visible immediately.`,
 				if r == nil {
 					return fmt.Errorf("no run matches %q (have %d runs)", runKey, len(runs))
 				}
-				targets = []score.Run{*r}
+				targets = []score.Card{score.Compute(*r, cfg, version)}
 			default:
 				if !latest {
 					return fmt.Errorf("--latest=false requires --run or --all-missing")
@@ -121,11 +131,10 @@ session's finished dispatches are visible immediately.`,
 					}
 					return nil
 				}
-				targets = []score.Run{*r}
+				targets = []score.Card{score.Compute(*r, cfg, version)}
 			}
 
-			for i, r := range targets {
-				card := score.Compute(r, cfg, version)
+			for i, card := range targets {
 				if err := score.AppendScore(filepath.Join(agentlog, "scores.jsonl"), card); err != nil {
 					return err
 				}

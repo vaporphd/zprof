@@ -132,3 +132,22 @@ func bptr(b bool) *bool { return &b }
 func ev(seq int, tool, hash, target string, isErr bool) ToolEvent {
 	return ToolEvent{DispatchID: "claude-code:s:x", Seq: seq, Tool: tool, InputHash: hash, Target: target, IsError: bptr(isErr)}
 }
+
+func TestCompute_LegacyRunIsPartial(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "", "completed", "2026-09-26T10:00:00Z")
+	x := mkDispatch("x", "implementer", "r", "done", "completed", "2026-09-26T10:05:00Z")
+	c := Compute(BuildRuns([]stats.Dispatch{root, x}, nil)[0], Defaults(), "test")
+	require.True(t, c.Inputs.Legacy)
+	require.Equal(t, "partial", c.Inputs.Confidence)
+	require.Contains(t, RenderCard(c), "legacy data: no tool events or no root verdict — collected before schema v2")
+
+	// A verdict but no tool events across several dispatches is legacy too.
+	root.Verdict = "done"
+	c = Compute(BuildRuns([]stats.Dispatch{root, x}, nil)[0], Defaults(), "test")
+	require.True(t, c.Inputs.Legacy)
+
+	// Fixture run: verdict + tool events → not legacy.
+	c = Compute(loadRun1(t)[0], Defaults(), "test")
+	require.False(t, c.Inputs.Legacy)
+	require.NotContains(t, RenderCard(c), "legacy data")
+}
