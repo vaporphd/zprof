@@ -125,11 +125,13 @@ func BuildRuns(ds []stats.Dispatch, evs []ToolEvent) []Run {
 		}
 		runs[id] = r
 	}
+	runOf := make(map[string]string, len(byID)) // dispatchID → runID
 	for _, d := range byID {
 		rid := runIDFor(d, byID, roots)
 		if rid == "" {
 			continue
 		}
+		runOf[d.DispatchID] = rid
 		r := runs[rid]
 		r.Dispatches = append(r.Dispatches, d)
 		if d.ParentDispatchID == rid {
@@ -137,11 +139,8 @@ func BuildRuns(ds []stats.Dispatch, evs []ToolEvent) []Run {
 		}
 	}
 	for _, ev := range evs {
-		for _, r := range runs {
-			if _, in := indexOf(r.Dispatches, ev.DispatchID); in {
-				r.Events[ev.DispatchID] = append(r.Events[ev.DispatchID], ev)
-				break
-			}
+		if rid, ok := runOf[ev.DispatchID]; ok {
+			runs[rid].Events[ev.DispatchID] = append(runs[rid].Events[ev.DispatchID], ev)
 		}
 	}
 	out := make([]Run, 0, len(runs))
@@ -163,15 +162,6 @@ func lessDispatch(a, b stats.Dispatch) bool {
 		return a.Timestamp.Before(b.Timestamp)
 	}
 	return a.DispatchID < b.DispatchID
-}
-
-func indexOf(ds []stats.Dispatch, id string) (int, bool) {
-	for i, d := range ds {
-		if d.DispatchID == id {
-			return i, true
-		}
-	}
-	return -1, false
 }
 
 // LatestRun returns the run with the newest root timestamp, or nil.

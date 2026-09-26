@@ -85,3 +85,21 @@ func TestLatestAndFindRun(t *testing.T) {
 }
 
 func writeFile(path, content string) error { return os.WriteFile(path, []byte(content), 0o644) }
+
+func TestBuildRuns_EventsForUnknownDispatchAreDropped(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
+	x := mkDispatch("x", "implementer", "r", "done", "completed", "2026-09-26T10:05:00Z")
+	orphan := mkDispatch("o", "explorer", "", "done", "completed", "2026-09-26T10:06:00Z")
+	evs := []ToolEvent{
+		ev(2, "Read", "h2", "/a", false),
+		ev(1, "Read", "h1", "/b", false),
+		{DispatchID: "claude-code:s:o", Seq: 1, Tool: "Read"},       // dispatch outside any run
+		{DispatchID: "claude-code:s:missing", Seq: 1, Tool: "Read"}, // no such dispatch
+	}
+	runs := BuildRuns([]stats.Dispatch{root, x, orphan}, evs)
+	require.Len(t, runs, 1)
+	require.Len(t, runs[0].Events, 1)
+	got := runs[0].Events["claude-code:s:x"]
+	require.Len(t, got, 2)
+	require.Equal(t, 1, got[0].Seq, "events sorted by seq")
+}
