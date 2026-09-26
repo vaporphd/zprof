@@ -1222,29 +1222,63 @@ def _get_project_id(cwd: str) -> tuple[str, bool]:
 
 
 def _load_redaction_patterns(project_cwd: str | None = None) -> list[tuple[str, "re.Pattern[str]"]]:
-    """Load redaction patterns from telemetry.yaml and optional .zprof.yaml.
+    """Load redaction patterns (see _load_pattern_list) plus optional .zprof.yaml extras.
 
     Returns list of (pattern_name, compiled_regex) tuples.
     """
-    patterns: list[tuple[str, "re.Pattern[str]"]] = []
-
-    # Load from telemetry.yaml (bundled next to this script)
-    telemetry_yaml = Path(__file__).parent / "telemetry.yaml"
-    if telemetry_yaml.exists():
-        patterns.extend(_parse_redaction_patterns_from_yaml(telemetry_yaml))
-
-    # Load from project's .zprof.yaml if present
+    patterns = _load_pattern_list("redaction_patterns", project_cwd)
+    # Project-specific extras from .zprof.yaml (redaction_patterns only)
     if project_cwd:
         zprof_yaml = Path(project_cwd) / ".zprof.yaml"
         if zprof_yaml.exists():
-            patterns.extend(_parse_redaction_patterns_from_yaml(zprof_yaml))
-
+            patterns.extend(_compile_patterns(
+                _parse_quoted_list_from_yaml(zprof_yaml, "redaction_patterns")))
     return patterns
 
 
-def _parse_redaction_patterns_from_yaml(path: Path) -> list[tuple[str, "re.Pattern[str]"]]:
-    """Parse redaction_patterns from a YAML file (stdlib-only parser)."""
+def _load_pattern_list(key: str, cwd: str | None) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Load a top-level list of regexes from the telemetry settings.
+
+    Source layout: telemetry.yaml next to this script. Deployed layout
+    (`.claude/zprof-collect.py`, no telemetry.yaml): `zprof apply` converts
+    telemetry.yaml into <cwd>/.agentlog/schema.json, so fall back to that.
+    Invalid regexes are skipped. Never raises.
+    """
+    raw: list[str] = []
+    try:
+        telemetry_yaml = Path(__file__).parent / "telemetry.yaml"
+        if telemetry_yaml.exists():
+            raw = _parse_quoted_list_from_yaml(telemetry_yaml, key)
+        elif cwd:
+            schema_json = Path(cwd) / ".agentlog" / "schema.json"
+            if schema_json.exists():
+                data = json.loads(schema_json.read_text(encoding="utf-8"))
+                vals = data.get(key, []) if isinstance(data, dict) else []
+                if isinstance(vals, list):
+                    raw = [v for v in vals if isinstance(v, str)]
+    except (OSError, ValueError):
+        raw = []
+    return _compile_patterns(raw)
+
+
+def _compile_patterns(raw: list[str]) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Compile regex strings into (name, pattern) tuples, skipping invalid ones."""
     results = []
+    for pat in raw:
+        try:
+            results.append((_pattern_name(pat), re.compile(pat)))
+        except re.error:
+            pass
+    return results
+
+
+def _parse_quoted_list_from_yaml(path: Path, key: str) -> list[str]:
+    """Return the string items of top-level list `key` in a YAML file (stdlib-only parser).
+
+    Handles `- "quoted"` / `- 'quoted'` / bare items; double-quoted backslashes
+    are unescaped. Returns raw (uncompiled) strings.
+    """
+    results: list[str] = []
     try:
         text = path.read_text()
     except OSError:
@@ -1253,30 +1287,20 @@ def _parse_redaction_patterns_from_yaml(path: Path) -> list[tuple[str, "re.Patte
     in_section = False
     for line in text.split("\n"):
         stripped = line.strip()
-        if stripped.startswith("redaction_patterns:"):
+        if stripped.startswith(f"{key}:"):
             in_section = True
             continue
-        if in_section:
-            if stripped.startswith("- "):
-                # Extract the pattern string (YAML list item)
-                raw_pat = stripped[2:].strip()
-                # Remove quotes if present
-                if (raw_pat.startswith('"') and raw_pat.endswith('"')) or \
-                   (raw_pat.startswith("'") and raw_pat.endswith("'")):
-                    raw_pat = raw_pat[1:-1]
-                # Unescape YAML double-quoted backslashes
-                raw_pat = raw_pat.replace("\\\\", "\\")
-                # Derive a short name from the pattern
-                name = _pattern_name(raw_pat)
-                try:
-                    compiled = re.compile(raw_pat)
-                    results.append((name, compiled))
-                except re.error:
-                    pass
-            elif stripped and not stripped.startswith("#"):
-                # Next YAML key — end of redaction_patterns section
-                in_section = False
-
+        if not in_section:
+            continue
+        if stripped.startswith("- "):
+            raw_pat = stripped[2:].strip()
+            if (raw_pat.startswith('"') and raw_pat.endswith('"')) or \
+               (raw_pat.startswith("'") and raw_pat.endswith("'")):
+                raw_pat = raw_pat[1:-1]
+            raw_pat = raw_pat.replace("\\\\", "\\")
+            results.append(raw_pat)
+        elif stripped and not stripped.startswith("#"):
+            in_section = False  # next YAML key — end of section
     return results
 
 
