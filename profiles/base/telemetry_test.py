@@ -35,6 +35,8 @@ def _parse_scalar(raw):
         return True
     if raw == "false":
         return False
+    if re.fullmatch(r"-?\d+\.\d+", raw):
+        return float(raw)
     if re.fullmatch(r"-?\d+", raw):
         return int(raw)
     return raw
@@ -70,6 +72,7 @@ def _unescape_dq(raw):
 def load_schema(text):
     """Minimal stdlib-only parser for telemetry.yaml's constrained structure."""
     schema = {s: [] for s in LIST_SECTIONS}
+    schema["score_defaults"] = {}
     section = None
 
     for raw_line in text.splitlines():
@@ -88,15 +91,32 @@ def load_schema(text):
                 if pattern_match:
                     schema[section].append(_unescape_dq(pattern_match.group("body")))
                     continue
+        elif section == "score_defaults":
+            # Handle indented lines like `  weights: {P1: 20, P2: 15, ...}`
+            if raw_line.startswith((" ", "\t")):
+                header_match = _SECTION_HEADER.match(stripped)
+                if header_match:
+                    key = header_match.group("key")
+                    value = header_match.group("value").strip()
+                    if value.startswith("{") and value.endswith("}"):
+                        # Parse the flow mapping
+                        body = value[1:-1]  # Remove { }
+                        schema["score_defaults"][key] = _parse_field_body(body)
+                    continue
 
         if not raw_line.startswith((" ", "\t")):
             header_match = _SECTION_HEADER.match(stripped)
             if header_match:
                 key = header_match.group("key")
                 value = header_match.group("value").strip()
-                section = key if key in LIST_SECTIONS else None
-                if section is None and value:
-                    schema[key] = _parse_scalar(value)
+                if key == "score_defaults":
+                    section = "score_defaults"
+                elif key in LIST_SECTIONS:
+                    section = key
+                else:
+                    section = None
+                    if value:
+                        schema[key] = _parse_scalar(value)
                 continue
 
     return schema
@@ -143,6 +163,9 @@ def test_schema():
                         "input_hash", "target", "is_error", "result_chars"], te_names
     for f in schema["tool_events"]:
         assert f["type"] in valid_types, f"{f['name']}: unknown type {f['type']}"
+        # Each tool_events entry has mandatory keys (like core_fields)
+        for required_key in ("name", "type", "required"):
+            assert required_key in f, f"tool_events field missing '{required_key}': {f}"
 
     # mutating bash patterns compile and do NOT match build/test commands
     assert schema["mutating_bash_patterns"], "mutating_bash_patterns is empty"
@@ -157,10 +180,15 @@ def test_schema():
     # exempt roles
     assert schema["verdict_exempt_roles"] == ["auditor", "auditor-deep"]
 
-    # score_defaults present (nested mapping — checked textually, parser is list-only)
-    text = SCHEMA_PATH.read_text()
-    for key in ("score_defaults:", "weights:", "saturation:", "thresholds:"):
-        assert key in text, f"missing {key} in telemetry.yaml"
+    # score_defaults: parsed values (cross-language contract)
+    assert schema["score_defaults"]["weights"] == {"P1": 20, "P2": 15, "P3": 10, "P4": 20, "P5": 10, "P6": 15, "P7": 10}, \
+        f"weights mismatch: {schema['score_defaults'].get('weights')}"
+    assert sum(schema["score_defaults"]["weights"].values()) == 100, \
+        f"weights do not sum to 100: {sum(schema['score_defaults']['weights'].values())}"
+    assert schema["score_defaults"]["saturation"] == {"P1": 0.20, "P2": 3, "P3": 0.5, "P4": 2, "P5": 2, "P6": 0.30, "P7": 4}, \
+        f"saturation mismatch: {schema['score_defaults'].get('saturation')}"
+    assert schema["score_defaults"]["thresholds"] == {"ideal": 85, "solid": 60}, \
+        f"thresholds mismatch: {schema['score_defaults'].get('thresholds')}"
 
     print(f"OK: {len(fields)} fields, {len(schema['redaction_patterns'])} redaction patterns")
 
