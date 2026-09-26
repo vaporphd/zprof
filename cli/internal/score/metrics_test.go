@@ -173,3 +173,16 @@ func TestP7_CountsFourKinds(t *testing.T) {
 	require.Equal(t, 4.0, p.byRole["implementer"])
 	require.InDelta(t, 10, pointsByID(Compute(run, Defaults(), "t"))["P7"], 0.01)
 }
+
+func TestIsMutating_PrefersFlag(t *testing.T) {
+	cfg := Defaults()
+	yes, no := true, false
+	long := ToolEvent{Tool: "Bash", Target: "cd /x/y/z && echo prefix-only-head", Mutating: &yes}
+	require.True(t, isMutating(long, cfg), "flag from the full command wins over a non-matching head")
+	sed := ToolEvent{Tool: "Bash", Target: "sed -i s/a/b/ f.go", Mutating: &no}
+	require.False(t, isMutating(sed, cfg), "explicit false wins over a matching target")
+	legacy := ToolEvent{Tool: "Bash", Target: "sed -i s/a/b/ f.go"}
+	require.True(t, isMutating(legacy, cfg), "nil flag falls back to target")
+	require.False(t, isMutating(ToolEvent{Tool: "Bash", Target: "swift test"}, cfg))
+	require.True(t, isMutating(ToolEvent{Tool: "Edit", Mutating: &no}, cfg), "mutating tools stay mutating")
+}

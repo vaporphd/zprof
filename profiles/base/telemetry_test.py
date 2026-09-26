@@ -160,7 +160,7 @@ def test_schema():
     # tool_events schema (spec §5 C3)
     te_names = [f["name"] for f in schema["tool_events"]]
     assert te_names == ["schema_version", "dispatch_id", "seq", "ts", "tool",
-                        "input_hash", "target", "is_error", "result_chars"], te_names
+                        "input_hash", "target", "is_error", "mutating", "result_chars"], te_names
     for f in schema["tool_events"]:
         assert f["type"] in valid_types, f"{f['name']}: unknown type {f['type']}"
         # Each tool_events entry has mandatory keys (like core_fields)

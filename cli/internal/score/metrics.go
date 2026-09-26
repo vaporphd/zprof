@@ -59,9 +59,14 @@ func roleIndex(run Run) map[string]string {
 	return m
 }
 
+// isMutating: the collector's flag (computed on the full command) wins;
+// rows without it fall back to matching the truncated Target.
 func isMutating(e ToolEvent, cfg Config) bool {
 	if cfg.MutatingTools[e.Tool] {
 		return true
+	}
+	if e.Mutating != nil {
+		return *e.Mutating
 	}
 	return e.Tool == "Bash" && cfg.IsMutatingBash(e.Target)
 }

@@ -22,7 +22,11 @@ type ToolEvent struct {
 	InputHash     string `json:"input_hash"`
 	Target        string `json:"target"`
 	IsError       *bool  `json:"is_error,omitempty"`
-	ResultChars   int    `json:"result_chars"`
+	// Mutating is set by the collector for Bash events, matched against the
+	// full command (Target is cut to 60 chars). nil on rows from older
+	// collectors — isMutating then falls back to matching Target.
+	Mutating    *bool `json:"mutating,omitempty"`
+	ResultChars int   `json:"result_chars"`
 }
 
 // ReadToolEvents parses tool-events.jsonl. A missing file yields (nil, nil).

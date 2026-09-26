@@ -776,11 +776,14 @@ def _tool_target(inp) -> str:
     return ""
 
 
-def _extract_tool_events(jsonl_path: Path) -> list[dict]:
+def _extract_tool_events(jsonl_path: Path, mutating_patterns=()) -> list[dict]:
     """Ordered leaf tool calls of one subagent transcript (spec §5 C3).
 
     Each event: seq (1-based, transcript order), ts, tool, input_hash, target,
     is_error (None when no tool_result arrived), result_chars.
+    Bash events also get `mutating`, matched against the FULL command
+    (`target` is cut to 60 chars). It is omitted when no patterns are
+    loaded, so `zprof score` falls back to its own patterns on `target`.
     Agent/Task calls are skipped — they are dispatches.
     """
     events: list[dict] = []
@@ -827,6 +830,10 @@ def _extract_tool_events(jsonl_path: Path) -> list[dict]:
                     "is_error": None,
                     "result_chars": None,
                 }
+                if name == "Bash" and mutating_patterns:
+                    cmd = inp.get("command", "") if isinstance(inp, dict) else ""
+                    cmd = cmd if isinstance(cmd, str) else ""
+                    ev["mutating"] = any(p.search(cmd) for p in mutating_patterns)
                 events.append(ev)
                 tid = item.get("id", "")
                 if tid:
@@ -929,6 +936,8 @@ def _collect_subagent_transcripts(
     if redaction_patterns is None:
         # agentlog is <cwd>/.agentlog — the project dir is its parent
         redaction_patterns = _load_redaction_patterns(str(agentlog.parent))
+    mutating_patterns = [p for _, p in
+                         _load_pattern_list("mutating_bash_patterns", str(agentlog.parent))]
     tp = Path(transcript_path)
     # subagents dir: transcript path without .jsonl extension + /subagents/
     subagents_dir = tp.with_suffix("") / "subagents"
@@ -1041,7 +1050,7 @@ def _collect_subagent_transcripts(
         # C3: leaf tool calls of this agent → tool-events.jsonl
         if transcript_file.exists():
             try:
-                events = _extract_tool_events(transcript_file)
+                events = _extract_tool_events(transcript_file, mutating_patterns=mutating_patterns)
                 composite = _make_composite_id(session_id, tool_use_id or f"meta:{agent_id}")
                 _write_tool_events(agentlog, composite, events, redaction_patterns)
             except Exception:

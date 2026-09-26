@@ -76,6 +76,7 @@ tool_events:
   - {name: input_hash,          type: string, required: true}   # sha1(canonical json input)[:12]
   - {name: target,              type: string, required: false}  # file_path | command[:60] | pattern, redacted
   - {name: is_error,            type: bool,   required: false}  # null when the tool_result never arrived
+  - {name: mutating,            type: bool,   required: false}  # Bash only; computed on the full command
   - {name: result_chars,        type: int,    required: false}
 
 # Bash commands that change files/state. Used by Go `zprof score` to decide

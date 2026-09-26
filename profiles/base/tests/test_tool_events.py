@@ -123,3 +123,34 @@ def test_collect_writes_tool_events_with_composite_id(tmp_path):
     # second pass: agent already done → no duplicate rows
     _collect_subagent_transcripts(agentlog, session_id, str(main), set(), sess, dispatches)
     assert len((agentlog / "tool-events.jsonl").read_text().splitlines()) == 1
+
+
+# --- item: `mutating` is computed on the FULL Bash command ------------------
+
+def _mutating_patterns():
+    return [p for _, p in zprof_collect._load_pattern_list("mutating_bash_patterns", None)]
+
+
+def test_mutating_flag_uses_full_command_not_60_char_target(tmp_path):
+    long_cmd = "cd /Volumes/mydata/projects/some/deep/path/here && git commit -m fix"
+    assert len(long_cmd) > 60
+    t = tmp_path / "agent-m.jsonl"
+    _write_transcript(t, [
+        _assistant("t1", {"type": "tool_use", "id": "a", "name": "Bash", "input": {"command": long_cmd}}),
+        _assistant("t2", {"type": "tool_use", "id": "b", "name": "Bash", "input": {"command": "swift test"}}),
+        _assistant("t3", {"type": "tool_use", "id": "c", "name": "Read", "input": {"file_path": "/p/a"}}),
+    ])
+    evs = _extract_tool_events(t, mutating_patterns=_mutating_patterns())
+    assert "git commit" not in evs[0]["target"], "precondition: mutating part is past the target cut"
+    assert evs[0]["mutating"] is True
+    assert evs[1]["mutating"] is False
+    assert "mutating" not in evs[2], "non-Bash events carry no mutating key"
+
+
+def test_mutating_omitted_without_patterns_so_go_falls_back(tmp_path):
+    # No settings loaded -> no verdict at all (not a false "not mutating"),
+    # so `zprof score` falls back to its compiled-in patterns on `target`.
+    t = tmp_path / "agent-n.jsonl"
+    _write_transcript(t, [_assistant("t1", {"type": "tool_use", "id": "a", "name": "Bash",
+                                            "input": {"command": "rm -rf build"}})])
+    assert "mutating" not in _extract_tool_events(t)[0]
