@@ -7,3 +7,6 @@ __pycache__/
 .agentlog/
 .zprof/runs/
 .pytest_cache/
+
+# git worktrees (local scratch)
+.worktrees/
