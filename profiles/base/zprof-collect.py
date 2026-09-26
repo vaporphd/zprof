@@ -723,6 +723,127 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
     return result
 
 
+# Tools that are dispatches, not leaf tool calls — they live in dispatches.jsonl.
+_DISPATCH_TOOLS = frozenset({"Agent", "Task"})
+
+_TARGET_MAX = 60
+
+
+def _input_hash(inp) -> str:
+    """sha1 of the canonical JSON of a tool input, first 12 hex chars."""
+    try:
+        canon = json.dumps(inp, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        canon = repr(inp)
+    return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+
+
+def _tool_target(inp) -> str:
+    """Human-readable target of a tool call: file path, command head, or pattern."""
+    if not isinstance(inp, dict):
+        return ""
+    for key in ("file_path", "path", "notebook_path"):
+        v = inp.get(key)
+        if isinstance(v, str) and v:
+            return v
+    cmd = inp.get("command")
+    if isinstance(cmd, str) and cmd:
+        return " ".join(cmd.split())[:_TARGET_MAX]
+    pat = inp.get("pattern")
+    if isinstance(pat, str) and pat:
+        return pat[:_TARGET_MAX]
+    return ""
+
+
+def _extract_tool_events(jsonl_path: Path) -> list[dict]:
+    """Ordered leaf tool calls of one subagent transcript (spec §5 C3).
+
+    Each event: seq (1-based, transcript order), ts, tool, input_hash, target,
+    is_error (None when no tool_result arrived), result_chars.
+    Agent/Task calls are skipped — they are dispatches.
+    """
+    events: list[dict] = []
+    by_id: dict[str, dict] = {}
+    if not jsonl_path.exists():
+        return events
+    try:
+        raw = jsonl_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return events
+
+    seq = 0
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = record.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        role = msg.get("role", "")
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            itype = item.get("type")
+            if role == "assistant" and itype == "tool_use":
+                name = item.get("name", "")
+                if not name or name in _DISPATCH_TOOLS:
+                    continue
+                seq += 1
+                inp = item.get("input", {})
+                ev = {
+                    "seq": seq,
+                    "ts": record.get("timestamp", ""),
+                    "tool": name,
+                    "input_hash": _input_hash(inp),
+                    "target": _tool_target(inp),
+                    "is_error": None,
+                    "result_chars": None,
+                }
+                events.append(ev)
+                tid = item.get("id", "")
+                if tid:
+                    by_id[tid] = ev
+            elif role == "user" and itype == "tool_result":
+                ev = by_id.get(item.get("tool_use_id", ""))
+                if ev is None:
+                    continue
+                ev["is_error"] = bool(item.get("is_error", False))
+                rc = item.get("content", "")
+                if isinstance(rc, str):
+                    ev["result_chars"] = len(rc)
+                elif isinstance(rc, list):
+                    ev["result_chars"] = sum(
+                        len(b.get("text", "")) for b in rc if isinstance(b, dict))
+    return events
+
+
+def _write_tool_events(agentlog: Path, dispatch_id: str, events: list[dict],
+                       redaction_patterns) -> int:
+    """Append events for one dispatch to .agentlog/tool-events.jsonl. Returns rows written."""
+    if not events or not dispatch_id:
+        return 0
+    path = agentlog / "tool-events.jsonl"
+    written = 0
+    with open(path, "a") as f:
+        for ev in events:
+            row = {"schema_version": 1, "dispatch_id": dispatch_id}
+            row.update(ev)
+            row = {k: v for k, v in row.items() if v is not None}
+            row, _ = _redact_secrets(row, redaction_patterns)
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            written += 1
+        f.flush()
+        os.fsync(f.fileno())
+    return written
+
+
 def _gzip_copy(src: Path, dst: Path):
     """Copy src file to dst, gzip-compressing the content."""
     dst.parent.mkdir(parents=True, exist_ok=True)
@@ -737,6 +858,7 @@ def _collect_subagent_transcripts(
     running_agents: set,
     sess: dict,
     dispatches: list[dict],
+    redaction_patterns=None,
 ):
     """Copy subagent transcripts and enrich dispatch dicts with transcript data.
 
@@ -745,6 +867,9 @@ def _collect_subagent_transcripts(
     token breakdown and model from the transcript JSONL, gzip-copies the
     transcript to .agentlog/transcripts/, and copies new tool-results.
     """
+    if redaction_patterns is None:
+        # agentlog is <cwd>/.agentlog — the project dir is its parent
+        redaction_patterns = _load_redaction_patterns(str(agentlog.parent))
     tp = Path(transcript_path)
     # subagents dir: transcript path without .jsonl extension + /subagents/
     subagents_dir = tp.with_suffix("") / "subagents"
@@ -806,6 +931,15 @@ def _collect_subagent_transcripts(
                     transcript_ref = f"transcripts/{gz_name}"
                 except OSError:
                     _log_error(agentlog, f"failed to gzip-copy transcript for agent {agent_id}")
+
+            # C3: leaf tool calls of this agent → tool-events.jsonl
+            if transcript_file.exists():
+                try:
+                    events = _extract_tool_events(transcript_file)
+                    composite = _make_composite_id(session_id, tool_use_id or f"meta:{agent_id}")
+                    _write_tool_events(agentlog, composite, events, redaction_patterns)
+                except Exception:
+                    _log_error(agentlog, f"tool-events failed for agent {agent_id}: {traceback.format_exc()}")
 
             # Enrich matching dispatch dicts — only set fields when
             # the value is meaningful to avoid blanking correct data
