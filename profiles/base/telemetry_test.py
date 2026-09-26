@@ -25,7 +25,8 @@ _PATTERN_LINE = re.compile(r'^\s*-\s*"(?P<body>.*)"\s*$')
 # top-level (unindented) `key: value` lines, e.g. `version: 1`, `core_fields:`
 _SECTION_HEADER = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_]*):\s*(?P<value>.*?)\s*(#.*)?$")
 
-LIST_SECTIONS = ("core_fields", "redaction_patterns")
+LIST_SECTIONS = ("core_fields", "tool_events", "redaction_patterns",
+                 "mutating_bash_patterns", "verdict_exempt_roles")
 
 
 def _parse_scalar(raw):
@@ -68,7 +69,7 @@ def _unescape_dq(raw):
 
 def load_schema(text):
     """Minimal stdlib-only parser for telemetry.yaml's constrained structure."""
-    schema = {"core_fields": [], "redaction_patterns": []}
+    schema = {s: [] for s in LIST_SECTIONS}
     section = None
 
     for raw_line in text.splitlines():
@@ -77,14 +78,16 @@ def load_schema(text):
             continue
 
         if section in LIST_SECTIONS:
-            field_match = _FIELD_LINE.match(raw_line) if section == "core_fields" else None
-            if field_match:
-                schema["core_fields"].append(_parse_field_body(field_match.group("body")))
-                continue
-            pattern_match = _PATTERN_LINE.match(raw_line) if section == "redaction_patterns" else None
-            if pattern_match:
-                schema["redaction_patterns"].append(_unescape_dq(pattern_match.group("body")))
-                continue
+            if section in ("core_fields", "tool_events"):
+                field_match = _FIELD_LINE.match(raw_line)
+                if field_match:
+                    schema[section].append(_parse_field_body(field_match.group("body")))
+                    continue
+            else:
+                pattern_match = _PATTERN_LINE.match(raw_line)
+                if pattern_match:
+                    schema[section].append(_unescape_dq(pattern_match.group("body")))
+                    continue
 
         if not raw_line.startswith((" ", "\t")):
             header_match = _SECTION_HEADER.match(stripped)
@@ -106,7 +109,7 @@ def test_schema():
 
     # sanity: the hand-rolled parser actually found something (guards
     # against a silent parse failure reporting a bogus "0 fields" pass)
-    assert schema.get("version") == 1, f"unexpected/missing top-level version: {schema.get('version')!r}"
+    assert schema.get("version") == 2, f"unexpected/missing top-level version: {schema.get('version')!r}"
     assert fields, "core_fields is empty — parser likely failed to match telemetry.yaml's structure"
     assert schema["redaction_patterns"], "redaction_patterns is empty — parser likely failed"
 
@@ -133,6 +136,31 @@ def test_schema():
     # redaction patterns compile
     for p in schema["redaction_patterns"]:
         re.compile(p)
+
+    # tool_events schema (spec §5 C3)
+    te_names = [f["name"] for f in schema["tool_events"]]
+    assert te_names == ["schema_version", "dispatch_id", "seq", "ts", "tool",
+                        "input_hash", "target", "is_error", "result_chars"], te_names
+    for f in schema["tool_events"]:
+        assert f["type"] in valid_types, f"{f['name']}: unknown type {f['type']}"
+
+    # mutating bash patterns compile and do NOT match build/test commands
+    assert schema["mutating_bash_patterns"], "mutating_bash_patterns is empty"
+    compiled = [re.compile(p) for p in schema["mutating_bash_patterns"]]
+    for cmd in ("swift test --package-path Packages/Core", "cargo build --release",
+                "go test ./...", "pytest -q", "make test", "git status", "cat foo.txt"):
+        assert not any(c.search(cmd) for c in compiled), f"build/test/read command matched as mutating: {cmd}"
+    for cmd in ("cat > f.txt <<'EOF'", "sed -i 's/a/b/' f", "git commit -m x",
+                "rm -rf build", "xcodegen generate", "echo hi | tee out.log"):
+        assert any(c.search(cmd) for c in compiled), f"mutating command not matched: {cmd}"
+
+    # exempt roles
+    assert schema["verdict_exempt_roles"] == ["auditor", "auditor-deep"]
+
+    # score_defaults present (nested mapping — checked textually, parser is list-only)
+    text = SCHEMA_PATH.read_text()
+    for key in ("score_defaults:", "weights:", "saturation:", "thresholds:"):
+        assert key in text, f"missing {key} in telemetry.yaml"
 
     print(f"OK: {len(fields)} fields, {len(schema['redaction_patterns'])} redaction patterns")
 
