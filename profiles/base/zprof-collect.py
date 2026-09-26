@@ -1101,6 +1101,11 @@ def _class_a_checks(returned: str | None, cwd: str,
         "return_parsed": None,
         "artifact_exists": None,
         "next_is_reachable": None,
+        # C2 — raw values, popped by _normalize_dispatch before norm.update()
+        "verdict_value": None,
+        "next_value": None,
+        "artifact_path": None,
+        "run_log": None,
     }
     if returned is None:
         return result
@@ -1124,6 +1129,11 @@ def _class_a_checks(returned: str | None, cwd: str,
     else:
         result["has_preamble"] = None
 
+    if verdict_idx is not None:
+        raw_v = lines[verdict_idx].strip().split(":", 1)[1].strip()
+        # first whitespace-delimited token, lowercased: "Approve-With-Fixes   " -> "approve-with-fixes"
+        result["verdict_value"] = raw_v.split()[0].lower() if raw_v else None
+
     # artifact_exists: check if referenced artifact path exists
     for line in lines:
         stripped = line.strip()
@@ -1135,6 +1145,7 @@ def _class_a_checks(returned: str | None, cwd: str,
                 if not p.is_absolute():
                     p = Path(cwd) / artifact_path
                 result["artifact_exists"] = p.exists()
+            result["artifact_path"] = artifact_path or None
             break
 
     # next_is_reachable: check if next: value is a known role
@@ -1145,6 +1156,14 @@ def _class_a_checks(returned: str | None, cwd: str,
             next_val = stripped.split(":", 1)[1].strip()
             if next_val:
                 result["next_is_reachable"] = next_val in roles
+            result["next_value"] = next_val or None
+            break
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("run_log:"):
+            rl = stripped.split(":", 1)[1].strip()
+            result["run_log"] = rl or None
             break
 
     return result
@@ -1230,7 +1249,22 @@ def _normalize_dispatch(
     returned = raw.get("returned")
     cwd = raw.get("cwd", "")
     checks = _class_a_checks(returned, cwd, known_roles=known_roles)
+    verdict_value = checks.pop("verdict_value", None)
+    next_value = checks.pop("next_value", None)
+    artifact_path = checks.pop("artifact_path", None)
+    run_log = checks.pop("run_log", None)
     norm.update(checks)
+    if verdict_value and not norm.get("verdict"):
+        norm["verdict"] = verdict_value
+    if next_value or artifact_path or run_log:
+        ext = dict(norm.get("ext") or {})
+        if next_value:
+            ext["next"] = next_value
+        if artifact_path:
+            ext["artifact"] = artifact_path
+        if run_log:
+            ext["run_log"] = run_log
+        norm["ext"] = ext
 
     # Remove None values for cleaner JSONL (optional fields)
     norm = {k: v for k, v in norm.items() if v is not None}

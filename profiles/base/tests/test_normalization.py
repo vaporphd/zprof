@@ -620,3 +620,46 @@ class TestDynamicRoles:
         roles = _get_known_roles(str(tmp_path))
         assert "reviewer" in roles  # builtin
         assert "custom" in roles  # dynamic
+
+
+def _norm(raw):
+    norm, _ = _normalize_dispatch(
+        raw, session_id="s1", harness_version="2.1.220", machine_id="m",
+        project_id="p", project_id_provisional=False, redaction_patterns=[],
+        known_roles=frozenset({"reviewer", "implementer"}),
+    )
+    return norm
+
+
+def test_verdict_value_persisted():
+    raw = {"dispatch_id": "toolu_1", "role": "implementer", "status": "completed",
+           "returned": "verdict: done\nartifact: commit abc\nnext: reviewer\none_line: ok"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "done"
+    assert norm["ext"]["next"] == "reviewer"
+    assert norm["ext"]["artifact"] == "commit abc"
+    assert "run_log" not in norm["ext"]
+
+
+def test_run_log_persisted_for_task_runner():
+    raw = {"dispatch_id": "toolu_r", "role": "task-runner", "status": "completed",
+           "returned": "verdict: blocked\nartifact: none\nrun_log: .zprof/runs/2026-09-26-x.md\none_line: q\nquestion: which?"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "blocked"
+    assert norm["ext"]["run_log"] == ".zprof/runs/2026-09-26-x.md"
+
+
+def test_verdict_absent_when_no_verdict_line():
+    raw = {"dispatch_id": "toolu_a", "role": "auditor", "status": "completed",
+           "returned": "completion: complete\nintegrity: clean\nevidence: x.md"}
+    norm = _norm(raw)
+    assert "verdict" not in norm
+    assert norm["return_parsed"] is False
+    assert norm.get("ext") in (None, {})
+
+
+def test_verdict_value_is_lowercased_first_token():
+    raw = {"dispatch_id": "toolu_b", "role": "reviewer", "status": "completed",
+           "returned": "verdict: Approve-With-Fixes   \nartifact: docs/reviews/r.md"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "approve-with-fixes"
