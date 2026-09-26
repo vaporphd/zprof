@@ -2,6 +2,7 @@ package score
 
 import (
 	"testing"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 
@@ -198,4 +199,13 @@ func TestP5_ConfigurableVerdicts(t *testing.T) {
 	cfg := Defaults()
 	cfg.ReviewBlockVerdicts = map[string]bool{"approve-with-fixes": true}
 	require.Equal(t, 1.0, computeP5(run, cfg).value)
+}
+
+func TestTruncate_RunesNotBytes(t *testing.T) {
+	s := "проверить длинную команду"
+	got := truncate(s, 10)
+	require.True(t, utf8.ValidString(got), "must not cut a multi-byte rune: %q", got)
+	require.Equal(t, "проверить…", got)
+	require.Equal(t, 10, utf8.RuneCountInString(got))
+	require.Equal(t, "короткая", truncate("короткая", 10), "short strings pass through")
 }

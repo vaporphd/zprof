@@ -141,3 +141,26 @@ func TestScoreCmd_AllMissingSkipsLegacy(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "legacy data:")
 }
+
+func TestScoreCmd_RunLogOutsideRunsDirIsIgnored(t *testing.T) {
+	for _, runLog := range []string{"notes/x.md", ".zprof/runs/../../notes/x.md"} {
+		proj, agentlog := setupScoreProject(t)
+		dpath := filepath.Join(agentlog, "dispatches.jsonl")
+		data, err := os.ReadFile(dpath)
+		require.NoError(t, err)
+		data = []byte(strings.ReplaceAll(string(data), `".zprof/runs/2026-09-26-fixture.md"`, `"`+runLog+`"`))
+		require.NoError(t, os.WriteFile(dpath, data, 0o644))
+		target := filepath.Join(proj, "notes", "x.md")
+		require.NoError(t, os.MkdirAll(filepath.Dir(target), 0o755))
+		require.NoError(t, os.WriteFile(target, []byte("# notes\n"), 0o644))
+
+		out, err := runScore(t, "--project", proj, "--no-collect")
+		require.NoError(t, err, runLog)
+		require.Contains(t, out, "Score 45/100")
+		got, err := os.ReadFile(target)
+		require.NoError(t, err)
+		require.Equal(t, "# notes\n", string(got), "run_log %q outside .zprof/runs must not be written", runLog)
+		_, err = os.Stat(filepath.Join(agentlog, "scores.jsonl"))
+		require.NoError(t, err, "the score row is still persisted")
+	}
+}

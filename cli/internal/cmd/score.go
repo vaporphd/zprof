@@ -139,11 +139,7 @@ session's finished dispatches are visible immediately.`,
 					return err
 				}
 				rendered := score.RenderCard(card)
-				if card.RunLog != "" {
-					runLogPath := card.RunLog
-					if !filepath.IsAbs(runLogPath) {
-						runLogPath = filepath.Join(projectDir, runLogPath)
-					}
+				if runLogPath, ok := runLogInRunsDir(projectDir, card.RunLog); ok {
 					if err := score.WriteRunLogSection(runLogPath, rendered); err != nil && !errors.Is(err, os.ErrNotExist) {
 						return err
 					}
@@ -173,6 +169,32 @@ session's finished dispatches are visible immediately.`,
 	c.Flags().StringVar(&projectDir, "project", "", "Project directory (default: cwd)")
 	c.Flags().StringVar(&agentlog, "agentlog", "", "Telemetry directory (default: <project>/.agentlog)")
 	return c
+}
+
+// runLogInRunsDir resolves runLog (relative to projectDir unless absolute) and
+// reports whether it lies inside <projectDir>/.zprof/runs/. run_log comes from
+// a subagent's return text, so anything else is ignored rather than written.
+func runLogInRunsDir(projectDir, runLog string) (string, bool) {
+	if runLog == "" {
+		return "", false
+	}
+	p := runLog
+	if !filepath.IsAbs(p) {
+		p = filepath.Join(projectDir, p)
+	}
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", false
+	}
+	runsDir, err := filepath.Abs(filepath.Join(projectDir, ".zprof", "runs"))
+	if err != nil {
+		return "", false
+	}
+	rel, err := filepath.Rel(runsDir, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return abs, true
 }
 
 // flushCollector runs the deployed collector in `stop` mode against the most

@@ -284,9 +284,11 @@ func joinRoles(byRole map[string]float64) string {
 	return strings.Join(keys, ", ")
 }
 
+// truncate cuts s to at most n runes, marking the cut with "…".
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
