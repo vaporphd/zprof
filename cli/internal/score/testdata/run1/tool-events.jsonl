@@ -1,0 +1,20 @@
+{"schema_version":1,"dispatch_id":"claude-code:s1:t1","seq":1,"ts":"2026-09-26T10:00:30Z","tool":"Read","input_hash":"h-spec","target":"/p/SPEC.md","is_error":false,"result_chars":900}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t1","seq":2,"ts":"2026-09-26T10:00:50Z","tool":"Write","input_hash":"h-plan","target":"/p/plan-1.md","is_error":false,"result_chars":10}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":1,"ts":"2026-09-26T10:03:10Z","tool":"Read","input_hash":"h-ra","target":"/p/a.swift","is_error":false,"result_chars":500}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":2,"ts":"2026-09-26T10:03:20Z","tool":"Read","input_hash":"h-rb","target":"/p/b.swift","is_error":false,"result_chars":500}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":3,"ts":"2026-09-26T10:03:30Z","tool":"Read","input_hash":"h-ra","target":"/p/a.swift","is_error":false,"result_chars":500}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":4,"ts":"2026-09-26T10:03:40Z","tool":"Read","input_hash":"h-rc","target":"/p/c.swift","is_error":false,"result_chars":500}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":5,"ts":"2026-09-26T10:04:00Z","tool":"Edit","input_hash":"h-ea1","target":"/p/a.swift","is_error":false,"result_chars":10}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":6,"ts":"2026-09-26T10:04:10Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":true,"result_chars":4000}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":7,"ts":"2026-09-26T10:04:30Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":true,"result_chars":4000}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":8,"ts":"2026-09-26T10:04:50Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":true,"result_chars":4000}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":9,"ts":"2026-09-26T10:04:55Z","tool":"Edit","input_hash":"h-ea2","target":"/p/a.swift","is_error":false,"result_chars":10}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t2","seq":10,"ts":"2026-09-26T10:04:59Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":false,"result_chars":200}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t3","seq":1,"ts":"2026-09-26T10:19:00Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":true,"result_chars":4000}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t3","seq":2,"ts":"2026-09-26T10:19:30Z","tool":"Read","input_hash":"h-rt","target":"/p/Tests/x.swift","is_error":false,"result_chars":300}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t4","seq":1,"ts":"2026-09-26T10:21:00Z","tool":"Read","input_hash":"h-ra","target":"/p/a.swift","is_error":false,"result_chars":500}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t4","seq":2,"ts":"2026-09-26T10:22:00Z","tool":"Edit","input_hash":"h-ea3","target":"/p/a.swift","is_error":false,"result_chars":10}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t4","seq":3,"ts":"2026-09-26T10:23:00Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":false,"result_chars":200}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t4","seq":4,"ts":"2026-09-26T10:24:00Z","tool":"Bash","input_hash":"h-commit","target":"git commit -m fix","is_error":false,"result_chars":80}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t5","seq":1,"ts":"2026-09-26T10:34:00Z","tool":"Bash","input_hash":"h-test","target":"swift test --package-path Packages/Core","is_error":false,"result_chars":200}
+{"schema_version":1,"dispatch_id":"claude-code:s1:t6","seq":1,"ts":"2026-09-26T10:39:00Z","tool":"Bash","input_hash":"h-diff","target":"git diff HEAD~1","is_error":false,"result_chars":3000}
