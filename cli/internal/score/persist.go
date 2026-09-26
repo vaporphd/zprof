@@ -68,7 +68,10 @@ func ReadScoredKeys(path string) (map[string]bool, error) {
 }
 
 // WriteRunLogSection puts the card between markers in the run log: replaces
-// an existing section in place, otherwise appends one at the end.
+// an existing well-formed section (matching begin/end pair) in place,
+// otherwise appends a new one at the end. A dangling marker (one without its
+// pair) is never treated as the section boundary — it is left untouched as
+// inert text so no surrounding content is ever discarded.
 func WriteRunLogSection(runLogPath, card string) error {
 	data, err := os.ReadFile(runLogPath)
 	if err != nil {
@@ -76,12 +79,14 @@ func WriteRunLogSection(runLogPath, card string) error {
 	}
 	s := string(data)
 	section := MarkerBegin + "\n## Score\n```\n" + strings.TrimRight(card, "\n") + "\n```\n" + MarkerEnd
-	if i := strings.Index(s, MarkerBegin); i >= 0 {
-		if j := strings.Index(s[i:], MarkerEnd); j >= 0 {
-			s = s[:i] + section + s[i+j+len(MarkerEnd):]
-		} else {
-			s = s[:i] + section + "\n"
-		}
+
+	end := strings.LastIndex(s, MarkerEnd)
+	begin := -1
+	if end >= 0 {
+		begin = strings.LastIndex(s[:end], MarkerBegin)
+	}
+	if begin >= 0 {
+		s = s[:begin] + section + s[end+len(MarkerEnd):]
 	} else {
 		if !strings.HasSuffix(s, "\n") {
 			s += "\n"

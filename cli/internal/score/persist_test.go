@@ -50,3 +50,20 @@ func TestWriteRunLogSection_MissingFile(t *testing.T) {
 	err := WriteRunLogSection(filepath.Join(t.TempDir(), "nope.md"), "x")
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
+
+func TestWriteRunLogSection_DanglingBeginMarkerKeepsContent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "run.md")
+	original := "# task\n" + MarkerBegin + "\nold partial\n" + "## Итог\nverdict: done\n"
+	require.NoError(t, os.WriteFile(p, []byte(original), 0o644))
+	require.NoError(t, WriteRunLogSection(p, "Score 45/100 · Lucky\n"))
+	require.NoError(t, WriteRunLogSection(p, "Score 72/100 · Solid\n"))
+	data, err := os.ReadFile(p)
+	require.NoError(t, err)
+	s := string(data)
+	require.Contains(t, s, "## Итог\nverdict: done")
+	require.Contains(t, s, "old partial")
+	require.Equal(t, 1, strings.Count(s, MarkerEnd))
+	require.Equal(t, 2, strings.Count(s, MarkerBegin))
+	require.Contains(t, s, "Score 72/100")
+	require.NotContains(t, s, "Score 45/100")
+}
