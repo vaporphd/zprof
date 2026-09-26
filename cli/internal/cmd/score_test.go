@@ -103,3 +103,17 @@ func TestScoreCmd_DisabledInManifest(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, out, "score disabled")
 }
+
+func TestScoreCmd_RunAndAllMissingConflict(t *testing.T) {
+	proj, _ := setupScoreProject(t)
+	_, err := runScore(t, "--project", proj, "--no-collect", "--run", "2026-09-26-fixture", "--all-missing")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mutually exclusive")
+}
+
+func TestScoreCmd_LatestFalseNeedsSelector(t *testing.T) {
+	proj, _ := setupScoreProject(t)
+	_, err := runScore(t, "--project", proj, "--no-collect", "--latest=false")
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "requires --run or --all-missing")
+}

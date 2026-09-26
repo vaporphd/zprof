@@ -81,6 +81,10 @@ session's finished dispatches are visible immediately.`,
 			}
 			runs := score.BuildRuns(ds, evs)
 
+			if runKey != "" && allMissing {
+				return fmt.Errorf("--run and --all-missing are mutually exclusive")
+			}
+
 			var targets []score.Run
 			switch {
 			case allMissing:
@@ -90,7 +94,7 @@ session's finished dispatches are visible immediately.`,
 				}
 				hash := cfg.WeightsHash()
 				for _, r := range runs {
-					if !keys[r.ID+"|"+hash] {
+					if !keys[score.ScoreKey(score.Card{RunID: r.ID, WeightsHash: hash})] {
 						targets = append(targets, r)
 					}
 				}
@@ -107,7 +111,9 @@ session's finished dispatches are visible immediately.`,
 				}
 				targets = []score.Run{*r}
 			default:
-				_ = latest
+				if !latest {
+					return fmt.Errorf("--latest=false requires --run or --all-missing")
+				}
 				r := score.LatestRun(runs)
 				if r == nil {
 					if !quiet {
