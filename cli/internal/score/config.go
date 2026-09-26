@@ -33,6 +33,8 @@ type Config struct {
 	MutatingBash  []*regexp.Regexp
 	MutatingTools map[string]bool
 	ExemptRoles   map[string]bool
+	// ReviewBlockVerdicts: reviewer verdicts that send work back (P5).
+	ReviewBlockVerdicts map[string]bool
 }
 
 var defaultMutatingBash = []string{
@@ -55,6 +57,8 @@ func Defaults() Config {
 		Thresholds:    Thresholds{Ideal: 85, Solid: 60},
 		MutatingTools: map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "NotebookEdit": true},
 		ExemptRoles:   map[string]bool{"auditor": true, "auditor-deep": true},
+		// mirrors telemetry.yaml `review_block_verdicts`
+		ReviewBlockVerdicts: map[string]bool{"block": true, "changes-requested": true, "blocked": true},
 	}
 	c.MutatingBash = compilePatterns(defaultMutatingBash)
 	return c
@@ -84,6 +88,7 @@ func (c Config) IsMutatingBash(command string) bool {
 type schemaFile struct {
 	MutatingBashPatterns []string `json:"mutating_bash_patterns"`
 	VerdictExemptRoles   []string `json:"verdict_exempt_roles"`
+	ReviewBlockVerdicts  []string `json:"review_block_verdicts"`
 	ScoreDefaults        *struct {
 		Weights    map[string]float64 `json:"weights"`
 		Saturation map[string]float64 `json:"saturation"`
@@ -108,6 +113,12 @@ func LoadConfig(projectDir, agentlogDir string) (Config, error) {
 			c.ExemptRoles = map[string]bool{}
 			for _, r := range s.VerdictExemptRoles {
 				c.ExemptRoles[r] = true
+			}
+		}
+		if len(s.ReviewBlockVerdicts) > 0 {
+			c.ReviewBlockVerdicts = map[string]bool{}
+			for _, v := range s.ReviewBlockVerdicts {
+				c.ReviewBlockVerdicts[v] = true
 			}
 		}
 		if s.ScoreDefaults != nil {

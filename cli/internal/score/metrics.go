@@ -184,11 +184,11 @@ func computeP4(run Run, cfg Config) metric {
 	return m
 }
 
-// P5 — reviewer `block` verdicts.
+// P5 — reviewer verdicts listed in review_block_verdicts (block, changes-requested, …).
 func computeP5(run Run, cfg Config) metric {
 	m := newMetric()
 	for _, s := range run.Steps {
-		if s.Role == "reviewer" && s.Verdict == "block" {
+		if s.Role == "reviewer" && cfg.ReviewBlockVerdicts[s.Verdict] {
 			m.value++
 		}
 	}

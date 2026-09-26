@@ -83,3 +83,20 @@ func TestWeightsHash_StableAndSensitive(t *testing.T) {
 	c.Thresholds.Solid = 61
 	require.NotEqual(t, a.WeightsHash(), c.WeightsHash())
 }
+
+func TestLoadConfig_ReviewBlockVerdictsFromSchema(t *testing.T) {
+	agentlog := filepath.Join(t.TempDir(), ".agentlog")
+	require.NoError(t, os.MkdirAll(agentlog, 0o755))
+	require.True(t, Defaults().ReviewBlockVerdicts["changes-requested"])
+
+	require.NoError(t, os.WriteFile(filepath.Join(agentlog, "schema.json"),
+		[]byte(`{"review_block_verdicts": ["rejected"]}`), 0o644))
+	c, err := LoadConfig(t.TempDir(), agentlog)
+	require.NoError(t, err)
+	require.Equal(t, map[string]bool{"rejected": true}, c.ReviewBlockVerdicts)
+
+	require.NoError(t, os.WriteFile(filepath.Join(agentlog, "schema.json"), []byte(`{}`), 0o644))
+	c, err = LoadConfig(t.TempDir(), agentlog)
+	require.NoError(t, err)
+	require.Equal(t, Defaults().ReviewBlockVerdicts, c.ReviewBlockVerdicts, "empty list keeps defaults")
+}

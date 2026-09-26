@@ -186,3 +186,16 @@ func TestIsMutating_PrefersFlag(t *testing.T) {
 	require.False(t, isMutating(ToolEvent{Tool: "Bash", Target: "swift test"}, cfg))
 	require.True(t, isMutating(ToolEvent{Tool: "Edit", Mutating: &no}, cfg), "mutating tools stay mutating")
 }
+
+func TestP5_ConfigurableVerdicts(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
+	rv1 := mkDispatch("v1", "reviewer", "r", "changes-requested", "completed", "2026-09-26T10:01:00Z")
+	rv2 := mkDispatch("v2", "reviewer", "r", "approve-with-fixes", "completed", "2026-09-26T10:02:00Z")
+	rv3 := mkDispatch("v3", "reviewer", "r", "block", "completed", "2026-09-26T10:03:00Z")
+	run := BuildRuns([]stats.Dispatch{root, rv1, rv2, rv3}, nil)[0]
+	require.Equal(t, 2.0, computeP5(run, Defaults()).value, "changes-requested + block; approve-with-fixes is not a block")
+
+	cfg := Defaults()
+	cfg.ReviewBlockVerdicts = map[string]bool{"approve-with-fixes": true}
+	require.Equal(t, 1.0, computeP5(run, cfg).value)
+}
