@@ -106,7 +106,8 @@ session's finished dispatches are visible immediately.`,
 					targets = append(targets, card)
 				}
 				if legacy > 0 && !quiet {
-					fmt.Fprintf(out, "skipped %d legacy run(s) (collected before schema v2)\n", legacy)
+					// stderr: keeps --json output a clean stream of score rows
+					fmt.Fprintf(cmd.ErrOrStderr(), "skipped %d legacy run(s) (collected before schema v2)\n", legacy)
 				}
 				if len(targets) == 0 {
 					if !quiet {
