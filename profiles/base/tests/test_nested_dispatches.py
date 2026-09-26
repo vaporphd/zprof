@@ -134,3 +134,73 @@ def test_merge_dispatch_prefers_fresh_status_but_keeps_transcript_tokens():
     assert existing["status"] == "completed" and existing["dispatch_complete"] is True
     assert existing["ts_utc"] == "t9" and existing["tool_uses"] == 4
     assert existing["tokens_input"] == 15000, "transcript tokens are more accurate than toolUseResult"
+
+
+# --- Stop-mode completion evidence (mid-run `zprof score` flush) -----------
+
+def _mid_run_tree(tmp_path, session_id="sess-midrun"):
+    """_runner_tree, but the main log holds only the runner's Agent tool_use (no result yet)."""
+    main, sub = _runner_tree(tmp_path, session_id=session_id)
+    main.write_text(_agent_call("2026-09-26T10:00:00Z", "toolu_R", "task-runner") + "\n")
+    return main, sub
+
+
+def _pass(tmp_path, main, sess, require):
+    agentlog = tmp_path / ".agentlog"
+    agentlog.mkdir(exist_ok=True)
+    dispatches, _meta = zprof_collect._extract_main_log(main.stem, main, sess)
+    _collect_subagent_transcripts(agentlog, main.stem, str(main), set(), sess, dispatches,
+                                  require_completion_evidence=require)
+    return dispatches
+
+
+def test_stop_mode_mid_run_flush_does_not_finalize_running_runner(tmp_path):
+    main, _ = _mid_run_tree(tmp_path)
+    sess = _sess()
+    dispatches = _pass(tmp_path, main, sess, require=True)
+    ids = [d["dispatch_id"] for d in dispatches]
+    assert "toolu_R" not in ids, "running runner must not get a meta-only row"
+    assert "zzzz01" not in sess["agents_done"]
+    child = [d for d in dispatches if d["dispatch_id"] == "toolu_C"]
+    assert child and child[0]["status"] == "completed"
+    assert "aaaa01" in sess["agents_done"], "child already returned inside the runner"
+
+
+def test_stop_mode_second_pass_after_completion_yields_full_runner_row(tmp_path):
+    main, _ = _mid_run_tree(tmp_path)
+    session_id = main.stem
+    sess = _sess()
+    agentlog = tmp_path / ".agentlog"
+    payload = {"cwd": str(tmp_path)}
+
+    first = _pass(tmp_path, main, sess, require=True)
+    zprof_collect._normalize_and_write(agentlog, first, session_id=session_id,
+                                       harness_version="", payload=payload)
+
+    with open(main, "a") as f:
+        f.write(_agent_result("2026-09-26T10:30:00Z", "toolu_R", "task-runner", "zzzz01",
+                              tool_uses=3, duration=1800000,
+                              returned="verdict: done\nartifact: PR #1\n"
+                                       "run_log: .zprof/runs/2026-09-26-x.md\none_line: ok") + "\n")
+    second = _pass(tmp_path, main, sess, require=True)
+    zprof_collect._normalize_and_write(agentlog, second, session_id=session_id,
+                                       harness_version="", payload=payload)
+
+    rows = [json.loads(l) for l in (agentlog / "dispatches.jsonl").read_text().splitlines() if l.strip()]
+    runner = [r for r in rows if r["dispatch_id"] == f"claude-code:{session_id}:toolu_R"]
+    assert len(runner) == 1, runner
+    r = runner[0]
+    assert r["verdict"] == "done"
+    assert r["ext"]["run_log"] == ".zprof/runs/2026-09-26-x.md"
+    assert r["dispatch_complete"] is True
+    assert "zzzz01" in sess["agents_done"]
+
+
+def test_session_start_mode_keeps_meta_only_recovery(tmp_path):
+    main, _ = _mid_run_tree(tmp_path)
+    sess = _sess()
+    dispatches = _pass(tmp_path, main, sess, require=False)
+    runner = [d for d in dispatches if d["dispatch_id"] == "toolu_R"]
+    assert len(runner) == 1, "dead-session recovery still produces the meta-only row"
+    assert runner[0]["seq"] == 0 and runner[0]["dispatch_complete"] is True
+    assert "zzzz01" in sess["agents_done"]

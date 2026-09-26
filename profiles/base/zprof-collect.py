@@ -236,7 +236,10 @@ class Collector:
             return
         running = {t["id"] for t in self.payload.get("background_tasks", [])
                    if t.get("status") == "running"}
-        self._collect_session(session_id, transcript_path, running)
+        # A Stop may be a mid-run flush (`zprof score`): only finalize agents
+        # whose return is already on record.
+        self._collect_session(session_id, transcript_path, running,
+                              require_completion_evidence=True)
 
     def _handle_session_start(self):
         transcript_path = self.payload.get("transcript_path", "")
@@ -253,10 +256,18 @@ class Collector:
                     continue  # already collected
                 if sid == self.payload.get("session_id"):
                     continue  # current session, will be collected on Stop
-                self._collect_session(sid, str(entry), set())
+                # Dead session: nothing will ever complete, so recover
+                # meta-only rows for agents without a recorded return.
+                self._collect_session(sid, str(entry), set(),
+                                      require_completion_evidence=False)
 
-    def _collect_session(self, session_id: str, transcript_path: str, running_agents: set):
-        """Collect new data from a session's main JSONL log."""
+    def _collect_session(self, session_id: str, transcript_path: str, running_agents: set,
+                         require_completion_evidence: bool = False):
+        """Collect new data from a session's main JSONL log.
+
+        `require_completion_evidence` is forwarded to
+        _collect_subagent_transcripts (True on Stop, False on SessionStart).
+        """
         sess = self.state.session(session_id)
         tp = Path(transcript_path)
         if not tp.exists():
@@ -281,6 +292,7 @@ class Collector:
         _collect_subagent_transcripts(
             self.agentlog, session_id, transcript_path,
             running_agents, sess, dispatches,
+            require_completion_evidence=require_completion_evidence,
         )
         # Store dispatches as raw JSONL for later normalization (Task 5).
         # Written AFTER transcript enrichment so the raw file has the
@@ -889,6 +901,8 @@ def _collect_subagent_transcripts(
     sess: dict,
     dispatches: list[dict],
     redaction_patterns=None,
+    *,
+    require_completion_evidence: bool = False,
 ):
     """Copy subagent transcripts and enrich dispatch dicts with transcript data.
 
@@ -896,6 +910,21 @@ def _collect_subagent_transcripts(
     meta.json files to correlate with dispatch_id (toolUseId), extracts
     token breakdown and model from the transcript JSONL, gzip-copies the
     transcript to .agentlog/transcripts/, and copies new tool-results.
+
+    Two modes for agents that have a meta.json but no recorded return:
+
+    - require_completion_evidence=True (Stop hook, incl. the synthetic Stop
+      of `zprof score`): the session is alive and a Stop may be a mid-run
+      flush with no `background_tasks`. An agent is finalized (row written,
+      tool events written, added to agents_done) only when a dispatch dict
+      for its toolUseId with dispatch_complete=True is already present —
+      from the main log's toolUseResult/notification or from pass-1 nested
+      extraction out of the parent's transcript. Otherwise it is left for a
+      later pass, so its real row is not shadowed by a meta-only one via
+      (dispatch_id, seq) dedup.
+    - require_completion_evidence=False (SessionStart recovery of dead
+      sessions): nothing will ever complete, so an agent without evidence
+      gets a meta-only row (seq 0, outcome inferred from truncation).
     """
     if redaction_patterns is None:
         # agentlog is <cwd>/.agentlog — the project dir is its parent
@@ -972,6 +1001,12 @@ def _collect_subagent_transcripts(
         if _skip(agent_id):
             continue
         tool_use_id = meta.get("toolUseId", "")
+        if require_completion_evidence and not (
+                tool_use_id in dispatch_by_id
+                and any(dispatches[i].get("dispatch_complete") for i in dispatch_by_id[tool_use_id])):
+            # Still in flight (or its return is not on record yet): no row,
+            # no tool events, not agents_done — a later Stop picks it up.
+            continue
         agent_type = meta.get("agentType", "")
         parent_agent_id = meta.get("parentAgentId", "")
         spawn_depth = meta.get("spawnDepth")
