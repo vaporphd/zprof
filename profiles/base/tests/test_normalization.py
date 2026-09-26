@@ -663,3 +663,27 @@ def test_verdict_value_is_lowercased_first_token():
            "returned": "verdict: Approve-With-Fixes   \nartifact: docs/reviews/r.md"}
     norm = _norm(raw)
     assert norm["verdict"] == "approve-with-fixes"
+
+_assign_run_ids = zprof_collect._assign_run_ids
+
+
+def test_assign_run_ids_walks_parent_chain():
+    ds = [
+        {"dispatch_id": "toolu_R", "role": "task-runner"},
+        {"dispatch_id": "toolu_I", "role": "implementer", "parent_dispatch_id": "toolu_R"},
+        {"dispatch_id": "toolu_A", "role": "auditor", "parent_dispatch_id": "toolu_I"},
+        {"dispatch_id": "toolu_X", "role": "explorer"},  # dispatched by main, no runner ancestor
+    ]
+    _assign_run_ids(ds)
+    assert ds[0]["ext"]["run_id"] == "toolu_R", "the runner is its own run"
+    assert ds[1]["ext"]["run_id"] == "toolu_R"
+    assert ds[2]["ext"]["run_id"] == "toolu_R"
+    assert "ext" not in ds[3] or "run_id" not in ds[3]["ext"]
+
+
+def test_run_id_is_composite_after_normalization():
+    raw = {"dispatch_id": "toolu_I", "role": "implementer", "parent_dispatch_id": "toolu_R",
+           "status": "completed", "ext": {"run_id": "toolu_R"}}
+    norm = _norm(raw)
+    assert norm["ext"]["run_id"] == "claude-code:s1:toolu_R"
+    assert norm["parent_dispatch_id"] == "claude-code:s1:toolu_R"

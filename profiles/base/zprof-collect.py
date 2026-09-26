@@ -1443,6 +1443,9 @@ def _normalize_dispatch(
 
     # Extension — merge project_id_provisional into ext (not a core field)
     ext = raw.get("ext")
+    if ext and ext.get("run_id"):
+        ext = dict(ext)
+        ext["run_id"] = _make_composite_id(session_id, ext["run_id"])
     if project_id_provisional:
         if ext is None:
             ext = {}
@@ -1503,6 +1506,29 @@ def _load_dedup_set(dispatches_path: Path) -> set[tuple[str, int]]:
     return seen
 
 
+_RUN_CHAIN_MAX_HOPS = 16
+
+
+def _assign_run_ids(dispatches: list[dict]) -> None:
+    """C4: ext.run_id = dispatch_id of the nearest task-runner ancestor (in-memory chain).
+
+    Best effort: only dispatches whose chain is fully present in this batch get
+    a run_id. `zprof score` re-derives membership from parent_dispatch_id
+    anyway, so a missing run_id is a slower path, not a wrong answer.
+    """
+    by_id = {d.get("dispatch_id", ""): d for d in dispatches if d.get("dispatch_id")}
+    for d in dispatches:
+        cur, hops = d, 0
+        while cur is not None and hops < _RUN_CHAIN_MAX_HOPS:
+            if cur.get("role") == "task-runner":
+                ext = dict(d.get("ext") or {})
+                ext["run_id"] = cur["dispatch_id"]
+                d["ext"] = ext
+                break
+            cur = by_id.get(cur.get("parent_dispatch_id", ""))
+            hops += 1
+
+
 def _normalize_and_write(
     agentlog: Path,
     dispatches: list[dict],
@@ -1519,6 +1545,7 @@ def _normalize_and_write(
         return
 
     cwd = payload.get("cwd", os.getcwd())
+    _assign_run_ids(dispatches)
 
     # Identity
     machine_id = _get_machine_id()
