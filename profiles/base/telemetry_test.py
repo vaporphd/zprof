@@ -177,11 +177,14 @@ def test_schema():
                 "rm -rf build", "xcodegen generate", "echo hi | tee out.log"):
         assert any(c.search(cmd) for c in compiled), f"mutating command not matched: {cmd}"
 
-    # exempt roles
-    assert schema["verdict_exempt_roles"] == ["auditor", "auditor-deep"]
+    # exempt roles — empty since #20 (ADR 0003): doctor guarantees verdict:
+    # on every role, so P6/P7 no longer need to look away from any of them.
+    assert schema["verdict_exempt_roles"] == []
 
     # reviewer verdicts that count as a block (P5); mirrored in Go score.Defaults
-    assert schema["review_block_verdicts"] == ["block", "changes-requested", "blocked"]
+    assert schema["review_block_verdicts"] == [
+        "block", "changes-requested", "awaiting-approval", "failed", "blocked",
+    ]
 
     # score_defaults: parsed values (cross-language contract)
     assert schema["score_defaults"]["weights"] == {"P1": 20, "P2": 15, "P3": 10, "P4": 20, "P5": 10, "P6": 15, "P7": 10}, \

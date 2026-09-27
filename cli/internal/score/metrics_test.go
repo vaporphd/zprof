@@ -129,22 +129,25 @@ func TestLoopRounds_OnlyFailedTesterFollowedByImplementer(t *testing.T) {
 	require.InDelta(t, 5, pts["P5"], 0.01)
 }
 
-func TestWastedTokens_ExemptRolesAndKilled(t *testing.T) {
+// TestWastedTokens_KilledAndUnparsedAuditor: since #20 (ADR 0003) auditors
+// are no longer in ExemptRoles — their contract now starts with `verdict:`
+// like everyone else's, so an unparsed auditor response is a real P6 hit,
+// not a role to look away from.
+func TestWastedTokens_KilledAndUnparsedAuditor(t *testing.T) {
 	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
 	root.TokensInput, root.TokensOutput = 0, 0
 	impl := mkDispatch("i", "implementer", "r", "", "killed", "2026-09-26T10:01:00Z")
 	impl.TokensInput, impl.TokensOutput = 3000, 0
 	aud := mkDispatch("a", "auditor", "r", "", "completed", "2026-09-26T10:02:00Z")
-	aud.ReturnParsed = bptr(false) // auditor contract starts with completion:, not verdict:
+	aud.ReturnParsed = bptr(false) // e.g. legacy completion: response
 	aud.TokensInput, aud.TokensOutput = 5000, 0
 	ok := mkDispatch("o", "tester", "r", "done", "completed", "2026-09-26T10:03:00Z")
 	ok.TokensInput, ok.TokensOutput = 2000, 0
 	run := BuildRuns([]stats.Dispatch{root, impl, aud, ok}, nil)[0]
 	p := computeP6(run, Defaults())
-	require.InDelta(t, 0.30, p.value, 0.001, "3000 of 10000")
+	require.InDelta(t, 0.80, p.value, 0.001, "3000+5000 of 10000")
 	require.Equal(t, 3000.0, p.byRole["implementer"])
-	_, hasAud := p.byRole["auditor"]
-	require.False(t, hasAud)
+	require.Equal(t, 5000.0, p.byRole["auditor"])
 }
 
 func TestP7_BlockedDoesNotCountMissingArtifact(t *testing.T) {
@@ -152,9 +155,7 @@ func TestP7_BlockedDoesNotCountMissingArtifact(t *testing.T) {
 	root.ArtifactExists = bptr(false)
 	impl := mkDispatch("i", "implementer", "r", "blocked", "completed", "2026-09-26T10:01:00Z")
 	impl.ArtifactExists = bptr(false)
-	aud := mkDispatch("a", "auditor", "r", "", "completed", "2026-09-26T10:02:00Z")
-	aud.HasPreamble = bptr(true) // exempt role → ignored
-	run := BuildRuns([]stats.Dispatch{root, impl, aud}, nil)[0]
+	run := BuildRuns([]stats.Dispatch{root, impl}, nil)[0]
 	require.Equal(t, 0.0, computeP7(run, Defaults()).value)
 	c := Compute(run, Defaults(), "t")
 	require.Equal(t, "Blocked", c.Tier)

@@ -92,17 +92,22 @@ mutating_bash_patterns:
   - "\\b(cargo|go|swift)\\s+fmt\\b"
   - "\\b(gofmt\\s+-w|swiftformat|rustfmt)\\b"
 
-# Roles whose contract does not start with `verdict:` (they return `completion:`).
-# Excluded from P6-by-return_parsed and from P7.
-verdict_exempt_roles:
-  - "auditor"
-  - "auditor-deep"
+# Roles whose contract does not start with `verdict:`. Empty since #20 (ADR
+# 0003, docs/adr/0003-verdicts-registry.md): doctor now guarantees every
+# role's return_format starts with `verdict:` (auditor/auditor-deep migrated
+# off `completion:`), so P6/P7 no longer need to look away from these roles.
+# The mechanism is kept for schema.json overrides on projects still running
+# an older, unmigrated auditor.
+verdict_exempt_roles: []
 
 # Verdict words a reviewer uses to send work back to the implementer.
-# P5 counts reviewer steps whose verdict is in this list.
+# P5 counts reviewer steps whose verdict is in this list. Mirrors
+# verdicts.yaml: {t in roles.reviewer : base in {failed, blocked}}.
 review_block_verdicts:
   - "block"
   - "changes-requested"
+  - "awaiting-approval"
+  - "failed"
   - "blocked"
 
 # Defaults for `zprof score`; `.zprof.yaml: score:` overrides any key.
