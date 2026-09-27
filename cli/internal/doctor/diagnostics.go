@@ -77,7 +77,7 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  15. python3 -c 'pass' actually runs (macOS without Xcode CLT hangs it)
 //  16. .agentlog/ is reminded to be vulnerable to `git clean -xdf`
 //  17. every role's return_format enum and body `verdict:` citations are
-//      covered by the verdicts.yaml registry (ADR 0003)
+//     covered by the verdicts.yaml registry (ADR 0003)
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so

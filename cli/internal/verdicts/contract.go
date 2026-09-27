@@ -77,7 +77,7 @@ type BodyToken struct {
 }
 
 // bodyVerdictRe finds `verdict: <token>` inside prose, optionally wrapped
-// in a single backtick (as Markdown inline code: `` `verdict: blocked` ``).
+// in a single backtick (as Markdown inline code: “ `verdict: blocked` “).
 var bodyVerdictRe = regexp.MustCompile("\\bverdict:\\s*`?([a-z][a-z0-9|*-]*)")
 
 // BodyTokens scans body line by line for `verdict: <token>` occurrences. A
