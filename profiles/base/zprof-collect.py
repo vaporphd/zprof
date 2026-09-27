@@ -232,11 +232,22 @@ class Collector:
         agent_id = self.payload.get("agent_id", "")
         if not agent_id:
             return
-        self.state.add_pointer(agent_id, {
+        agent_type = self.payload.get("agent_type", "")
+        cwd = self.payload.get("cwd", os.getcwd())
+        # Snapshot the config hash now: the agent file may be rewritten
+        # (e.g. a subsequent `zprof apply`) between this SubagentStop and the
+        # session's eventual Stop, which would otherwise attribute the wrong
+        # contract version to this dispatch.
+        config_hash, candidates = _agent_config_hash(cwd, agent_type)
+        pointer = {
             "agent_transcript_path": self.payload.get("agent_transcript_path", ""),
-            "agent_type": self.payload.get("agent_type", ""),
+            "agent_type": agent_type,
             "ts": datetime.now(timezone.utc).isoformat(),
-        })
+            "config_hash": config_hash,
+        }
+        if candidates > 1:
+            pointer["config_hash_candidates"] = candidates
+        self.state.add_pointer(agent_id, pointer)
 
     def _handle_stop(self):
         session_id = self.payload.get("session_id", "")
@@ -304,6 +315,7 @@ class Collector:
             self.agentlog, session_id, transcript_path,
             running_agents, sess, dispatches,
             require_completion_evidence=require_completion_evidence,
+            pointers=self.state.data.setdefault("pointers", {}),
         )
         # Store dispatches as raw JSONL for later normalization (Task 5).
         # Written AFTER transcript enrichment so the raw file has the
@@ -910,6 +922,126 @@ def _merge_dispatch(existing: dict, fresh: dict) -> None:
         existing[k] = v
 
 
+# ---------------------------------------------------------------------------
+# config_hash resolution (agent_type -> agent definition file -> sha256)
+# ---------------------------------------------------------------------------
+
+def _is_agent_backup_name(name: str) -> bool:
+    """True for zprof's own backup files (e.g. `implementer.md.zprof.bak-<ts>`).
+
+    `Path.rglob("*.md")` already excludes these (the suffix isn't `.md`), but
+    the check is kept as a defensive second layer per the ADR.
+    """
+    return ".bak-" in name
+
+
+def _agent_frontmatter_name(path: Path) -> str | None:
+    """Return the `name:` value from a Markdown file's YAML frontmatter.
+
+    Frontmatter is the text between the first two `---` lines. Returns None
+    if there is no frontmatter, no `name:` key, or the file can't be read.
+    Never raises.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return None
+    for line in lines[1:end]:
+        stripped = line.strip()
+        if stripped.startswith("name:"):
+            value = stripped[len("name:"):].strip()
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            return value or None
+    return None
+
+
+def _agent_file_index(cwd: str) -> tuple[dict[str, list[Path]], dict[str, list[Path]]]:
+    """Index `.claude/agents/**/*.md` by frontmatter `name:` and by file stem.
+
+    Returns (name_index, stem_index). Skips non-files, zprof backup files,
+    and symlinks that resolve outside `.claude/agents/`. Never raises —
+    a missing or unreadable directory yields two empty indexes.
+    """
+    name_index: dict[str, list[Path]] = {}
+    stem_index: dict[str, list[Path]] = {}
+    root = Path(cwd) / ".claude" / "agents"
+    if not root.is_dir():
+        return name_index, stem_index
+    try:
+        root_resolved = root.resolve()
+    except OSError:
+        return name_index, stem_index
+    try:
+        candidates = sorted(root.rglob("*.md"))
+    except OSError:
+        return name_index, stem_index
+    for p in candidates:
+        try:
+            if not p.is_file() or _is_agent_backup_name(p.name):
+                continue
+            resolved = p.resolve()
+            if resolved != root_resolved and root_resolved not in resolved.parents:
+                continue  # symlink escapes .claude/agents/
+        except OSError:
+            continue
+        stem_index.setdefault(p.stem, []).append(p)
+        name = _agent_frontmatter_name(p)
+        if name:
+            name_index.setdefault(name, []).append(p)
+    return name_index, stem_index
+
+
+def _resolve_agent_file(cwd: str, agent_type: str) -> tuple[Path | None, int]:
+    """Resolve an `agent_type` string (from SubagentStop) to its definition file.
+
+    Returns (path, candidate_count):
+    - (None, 0) — empty agent_type, or no file matches (builtin agents like
+      `Explore`/`general-purpose`, plugin agents, user-level ~/.claude/agents).
+    - (path, 1) — exactly one match, by frontmatter `name:` or, failing that,
+      by file stem.
+    - (None, N>1) — ambiguous: N files share the same name. The caller does
+      not guess; a wrong hash is worse than a missing one.
+    """
+    if not agent_type:
+        return None, 0
+    name_index, stem_index = _agent_file_index(cwd)
+    candidates = name_index.get(agent_type) or stem_index.get(agent_type) or []
+    if len(candidates) == 1:
+        return candidates[0], 1
+    return None, len(candidates)
+
+
+def _agent_config_hash(cwd: str, agent_type: str) -> tuple[str | None, int]:
+    """Resolve `agent_type` to a file and hash its raw bytes.
+
+    Returns (hash, candidate_count). Hash is the first 12 hex chars of the
+    file's sha256, taken over the bytes as-is (no normalization), so a
+    `model:` change also changes the hash. Returns (None, N) when the file
+    can't be resolved (see `_resolve_agent_file`) or can't be read
+    (OSError). Never raises; stdlib only.
+    """
+    path, count = _resolve_agent_file(cwd, agent_type)
+    if path is None:
+        return None, count
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None, count
+    return hashlib.sha256(data).hexdigest()[:12], count
+
+
 def _collect_subagent_transcripts(
     agentlog: Path,
     session_id: str,
@@ -920,6 +1052,7 @@ def _collect_subagent_transcripts(
     redaction_patterns=None,
     *,
     require_completion_evidence: bool = False,
+    pointers: dict | None = None,
 ):
     """Copy subagent transcripts and enrich dispatch dicts with transcript data.
 
@@ -942,12 +1075,19 @@ def _collect_subagent_transcripts(
     - require_completion_evidence=False (SessionStart recovery of dead
       sessions): nothing will ever complete, so an agent without evidence
       gets a meta-only row (seq 0, outcome inferred from truncation).
+
+    `pointers` is `state.data["pointers"]` (agent_id -> dict written by
+    SubagentStop). When an agent's pointer carries a `config_hash` snapshot,
+    it is used and the pointer is popped (consumed). Otherwise config_hash is
+    resolved now, from `agent_type` and `cwd`. Callers that don't pass
+    `pointers` (e.g. unit tests) always take the latter path.
     """
     if redaction_patterns is None:
         # agentlog is <cwd>/.agentlog — the project dir is its parent
         redaction_patterns = _load_redaction_patterns(str(agentlog.parent))
     mutating_patterns = [p for _, p in
                          _load_pattern_list("mutating_bash_patterns", str(agentlog.parent))]
+    cwd = str(agentlog.parent)
     tp = Path(transcript_path)
     # subagents dir: transcript path without .jsonl extension + /subagents/
     subagents_dir = tp.with_suffix("") / "subagents"
@@ -1030,6 +1170,23 @@ def _collect_subagent_transcripts(
         parent_agent_id = meta.get("parentAgentId", "")
         spawn_depth = meta.get("spawnDepth")
 
+        # config_hash: prefer the snapshot taken at SubagentStop (pointer),
+        # since the agent file may have been rewritten since then. Consume
+        # the pointer once used. No pointer (e.g. SessionStart recovery of a
+        # dead session, or a caller that doesn't track pointers) falls back
+        # to resolving now, from the current file on disk.
+        pointer = (pointers or {}).pop(agent_id, None)
+        if pointer is not None:
+            config_hash = pointer.get("config_hash")
+            config_hash_candidates = pointer.get("config_hash_candidates", 0)
+            config_hash_source = "subagent-stop"
+        else:
+            config_hash, config_hash_candidates = _agent_config_hash(cwd, agent_type)
+            config_hash_source = "collect"
+        config_hash_ext = {"config_hash_source": config_hash_source}
+        if config_hash_candidates and config_hash_candidates > 1:
+            config_hash_ext["config_hash_ambiguous"] = config_hash_candidates
+
         # Resolve parent_dispatch_id: parentAgentId is an agent_id (hex),
         # not a toolUseId.  Read the parent's meta.json to get its
         # toolUseId so parent_dispatch_id is joinable with dispatch_id.
@@ -1073,6 +1230,7 @@ def _collect_subagent_transcripts(
             "agent_id": agent_id,
             "transcript_ref": transcript_ref,
             "transcript_captured": bool(transcript_ref),
+            "config_hash": config_hash,
         }
         if agent_type:
             enrichment["role"] = agent_type
@@ -1097,6 +1255,9 @@ def _collect_subagent_transcripts(
         if tool_use_id and tool_use_id in dispatch_by_id:
             for idx in dispatch_by_id[tool_use_id]:
                 dispatches[idx].update(enrichment)
+                ext = dict(dispatches[idx].get("ext") or {})
+                ext.update(config_hash_ext)
+                dispatches[idx]["ext"] = ext
                 # Return text from transcript's last assistant message.
                 # Only backfill if sync path didn't already populate it.
                 if not dispatches[idx].get("returned") and transcript_data.get("returned"):
@@ -1116,6 +1277,9 @@ def _collect_subagent_transcripts(
                 "ts_utc": "",
             }
             dispatch.update(enrichment)
+            ext = dict(dispatch.get("ext") or {})
+            ext.update(config_hash_ext)
+            dispatch["ext"] = ext
             if transcript_data.get("returned"):
                 dispatch["returned"] = transcript_data["returned"]
             dispatches.append(dispatch)

@@ -247,6 +247,18 @@ class TestClassAChecks:
         # next_is_reachable should be non-None when next: line exists
         assert checks["next_is_reachable"] is not None
 
+    def test_verdict_extracted_despite_preamble(self):
+        """A preamble before `verdict:` must not prevent verdict extraction (AC2)."""
+        returned = "Here is my analysis of the change.\nverdict: approve\nnext: reviewer"
+        checks = _class_a_checks(returned, cwd="/nonexistent")
+        assert checks["has_preamble"] is True
+        assert checks["verdict_value"] == "approve"
+
+    def test_first_verdict_line_wins_when_two_present(self):
+        returned = "verdict: approve\nsome text\nverdict: blocked"
+        checks = _class_a_checks(returned, cwd="/nonexistent")
+        assert checks["verdict_value"] == "approve"
+
 
 class TestSecretRedaction:
     """Secret redaction replaces patterns and counts replacements."""
@@ -665,6 +677,16 @@ def test_verdict_value_is_lowercased_first_token():
            "returned": "verdict: Approve-With-Fixes   \nartifact: docs/reviews/r.md"}
     norm = _norm(raw)
     assert norm["verdict"] == "approve-with-fixes"
+
+
+def test_verdict_persisted_despite_preamble():
+    """AC2: a preamble before `verdict:` must not blank the verdict field."""
+    raw = {"dispatch_id": "toolu_c", "role": "reviewer", "status": "completed",
+           "returned": "Reviewed the diff, looks solid overall.\n"
+                       "verdict: approve\nartifact: docs/reviews/r.md\nnext: implementer"}
+    norm = _norm(raw)
+    assert norm["has_preamble"] is True
+    assert norm["verdict"] == "approve"
 
 _assign_run_ids = zprof_collect._assign_run_ids
 

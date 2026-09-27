@@ -7,9 +7,20 @@ Modes: subagent-stop | stop | session-start | pick-arm
 Reads JSON payload from stdin. Writes to $ZPROF_AGENTLOG or <cwd>/.agentlog/.
 Always exits 0. Errors go to collect.log.
 """
-import fcntl, gzip, hashlib, json, os, platform, re, shutil, subprocess, sys, time, traceback
-from pathlib import Path
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 VERSION = "0.1.0"
 
@@ -221,11 +232,22 @@ class Collector:
         agent_id = self.payload.get("agent_id", "")
         if not agent_id:
             return
-        self.state.add_pointer(agent_id, {
+        agent_type = self.payload.get("agent_type", "")
+        cwd = self.payload.get("cwd", os.getcwd())
+        # Snapshot the config hash now: the agent file may be rewritten
+        # (e.g. a subsequent `zprof apply`) between this SubagentStop and the
+        # session's eventual Stop, which would otherwise attribute the wrong
+        # contract version to this dispatch.
+        config_hash, candidates = _agent_config_hash(cwd, agent_type)
+        pointer = {
             "agent_transcript_path": self.payload.get("agent_transcript_path", ""),
-            "agent_type": self.payload.get("agent_type", ""),
+            "agent_type": agent_type,
             "ts": datetime.now(timezone.utc).isoformat(),
-        })
+            "config_hash": config_hash,
+        }
+        if candidates > 1:
+            pointer["config_hash_candidates"] = candidates
+        self.state.add_pointer(agent_id, pointer)
 
     def _handle_stop(self):
         session_id = self.payload.get("session_id", "")
@@ -236,7 +258,10 @@ class Collector:
             return
         running = {t["id"] for t in self.payload.get("background_tasks", [])
                    if t.get("status") == "running"}
-        self._collect_session(session_id, transcript_path, running)
+        # A Stop may be a mid-run flush (`zprof score`): only finalize agents
+        # whose return is already on record.
+        self._collect_session(session_id, transcript_path, running,
+                              require_completion_evidence=True)
 
     def _handle_session_start(self):
         transcript_path = self.payload.get("transcript_path", "")
@@ -253,10 +278,18 @@ class Collector:
                     continue  # already collected
                 if sid == self.payload.get("session_id"):
                     continue  # current session, will be collected on Stop
-                self._collect_session(sid, str(entry), set())
+                # Dead session: nothing will ever complete, so recover
+                # meta-only rows for agents without a recorded return.
+                self._collect_session(sid, str(entry), set(),
+                                      require_completion_evidence=False)
 
-    def _collect_session(self, session_id: str, transcript_path: str, running_agents: set):
-        """Collect new data from a session's main JSONL log."""
+    def _collect_session(self, session_id: str, transcript_path: str, running_agents: set,
+                         require_completion_evidence: bool = False):
+        """Collect new data from a session's main JSONL log.
+
+        `require_completion_evidence` is forwarded to
+        _collect_subagent_transcripts (True on Stop, False on SessionStart).
+        """
         sess = self.state.session(session_id)
         tp = Path(transcript_path)
         if not tp.exists():
@@ -281,6 +314,8 @@ class Collector:
         _collect_subagent_transcripts(
             self.agentlog, session_id, transcript_path,
             running_agents, sess, dispatches,
+            require_completion_evidence=require_completion_evidence,
+            pointers=self.state.data.setdefault("pointers", {}),
         )
         # Store dispatches as raw JSONL for later normalization (Task 5).
         # Written AFTER transcript enrichment so the raw file has the
@@ -289,8 +324,7 @@ class Collector:
             raw_path = self.agentlog / "raw" / f"{session_id}.jsonl"
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             with open(raw_path, "a") as f:
-                for d in dispatches:
-                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
+                f.writelines(json.dumps(d, ensure_ascii=False) + "\n" for d in dispatches)
                 f.flush()
                 os.fsync(f.fileno())
         # Task 5: normalize and write to dispatches.jsonl
@@ -399,57 +433,23 @@ def _extract_tool_uses_from_assistant(content: list) -> list[dict]:
     return results
 
 
-def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dict], dict]:
-    """Read a session JSONL and extract dispatch records.
+def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
+                                  seen_notifications: set) -> dict:
+    """Extract dispatch records from JSONL text (main log or a subagent transcript).
 
-    Returns (dispatches, meta) where dispatches is a list of raw dicts
-    and meta contains offset/size/hash/harness_version/unparsed_lines.
+    Handles the sync path (Agent tool_use + toolUseResult), the async path
+    (<task-notification>), and legacy notification fields. Returns
+    {"dispatches", "unparsed_lines", "truncated", "harness_version"}.
+    `notify_seq` and `seen_notifications` are mutated in place so the main-log
+    caller can persist them; nested callers pass fresh containers.
     """
-    meta = {
-        "offset": sess.get("main_log_offset", 0),
-        "size": sess.get("main_log_size", 0),
-        "head_sha": sess.get("main_log_head_sha", ""),
-        "harness_version": sess.get("harness_version", ""),
-        "unparsed_lines": 0,
-        "truncated": False,
-    }
-
-    if not path.exists():
-        return [], meta
-
-    start_offset = _check_offset(path, sess)
-    file_size = path.stat().st_size
-
-    if start_offset >= file_size:
-        # No new data
-        return [], meta
-
-    # Read new bytes (use binary seek for exact offset, then decode)
-    try:
-        with open(path, "rb") as f:
-            f.seek(start_offset)
-            raw = f.read().decode("utf-8", errors="replace")
-    except OSError:
-        return [], meta
-
-    # Track pending tool_use dispatches from assistant messages
-    # key = tool_use_id, value = info from the assistant's tool_use block
     pending_dispatches: dict[str, dict] = {}
-    # Track notification sequence per dispatch_id for multi-notify.
-    # Persisted across hook invocations so a SendMessage resume in
-    # invocation 2 gets seq=2, not seq=1.
-    notify_seq: dict[str, int] = dict(sess.get("notify_seq", {}))
-    # Dedup set: (dispatch_id, status) pairs already emitted in THIS pass.
-    # Claude Code writes every task-notification twice (~15ms apart) —
-    # once as queue-operation, once as user message.  Without dedup
-    # every async dispatch produces seq=1 AND seq=2.
-    seen_notifications: set[tuple[str, str]] = set()
     dispatches: list[dict] = []
-    harness_version = meta["harness_version"]
+    harness_version = ""
     truncated = False
+    unparsed = 0
 
-    lines = raw.split("\n")
-    for line in lines:
+    for line in raw.split("\n"):
         line = line.strip()
         if not line:
             continue
@@ -623,14 +623,57 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
 
                 dispatches.append(dispatch)
             else:
-                meta["unparsed_lines"] += 1
+                unparsed += 1
+
+    return {"dispatches": dispatches, "unparsed_lines": unparsed,
+            "truncated": truncated, "harness_version": harness_version}
+
+
+def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dict], dict]:
+    """Read a session JSONL and extract dispatch records.
+
+    Returns (dispatches, meta) where dispatches is a list of raw dicts
+    and meta contains offset/size/hash/harness_version/unparsed_lines.
+    """
+    meta = {
+        "offset": sess.get("main_log_offset", 0),
+        "size": sess.get("main_log_size", 0),
+        "head_sha": sess.get("main_log_head_sha", ""),
+        "harness_version": sess.get("harness_version", ""),
+        "unparsed_lines": 0,
+        "truncated": False,
+    }
+
+    if not path.exists():
+        return [], meta
+
+    start_offset = _check_offset(path, sess)
+    file_size = path.stat().st_size
+
+    if start_offset >= file_size:
+        # No new data
+        return [], meta
+
+    # Read new bytes (use binary seek for exact offset, then decode)
+    try:
+        with open(path, "rb") as f:
+            f.seek(start_offset)
+            raw = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return [], meta
+
+    notify_seq: dict[str, int] = dict(sess.get("notify_seq", {}))
+    seen_notifications: set[tuple[str, str]] = set()
+    out = _extract_dispatches_from_text(session_id, raw, notify_seq, seen_notifications)
+    dispatches = out["dispatches"]
+    meta["unparsed_lines"] += out["unparsed_lines"]
 
     # Update meta
     meta["offset"] = file_size
     meta["size"] = file_size
     meta["head_sha"] = _sha256_head(path, min(_HEAD_BYTES, file_size))
-    meta["harness_version"] = harness_version
-    meta["truncated"] = truncated
+    meta["harness_version"] = out["harness_version"] or meta["harness_version"]
+    meta["truncated"] = out["truncated"]
     meta["notify_seq"] = notify_seq
 
     return dispatches, meta
@@ -723,11 +766,280 @@ def _extract_subagent_transcript(jsonl_path: Path) -> dict:
     return result
 
 
+# Tools that are dispatches, not leaf tool calls — they live in dispatches.jsonl.
+_DISPATCH_TOOLS = frozenset({"Agent", "Task"})
+
+_TARGET_MAX = 60
+
+
+def _input_hash(inp) -> str:
+    """sha1 of the canonical JSON of a tool input, first 12 hex chars."""
+    try:
+        canon = json.dumps(inp, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    except (TypeError, ValueError):
+        canon = repr(inp)
+    return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
+
+
+def _tool_target(inp) -> str:
+    """Human-readable target of a tool call: file path, command head, or pattern."""
+    if not isinstance(inp, dict):
+        return ""
+    for key in ("file_path", "path", "notebook_path"):
+        v = inp.get(key)
+        if isinstance(v, str) and v:
+            return v
+    cmd = inp.get("command")
+    if isinstance(cmd, str) and cmd:
+        return " ".join(cmd.split())[:_TARGET_MAX]
+    pat = inp.get("pattern")
+    if isinstance(pat, str) and pat:
+        return pat[:_TARGET_MAX]
+    return ""
+
+
+def _extract_tool_events(jsonl_path: Path, mutating_patterns=()) -> list[dict]:
+    """Ordered leaf tool calls of one subagent transcript (spec §5 C3).
+
+    Each event: seq (1-based, transcript order), ts, tool, input_hash, target,
+    is_error (None when no tool_result arrived), result_chars.
+    Bash events also get `mutating`, matched against the FULL command
+    (`target` is cut to 60 chars). It is omitted when no patterns are
+    loaded, so `zprof score` falls back to its own patterns on `target`.
+    Agent/Task calls are skipped — they are dispatches.
+    """
+    events: list[dict] = []
+    by_id: dict[str, dict] = {}
+    if not jsonl_path.exists():
+        return events
+    try:
+        raw = jsonl_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return events
+
+    seq = 0
+    for line in raw.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        msg = record.get("message", {})
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        role = msg.get("role", "")
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            itype = item.get("type")
+            if role == "assistant" and itype == "tool_use":
+                name = item.get("name", "")
+                if not name or name in _DISPATCH_TOOLS:
+                    continue
+                seq += 1
+                inp = item.get("input", {})
+                ev = {
+                    "seq": seq,
+                    "ts": record.get("timestamp", ""),
+                    "tool": name,
+                    "input_hash": _input_hash(inp),
+                    "target": _tool_target(inp),
+                    "is_error": None,
+                    "result_chars": None,
+                }
+                if name == "Bash" and mutating_patterns:
+                    cmd = inp.get("command", "") if isinstance(inp, dict) else ""
+                    cmd = cmd if isinstance(cmd, str) else ""
+                    ev["mutating"] = any(p.search(cmd) for p in mutating_patterns)
+                events.append(ev)
+                tid = item.get("id", "")
+                if tid:
+                    by_id[tid] = ev
+            elif role == "user" and itype == "tool_result":
+                ev = by_id.get(item.get("tool_use_id", ""))
+                if ev is None:
+                    continue
+                ev["is_error"] = bool(item.get("is_error", False))
+                rc = item.get("content", "")
+                if isinstance(rc, str):
+                    ev["result_chars"] = len(rc)
+                elif isinstance(rc, list):
+                    ev["result_chars"] = sum(
+                        len(b.get("text", "")) for b in rc if isinstance(b, dict))
+    return events
+
+
+def _write_tool_events(agentlog: Path, dispatch_id: str, events: list[dict],
+                       redaction_patterns) -> int:
+    """Append events for one dispatch to .agentlog/tool-events.jsonl. Returns rows written."""
+    if not events or not dispatch_id:
+        return 0
+    path = agentlog / "tool-events.jsonl"
+    written = 0
+    with open(path, "a") as f:
+        for ev in events:
+            row = {"schema_version": 1, "dispatch_id": dispatch_id}
+            row.update(ev)
+            row = {k: v for k, v in row.items() if v is not None}
+            row, _ = _redact_secrets(row, redaction_patterns)
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            written += 1
+        f.flush()
+        os.fsync(f.fileno())
+    return written
+
+
 def _gzip_copy(src: Path, dst: Path):
     """Copy src file to dst, gzip-compressing the content."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     with open(src, "rb") as f_in, gzip.open(dst, "wb") as f_out:
         shutil.copyfileobj(f_in, f_out)
+
+
+_TRANSCRIPT_TOKEN_FIELDS = frozenset({
+    "tokens_input", "tokens_output", "tokens_cache_read", "tokens_cache_creation"})
+
+
+def _merge_dispatch(existing: dict, fresh: dict) -> None:
+    """Upgrade a thin (meta-only) dispatch dict with a fuller record for the same id.
+
+    Fresh non-empty values win, except token fields already derived from the
+    subagent's own transcript, which are more accurate than toolUseResult.
+    """
+    for k, v in fresh.items():
+        if v is None or v == "" or v == []:
+            continue
+        if k in _TRANSCRIPT_TOKEN_FIELDS and existing.get(k) not in (None, 0):
+            continue
+        if k == "dispatch_complete":
+            existing[k] = bool(existing.get(k, False) or v)
+            continue
+        existing[k] = v
+
+
+# ---------------------------------------------------------------------------
+# config_hash resolution (agent_type -> agent definition file -> sha256)
+# ---------------------------------------------------------------------------
+
+def _is_agent_backup_name(name: str) -> bool:
+    """True for zprof's own backup files (e.g. `implementer.md.zprof.bak-<ts>`).
+
+    `Path.rglob("*.md")` already excludes these (the suffix isn't `.md`), but
+    the check is kept as a defensive second layer per the ADR.
+    """
+    return ".bak-" in name
+
+
+def _agent_frontmatter_name(path: Path) -> str | None:
+    """Return the `name:` value from a Markdown file's YAML frontmatter.
+
+    Frontmatter is the text between the first two `---` lines. Returns None
+    if there is no frontmatter, no `name:` key, or the file can't be read.
+    Never raises.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    end = None
+    for i in range(1, len(lines)):
+        if lines[i].strip() == "---":
+            end = i
+            break
+    if end is None:
+        return None
+    for line in lines[1:end]:
+        stripped = line.strip()
+        if stripped.startswith("name:"):
+            value = stripped[len("name:"):].strip()
+            if (value.startswith('"') and value.endswith('"')) or \
+               (value.startswith("'") and value.endswith("'")):
+                value = value[1:-1]
+            return value or None
+    return None
+
+
+def _agent_file_index(cwd: str) -> tuple[dict[str, list[Path]], dict[str, list[Path]]]:
+    """Index `.claude/agents/**/*.md` by frontmatter `name:` and by file stem.
+
+    Returns (name_index, stem_index). Skips non-files, zprof backup files,
+    and symlinks that resolve outside `.claude/agents/`. Never raises —
+    a missing or unreadable directory yields two empty indexes.
+    """
+    name_index: dict[str, list[Path]] = {}
+    stem_index: dict[str, list[Path]] = {}
+    root = Path(cwd) / ".claude" / "agents"
+    if not root.is_dir():
+        return name_index, stem_index
+    try:
+        root_resolved = root.resolve()
+    except OSError:
+        return name_index, stem_index
+    try:
+        candidates = sorted(root.rglob("*.md"))
+    except OSError:
+        return name_index, stem_index
+    for p in candidates:
+        try:
+            if not p.is_file() or _is_agent_backup_name(p.name):
+                continue
+            resolved = p.resolve()
+            if resolved != root_resolved and root_resolved not in resolved.parents:
+                continue  # symlink escapes .claude/agents/
+        except OSError:
+            continue
+        stem_index.setdefault(p.stem, []).append(p)
+        name = _agent_frontmatter_name(p)
+        if name:
+            name_index.setdefault(name, []).append(p)
+    return name_index, stem_index
+
+
+def _resolve_agent_file(cwd: str, agent_type: str) -> tuple[Path | None, int]:
+    """Resolve an `agent_type` string (from SubagentStop) to its definition file.
+
+    Returns (path, candidate_count):
+    - (None, 0) — empty agent_type, or no file matches (builtin agents like
+      `Explore`/`general-purpose`, plugin agents, user-level ~/.claude/agents).
+    - (path, 1) — exactly one match, by frontmatter `name:` or, failing that,
+      by file stem.
+    - (None, N>1) — ambiguous: N files share the same name. The caller does
+      not guess; a wrong hash is worse than a missing one.
+    """
+    if not agent_type:
+        return None, 0
+    name_index, stem_index = _agent_file_index(cwd)
+    candidates = name_index.get(agent_type) or stem_index.get(agent_type) or []
+    if len(candidates) == 1:
+        return candidates[0], 1
+    return None, len(candidates)
+
+
+def _agent_config_hash(cwd: str, agent_type: str) -> tuple[str | None, int]:
+    """Resolve `agent_type` to a file and hash its raw bytes.
+
+    Returns (hash, candidate_count). Hash is the first 12 hex chars of the
+    file's sha256, taken over the bytes as-is (no normalization), so a
+    `model:` change also changes the hash. Returns (None, N) when the file
+    can't be resolved (see `_resolve_agent_file`) or can't be read
+    (OSError). Never raises; stdlib only.
+    """
+    path, count = _resolve_agent_file(cwd, agent_type)
+    if path is None:
+        return None, count
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None, count
+    return hashlib.sha256(data).hexdigest()[:12], count
 
 
 def _collect_subagent_transcripts(
@@ -737,6 +1049,10 @@ def _collect_subagent_transcripts(
     running_agents: set,
     sess: dict,
     dispatches: list[dict],
+    redaction_patterns=None,
+    *,
+    require_completion_evidence: bool = False,
+    pointers: dict | None = None,
 ):
     """Copy subagent transcripts and enrich dispatch dicts with transcript data.
 
@@ -744,7 +1060,34 @@ def _collect_subagent_transcripts(
     meta.json files to correlate with dispatch_id (toolUseId), extracts
     token breakdown and model from the transcript JSONL, gzip-copies the
     transcript to .agentlog/transcripts/, and copies new tool-results.
+
+    Two modes for agents that have a meta.json but no recorded return:
+
+    - require_completion_evidence=True (Stop hook, incl. the synthetic Stop
+      of `zprof score`): the session is alive and a Stop may be a mid-run
+      flush with no `background_tasks`. An agent is finalized (row written,
+      tool events written, added to agents_done) only when a dispatch dict
+      for its toolUseId with dispatch_complete=True is already present —
+      from the main log's toolUseResult/notification or from pass-1 nested
+      extraction out of the parent's transcript. Otherwise it is left for a
+      later pass, so its real row is not shadowed by a meta-only one via
+      (dispatch_id, seq) dedup.
+    - require_completion_evidence=False (SessionStart recovery of dead
+      sessions): nothing will ever complete, so an agent without evidence
+      gets a meta-only row (seq 0, outcome inferred from truncation).
+
+    `pointers` is `state.data["pointers"]` (agent_id -> dict written by
+    SubagentStop). When an agent's pointer carries a `config_hash` snapshot,
+    it is used and the pointer is popped (consumed). Otherwise config_hash is
+    resolved now, from `agent_type` and `cwd`. Callers that don't pass
+    `pointers` (e.g. unit tests) always take the latter path.
     """
+    if redaction_patterns is None:
+        # agentlog is <cwd>/.agentlog — the project dir is its parent
+        redaction_patterns = _load_redaction_patterns(str(agentlog.parent))
+    mutating_patterns = [p for _, p in
+                         _load_pattern_list("mutating_bash_patterns", str(agentlog.parent))]
+    cwd = str(agentlog.parent)
     tp = Path(transcript_path)
     # subagents dir: transcript path without .jsonl extension + /subagents/
     subagents_dir = tp.with_suffix("") / "subagents"
@@ -757,111 +1100,191 @@ def _collect_subagent_transcripts(
         if did:
             dispatch_by_id.setdefault(did, []).append(i)
 
+    # Read every meta.json once.
+    metas: dict[str, dict] = {}
     if subagents_dir.is_dir():
         for meta_file in sorted(subagents_dir.glob("agent-*.meta.json")):
-            # agent-<agentId>.meta.json → agentId
             agent_id = meta_file.name[len("agent-"):-len(".meta.json")]
             if not agent_id:
                 continue
-            if agent_id in agents_done:
-                continue
-            if agent_id in running_agents:
-                continue
-
-            # Read meta.json
             try:
-                meta = json.loads(meta_file.read_text())
+                metas[agent_id] = json.loads(meta_file.read_text())
             except (OSError, json.JSONDecodeError):
                 _log_error(agentlog, f"failed to read meta.json for agent {agent_id}")
-                continue
 
-            tool_use_id = meta.get("toolUseId", "")
-            agent_type = meta.get("agentType", "")
-            parent_agent_id = meta.get("parentAgentId", "")
-            spawn_depth = meta.get("spawnDepth")
+    # Defer children whose parent is still running: their full row comes from
+    # the parent's transcript, and a thin row written now would block it via
+    # (dispatch_id, seq) dedup on the next pass.
+    deferred: set[str] = set()
+    for agent_id, meta in metas.items():
+        parent = meta.get("parentAgentId", "")
+        if parent and parent in running_agents:
+            deferred.add(agent_id)
 
-            # Resolve parent_dispatch_id: parentAgentId is an agent_id (hex),
-            # not a toolUseId.  Read the parent's meta.json to get its
-            # toolUseId so parent_dispatch_id is joinable with dispatch_id.
-            parent_dispatch_id = ""
-            if parent_agent_id:
-                parent_meta_file = subagents_dir / f"agent-{parent_agent_id}.meta.json"
-                try:
-                    parent_meta = json.loads(parent_meta_file.read_text())
-                    parent_dispatch_id = parent_meta.get("toolUseId", "")
-                except (OSError, json.JSONDecodeError):
-                    parent_dispatch_id = f"unresolved:{parent_agent_id}"
+    def _skip(agent_id: str) -> bool:
+        return agent_id in agents_done or agent_id in running_agents or agent_id in deferred
 
-            # Read the corresponding transcript JSONL
-            transcript_file = subagents_dir / f"agent-{agent_id}.jsonl"
-            transcript_data = _extract_subagent_transcript(transcript_file)
-
-            # Gzip-copy transcript to .agentlog/transcripts/
-            transcript_ref = ""
-            if transcript_file.exists():
-                gz_name = f"{agent_id}.jsonl.gz"
-                gz_path = agentlog / "transcripts" / gz_name
-                try:
-                    _gzip_copy(transcript_file, gz_path)
-                    transcript_ref = f"transcripts/{gz_name}"
-                except OSError:
-                    _log_error(agentlog, f"failed to gzip-copy transcript for agent {agent_id}")
-
-            # Enrich matching dispatch dicts — only set fields when
-            # the value is meaningful to avoid blanking correct data
-            # from Task 3's main-log extraction.
-            enrichment = {
-                "agent_id": agent_id,
-                "transcript_ref": transcript_ref,
-                "transcript_captured": bool(transcript_ref),
-            }
-            if agent_type:
-                enrichment["role"] = agent_type
-            if spawn_depth is not None and spawn_depth > 0:
-                enrichment["spawn_depth"] = spawn_depth
-            if parent_dispatch_id:
-                enrichment["parent_dispatch_id"] = parent_dispatch_id
-            if transcript_data["truncated"]:
-                enrichment["transcript_truncated"] = True
-
-            # Token data from transcript (more accurate than main log)
-            if transcript_data["tokens_input"] or transcript_data["tokens_output"]:
-                enrichment["tokens_input"] = transcript_data["tokens_input"]
-                enrichment["tokens_output"] = transcript_data["tokens_output"]
-                enrichment["tokens_cache_read"] = transcript_data["tokens_cache_read"]
-                enrichment["tokens_cache_creation"] = transcript_data["tokens_cache_creation"]
-
-            # Model from transcript (actual model used, more accurate)
-            if transcript_data["model"]:
-                enrichment["model_resolved"] = transcript_data["model"]
-
-            if tool_use_id and tool_use_id in dispatch_by_id:
-                for idx in dispatch_by_id[tool_use_id]:
-                    dispatches[idx].update(enrichment)
-                    # Return text from transcript's last assistant message.
-                    # Only backfill if sync path didn't already populate it.
-                    if not dispatches[idx].get("returned") and transcript_data.get("returned"):
-                        dispatches[idx]["returned"] = transcript_data["returned"]
+    # Pass 1 (C1): nested dispatches. A task-runner's transcript holds the same
+    # Agent tool_use + toolUseResult records as the main log.
+    for agent_id, meta in metas.items():
+        if _skip(agent_id):
+            continue
+        transcript_file = subagents_dir / f"agent-{agent_id}.jsonl"
+        if not transcript_file.exists():
+            continue
+        try:
+            raw = transcript_file.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        try:
+            nested = _extract_dispatches_from_text(session_id, raw, {}, set())
+        except Exception:
+            _log_error(agentlog, f"nested extraction failed for agent {agent_id}: {traceback.format_exc()}")
+            continue
+        parent_tool_use_id = meta.get("toolUseId", "")
+        depth = (meta.get("spawnDepth") or 1) + 1
+        for d in nested["dispatches"]:
+            if parent_tool_use_id:
+                d["parent_dispatch_id"] = parent_tool_use_id
+            d["spawn_depth"] = depth
+            did = d.get("dispatch_id", "")
+            if did in dispatch_by_id:
+                for idx in dispatch_by_id[did]:
+                    _merge_dispatch(dispatches[idx], d)
             else:
-                # No matching dispatch from main log — create one from meta
-                # alone.  Outcome is unknown (killed session recovery path),
-                # so mark dispatch_complete based on transcript truncation.
-                is_truncated = transcript_data["truncated"]
-                dispatch = {
-                    "dispatch_id": tool_use_id or f"meta:{agent_id}",
-                    "session_id": session_id,
-                    "agent_id": agent_id,
-                    "status": "completed" if not is_truncated else "unknown",
-                    "dispatch_complete": not is_truncated,
-                    "seq": 0,
-                    "ts_utc": "",
-                }
-                dispatch.update(enrichment)
-                if transcript_data.get("returned"):
-                    dispatch["returned"] = transcript_data["returned"]
-                dispatches.append(dispatch)
+                dispatches.append(d)
+                dispatch_by_id.setdefault(did, []).append(len(dispatches) - 1)
 
-            agents_done.add(agent_id)
+    # Pass 2: per-agent enrichment (unchanged logic, now iterating `metas`).
+    for agent_id, meta in metas.items():
+        if _skip(agent_id):
+            continue
+        tool_use_id = meta.get("toolUseId", "")
+        if require_completion_evidence and not (
+                tool_use_id in dispatch_by_id
+                and any(dispatches[i].get("dispatch_complete") for i in dispatch_by_id[tool_use_id])):
+            # Still in flight (or its return is not on record yet): no row,
+            # no tool events, not agents_done — a later Stop picks it up.
+            continue
+        agent_type = meta.get("agentType", "")
+        parent_agent_id = meta.get("parentAgentId", "")
+        spawn_depth = meta.get("spawnDepth")
+
+        # config_hash: prefer the snapshot taken at SubagentStop (pointer),
+        # since the agent file may have been rewritten since then. Consume
+        # the pointer once used. No pointer (e.g. SessionStart recovery of a
+        # dead session, or a caller that doesn't track pointers) falls back
+        # to resolving now, from the current file on disk.
+        pointer = (pointers or {}).pop(agent_id, None)
+        if pointer is not None:
+            config_hash = pointer.get("config_hash")
+            config_hash_candidates = pointer.get("config_hash_candidates", 0)
+            config_hash_source = "subagent-stop"
+        else:
+            config_hash, config_hash_candidates = _agent_config_hash(cwd, agent_type)
+            config_hash_source = "collect"
+        config_hash_ext = {"config_hash_source": config_hash_source}
+        if config_hash_candidates and config_hash_candidates > 1:
+            config_hash_ext["config_hash_ambiguous"] = config_hash_candidates
+
+        # Resolve parent_dispatch_id: parentAgentId is an agent_id (hex),
+        # not a toolUseId.  Read the parent's meta.json to get its
+        # toolUseId so parent_dispatch_id is joinable with dispatch_id.
+        parent_dispatch_id = ""
+        if parent_agent_id:
+            parent_meta_file = subagents_dir / f"agent-{parent_agent_id}.meta.json"
+            try:
+                parent_meta = json.loads(parent_meta_file.read_text())
+                parent_dispatch_id = parent_meta.get("toolUseId", "")
+            except (OSError, json.JSONDecodeError):
+                parent_dispatch_id = f"unresolved:{parent_agent_id}"
+
+        # Read the corresponding transcript JSONL
+        transcript_file = subagents_dir / f"agent-{agent_id}.jsonl"
+        transcript_data = _extract_subagent_transcript(transcript_file)
+
+        # Gzip-copy transcript to .agentlog/transcripts/
+        transcript_ref = ""
+        if transcript_file.exists():
+            gz_name = f"{agent_id}.jsonl.gz"
+            gz_path = agentlog / "transcripts" / gz_name
+            try:
+                _gzip_copy(transcript_file, gz_path)
+                transcript_ref = f"transcripts/{gz_name}"
+            except OSError:
+                _log_error(agentlog, f"failed to gzip-copy transcript for agent {agent_id}")
+
+        # C3: leaf tool calls of this agent → tool-events.jsonl
+        if transcript_file.exists():
+            try:
+                events = _extract_tool_events(transcript_file, mutating_patterns=mutating_patterns)
+                composite = _make_composite_id(session_id, tool_use_id or f"meta:{agent_id}")
+                _write_tool_events(agentlog, composite, events, redaction_patterns)
+            except Exception:
+                _log_error(agentlog, f"tool-events failed for agent {agent_id}: {traceback.format_exc()}")
+
+        # Enrich matching dispatch dicts — only set fields when
+        # the value is meaningful to avoid blanking correct data
+        # from Task 3's main-log extraction.
+        enrichment = {
+            "agent_id": agent_id,
+            "transcript_ref": transcript_ref,
+            "transcript_captured": bool(transcript_ref),
+            "config_hash": config_hash,
+        }
+        if agent_type:
+            enrichment["role"] = agent_type
+        if spawn_depth is not None and spawn_depth > 0:
+            enrichment["spawn_depth"] = spawn_depth
+        if parent_dispatch_id:
+            enrichment["parent_dispatch_id"] = parent_dispatch_id
+        if transcript_data["truncated"]:
+            enrichment["transcript_truncated"] = True
+
+        # Token data from transcript (more accurate than main log)
+        if transcript_data["tokens_input"] or transcript_data["tokens_output"]:
+            enrichment["tokens_input"] = transcript_data["tokens_input"]
+            enrichment["tokens_output"] = transcript_data["tokens_output"]
+            enrichment["tokens_cache_read"] = transcript_data["tokens_cache_read"]
+            enrichment["tokens_cache_creation"] = transcript_data["tokens_cache_creation"]
+
+        # Model from transcript (actual model used, more accurate)
+        if transcript_data["model"]:
+            enrichment["model_resolved"] = transcript_data["model"]
+
+        if tool_use_id and tool_use_id in dispatch_by_id:
+            for idx in dispatch_by_id[tool_use_id]:
+                dispatches[idx].update(enrichment)
+                ext = dict(dispatches[idx].get("ext") or {})
+                ext.update(config_hash_ext)
+                dispatches[idx]["ext"] = ext
+                # Return text from transcript's last assistant message.
+                # Only backfill if sync path didn't already populate it.
+                if not dispatches[idx].get("returned") and transcript_data.get("returned"):
+                    dispatches[idx]["returned"] = transcript_data["returned"]
+        else:
+            # No matching dispatch from main log — create one from meta
+            # alone.  Outcome is unknown (killed session recovery path),
+            # so mark dispatch_complete based on transcript truncation.
+            is_truncated = transcript_data["truncated"]
+            dispatch = {
+                "dispatch_id": tool_use_id or f"meta:{agent_id}",
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "status": "completed" if not is_truncated else "unknown",
+                "dispatch_complete": not is_truncated,
+                "seq": 0,
+                "ts_utc": "",
+            }
+            dispatch.update(enrichment)
+            ext = dict(dispatch.get("ext") or {})
+            ext.update(config_hash_ext)
+            dispatch["ext"] = ext
+            if transcript_data.get("returned"):
+                dispatch["returned"] = transcript_data["returned"]
+            dispatches.append(dispatch)
+
+        agents_done.add(agent_id)
 
     # Mark dispatches that have no transcript as transcript_captured=false
     for d in dispatches:
@@ -966,7 +1389,7 @@ def _get_project_id(cwd: str) -> tuple[str, bool]:
         result = subprocess.run(
             ["git", "rev-list", "--max-parents=0", "HEAD"],
             capture_output=True, text=True, timeout=5,
-            cwd=cwd,
+            cwd=cwd, check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
             roots = sorted(result.stdout.strip().split())
@@ -982,29 +1405,63 @@ def _get_project_id(cwd: str) -> tuple[str, bool]:
 
 
 def _load_redaction_patterns(project_cwd: str | None = None) -> list[tuple[str, "re.Pattern[str]"]]:
-    """Load redaction patterns from telemetry.yaml and optional .zprof.yaml.
+    """Load redaction patterns (see _load_pattern_list) plus optional .zprof.yaml extras.
 
     Returns list of (pattern_name, compiled_regex) tuples.
     """
-    patterns: list[tuple[str, "re.Pattern[str]"]] = []
-
-    # Load from telemetry.yaml (bundled next to this script)
-    telemetry_yaml = Path(__file__).parent / "telemetry.yaml"
-    if telemetry_yaml.exists():
-        patterns.extend(_parse_redaction_patterns_from_yaml(telemetry_yaml))
-
-    # Load from project's .zprof.yaml if present
+    patterns = _load_pattern_list("redaction_patterns", project_cwd)
+    # Project-specific extras from .zprof.yaml (redaction_patterns only)
     if project_cwd:
         zprof_yaml = Path(project_cwd) / ".zprof.yaml"
         if zprof_yaml.exists():
-            patterns.extend(_parse_redaction_patterns_from_yaml(zprof_yaml))
-
+            patterns.extend(_compile_patterns(
+                _parse_quoted_list_from_yaml(zprof_yaml, "redaction_patterns")))
     return patterns
 
 
-def _parse_redaction_patterns_from_yaml(path: Path) -> list[tuple[str, "re.Pattern[str]"]]:
-    """Parse redaction_patterns from a YAML file (stdlib-only parser)."""
+def _load_pattern_list(key: str, cwd: str | None) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Load a top-level list of regexes from the telemetry settings.
+
+    Source layout: telemetry.yaml next to this script. Deployed layout
+    (`.claude/zprof-collect.py`, no telemetry.yaml): `zprof apply` converts
+    telemetry.yaml into <cwd>/.agentlog/schema.json, so fall back to that.
+    Invalid regexes are skipped. Never raises.
+    """
+    raw: list[str] = []
+    try:
+        telemetry_yaml = Path(__file__).parent / "telemetry.yaml"
+        if telemetry_yaml.exists():
+            raw = _parse_quoted_list_from_yaml(telemetry_yaml, key)
+        elif cwd:
+            schema_json = Path(cwd) / ".agentlog" / "schema.json"
+            if schema_json.exists():
+                data = json.loads(schema_json.read_text(encoding="utf-8"))
+                vals = data.get(key, []) if isinstance(data, dict) else []
+                if isinstance(vals, list):
+                    raw = [v for v in vals if isinstance(v, str)]
+    except (OSError, ValueError):
+        raw = []
+    return _compile_patterns(raw)
+
+
+def _compile_patterns(raw: list[str]) -> list[tuple[str, "re.Pattern[str]"]]:
+    """Compile regex strings into (name, pattern) tuples, skipping invalid ones."""
     results = []
+    for pat in raw:
+        try:
+            results.append((_pattern_name(pat), re.compile(pat)))
+        except re.error:
+            pass
+    return results
+
+
+def _parse_quoted_list_from_yaml(path: Path, key: str) -> list[str]:
+    """Return the string items of top-level list `key` in a YAML file (stdlib-only parser).
+
+    Handles `- "quoted"` / `- 'quoted'` / bare items; double-quoted backslashes
+    are unescaped. Returns raw (uncompiled) strings.
+    """
+    results: list[str] = []
     try:
         text = path.read_text()
     except OSError:
@@ -1013,30 +1470,20 @@ def _parse_redaction_patterns_from_yaml(path: Path) -> list[tuple[str, "re.Patte
     in_section = False
     for line in text.split("\n"):
         stripped = line.strip()
-        if stripped.startswith("redaction_patterns:"):
+        if stripped.startswith(f"{key}:"):
             in_section = True
             continue
-        if in_section:
-            if stripped.startswith("- "):
-                # Extract the pattern string (YAML list item)
-                raw_pat = stripped[2:].strip()
-                # Remove quotes if present
-                if (raw_pat.startswith('"') and raw_pat.endswith('"')) or \
-                   (raw_pat.startswith("'") and raw_pat.endswith("'")):
-                    raw_pat = raw_pat[1:-1]
-                # Unescape YAML double-quoted backslashes
-                raw_pat = raw_pat.replace("\\\\", "\\")
-                # Derive a short name from the pattern
-                name = _pattern_name(raw_pat)
-                try:
-                    compiled = re.compile(raw_pat)
-                    results.append((name, compiled))
-                except re.error:
-                    pass
-            elif stripped and not stripped.startswith("#"):
-                # Next YAML key — end of redaction_patterns section
-                in_section = False
-
+        if not in_section:
+            continue
+        if stripped.startswith("- "):
+            raw_pat = stripped[2:].strip()
+            if (raw_pat.startswith('"') and raw_pat.endswith('"')) or \
+               (raw_pat.startswith("'") and raw_pat.endswith("'")):
+                raw_pat = raw_pat[1:-1]
+            raw_pat = raw_pat.replace("\\\\", "\\")
+            results.append(raw_pat)
+        elif stripped and not stripped.startswith("#"):
+            in_section = False  # next YAML key — end of section
     return results
 
 
@@ -1101,6 +1548,11 @@ def _class_a_checks(returned: str | None, cwd: str,
         "return_parsed": None,
         "artifact_exists": None,
         "next_is_reachable": None,
+        # C2 — raw values, popped by _normalize_dispatch before norm.update()
+        "verdict_value": None,
+        "next_value": None,
+        "artifact_path": None,
+        "run_log": None,
     }
     if returned is None:
         return result
@@ -1124,6 +1576,11 @@ def _class_a_checks(returned: str | None, cwd: str,
     else:
         result["has_preamble"] = None
 
+    if verdict_idx is not None:
+        raw_v = lines[verdict_idx].strip().split(":", 1)[1].strip()
+        # first whitespace-delimited token, lowercased: "Approve-With-Fixes   " -> "approve-with-fixes"
+        result["verdict_value"] = raw_v.split()[0].lower() if raw_v else None
+
     # artifact_exists: check if referenced artifact path exists
     for line in lines:
         stripped = line.strip()
@@ -1135,6 +1592,7 @@ def _class_a_checks(returned: str | None, cwd: str,
                 if not p.is_absolute():
                     p = Path(cwd) / artifact_path
                 result["artifact_exists"] = p.exists()
+            result["artifact_path"] = artifact_path or None
             break
 
     # next_is_reachable: check if next: value is a known role
@@ -1145,6 +1603,14 @@ def _class_a_checks(returned: str | None, cwd: str,
             next_val = stripped.split(":", 1)[1].strip()
             if next_val:
                 result["next_is_reachable"] = next_val in roles
+            result["next_value"] = next_val or None
+            break
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.lower().startswith("run_log:"):
+            rl = stripped.split(":", 1)[1].strip()
+            result["run_log"] = rl or None
             break
 
     return result
@@ -1154,7 +1620,7 @@ def _make_composite_id(session_id: str, raw_id: str) -> str:
     """Prefix a raw dispatch/parent ID with claude-code:<session>:."""
     if not raw_id:
         return ""
-    if raw_id.startswith("unresolved:") or raw_id.startswith("meta:"):
+    if raw_id.startswith(("unresolved:", "meta:")):
         return raw_id
     if raw_id.startswith("claude-code:"):
         return raw_id
@@ -1219,6 +1685,9 @@ def _normalize_dispatch(
 
     # Extension — merge project_id_provisional into ext (not a core field)
     ext = raw.get("ext")
+    if ext and ext.get("run_id"):
+        ext = dict(ext)
+        ext["run_id"] = _make_composite_id(session_id, ext["run_id"])
     if project_id_provisional:
         if ext is None:
             ext = {}
@@ -1230,7 +1699,22 @@ def _normalize_dispatch(
     returned = raw.get("returned")
     cwd = raw.get("cwd", "")
     checks = _class_a_checks(returned, cwd, known_roles=known_roles)
+    verdict_value = checks.pop("verdict_value", None)
+    next_value = checks.pop("next_value", None)
+    artifact_path = checks.pop("artifact_path", None)
+    run_log = checks.pop("run_log", None)
     norm.update(checks)
+    if verdict_value and not norm.get("verdict"):
+        norm["verdict"] = verdict_value
+    if next_value or artifact_path or run_log:
+        ext = dict(norm.get("ext") or {})
+        if next_value:
+            ext["next"] = next_value
+        if artifact_path:
+            ext["artifact"] = artifact_path
+        if run_log:
+            ext["run_log"] = run_log
+        norm["ext"] = ext
 
     # Remove None values for cleaner JSONL (optional fields)
     norm = {k: v for k, v in norm.items() if v is not None}
@@ -1264,6 +1748,29 @@ def _load_dedup_set(dispatches_path: Path) -> set[tuple[str, int]]:
     return seen
 
 
+_RUN_CHAIN_MAX_HOPS = 16
+
+
+def _assign_run_ids(dispatches: list[dict]) -> None:
+    """C4: ext.run_id = dispatch_id of the nearest task-runner ancestor (in-memory chain).
+
+    Best effort: only dispatches whose chain is fully present in this batch get
+    a run_id. `zprof score` re-derives membership from parent_dispatch_id
+    anyway, so a missing run_id is a slower path, not a wrong answer.
+    """
+    by_id = {d.get("dispatch_id", ""): d for d in dispatches if d.get("dispatch_id")}
+    for d in dispatches:
+        cur, hops = d, 0
+        while cur is not None and hops < _RUN_CHAIN_MAX_HOPS:
+            if cur.get("role") == "task-runner":
+                ext = dict(d.get("ext") or {})
+                ext["run_id"] = cur["dispatch_id"]
+                d["ext"] = ext
+                break
+            cur = by_id.get(cur.get("parent_dispatch_id", ""))
+            hops += 1
+
+
 def _normalize_and_write(
     agentlog: Path,
     dispatches: list[dict],
@@ -1280,6 +1787,7 @@ def _normalize_and_write(
         return
 
     cwd = payload.get("cwd", os.getcwd())
+    _assign_run_ids(dispatches)
 
     # Identity
     machine_id = _get_machine_id()
