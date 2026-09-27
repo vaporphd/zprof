@@ -97,3 +97,12 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 - Промпты: русский текст, английские ключи/имена
 - Agent files: 200–400 lines executors, 500–800 orchestrators
 <!-- zprof:end executing -->
+
+## Интеграция ветки
+
+Готовая ветка попадает в `main` **только через PR**, который ведёт `pr-shepherd`:
+`git push -u origin <branch>` → `gh pr create` → dispatch `pr-shepherd` → человек
+делает merge. Main-сессия не мержит в `main` сама и не предлагает «merge locally»,
+даже если внешний skill (finishing-a-development-branch, SDD) показывает такое меню —
+инструкции этого файла его перебивают. Это же правило действует во всех проектах
+под zprof (urok: `tasks/lessons.md`, 2026-09-27).
