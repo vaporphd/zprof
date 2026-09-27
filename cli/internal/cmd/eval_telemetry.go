@@ -14,9 +14,9 @@ import (
 
 func NewEvalTelemetryCmd() *cobra.Command {
 	var (
-		role    string
-		metric  string
-		model   string
+		role   string
+		metric string
+		model  string
 	)
 	c := &cobra.Command{
 		Use:   "eval-telemetry <agentlog-dir>",

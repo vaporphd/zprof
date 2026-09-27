@@ -43,22 +43,22 @@ func GuessRole(description string) string {
 // RoleStats is the deterministic scorecard for one role, aggregated over
 // every dispatch attributed to that role in a session.
 type RoleStats struct {
-	Role             string
-	Model            string // most recent model seen for this role
-	Dispatches       int
-	Completed        int
-	PassAt1          float64 // ratio, [0.0, 1.0]
-	MedianTokens     int
-	TotalTokens      int
-	ApT              float64 // per OckBench: passed * 1e5 / total_output_tokens
-	ArtifactExists   int     // rows where the artifact claim was writing-verified
-	ArtifactMissing  int     // artifact claimed but not found on disk
-	HadPreamble      int
-	NextReachable    int
-	NextUnreachable  int
-	AvgConfidence    float64 // averaged over dispatches that reported it
-	ConfidenceCount  int     // how many dispatches self-reported confidence
-	AvgDurationMs    int64
+	Role            string
+	Model           string // most recent model seen for this role
+	Dispatches      int
+	Completed       int
+	PassAt1         float64 // ratio, [0.0, 1.0]
+	MedianTokens    int
+	TotalTokens     int
+	ApT             float64 // per OckBench: passed * 1e5 / total_output_tokens
+	ArtifactExists  int     // rows where the artifact claim was writing-verified
+	ArtifactMissing int     // artifact claimed but not found on disk
+	HadPreamble     int
+	NextReachable   int
+	NextUnreachable int
+	AvgConfidence   float64 // averaged over dispatches that reported it
+	ConfidenceCount int     // how many dispatches self-reported confidence
+	AvgDurationMs   int64
 }
 
 // SessionScore is the top-level Tier-1 scorecard.

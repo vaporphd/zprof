@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/stretchr/testify/require"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 func TestSetModelOverride(t *testing.T) {

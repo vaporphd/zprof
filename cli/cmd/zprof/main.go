@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vaporphd/zprof/internal/cmd"
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/cmd"
 )
 
 var version = "0.1.0-dev"

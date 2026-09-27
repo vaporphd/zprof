@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/vaporphd/zprof/internal/models"
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/models"
 )
 
 // NewModelsCmd returns the `zprof models` command group.

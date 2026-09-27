@@ -13,22 +13,22 @@ import "strings"
 //     role's output is parsed as a schema by whoever dispatched it, while a
 //     tool-agent's is consumed by the step that called it.
 var Roles = map[string]bool{
-	"planner":        true,
-	"docs-writer":    true,
-	"task-runner":    true,
-	"architect":      true,
-	"implementer":    true,
-	"tester":         true,
-	"bug-hunter":     true,
-	"refactor-agent": true,
-	"explorer":            true,
-	"reviewer":            true,
-	"frontend-developer":  true,
-	"pr-shepherd":         true,
-	"groomer":             true,
-	"wiki-keeper":         true,
-	"auditor":             true,
-	"auditor-deep":        true,
+	"planner":            true,
+	"docs-writer":        true,
+	"task-runner":        true,
+	"architect":          true,
+	"implementer":        true,
+	"tester":             true,
+	"bug-hunter":         true,
+	"refactor-agent":     true,
+	"explorer":           true,
+	"reviewer":           true,
+	"frontend-developer": true,
+	"pr-shepherd":        true,
+	"groomer":            true,
+	"wiki-keeper":        true,
+	"auditor":            true,
+	"auditor-deep":       true,
 }
 
 // Gates are the base agents/gates/*.md that count as roles when

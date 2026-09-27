@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vaporphd/zprof/internal/doctor"
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/doctor"
 )
 
 // NewDoctorCmd returns the `zprof doctor` command: diagnostics for the

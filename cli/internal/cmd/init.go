@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/vaporphd/zprof/internal/wizard"
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/wizard"
 )
 
 // NewInitCmd returns the `zprof init` command: an interactive wizard that
