@@ -56,9 +56,17 @@ func Defaults() Config {
 		Saturation:    map[string]float64{"P1": 0.20, "P2": 3, "P3": 0.5, "P4": 2, "P5": 2, "P6": 0.30, "P7": 4},
 		Thresholds:    Thresholds{Ideal: 85, Solid: 60},
 		MutatingTools: map[string]bool{"Edit": true, "Write": true, "MultiEdit": true, "NotebookEdit": true},
-		ExemptRoles:   map[string]bool{"auditor": true, "auditor-deep": true},
+		// Empty since #20 (ADR 0003): doctor now guarantees every role's
+		// return_format starts with `verdict:` (auditor/auditor-deep
+		// migrated off `completion:`), so P6/P7 no longer need to look away
+		// from these roles. The mechanism stays for schema.json overrides on
+		// projects with an older, unmigrated auditor.
+		ExemptRoles: map[string]bool{},
 		// mirrors telemetry.yaml `review_block_verdicts`
-		ReviewBlockVerdicts: map[string]bool{"block": true, "changes-requested": true, "blocked": true},
+		ReviewBlockVerdicts: map[string]bool{
+			"block": true, "changes-requested": true, "awaiting-approval": true,
+			"failed": true, "blocked": true,
+		},
 	}
 	c.MutatingBash = compilePatterns(defaultMutatingBash)
 	return c

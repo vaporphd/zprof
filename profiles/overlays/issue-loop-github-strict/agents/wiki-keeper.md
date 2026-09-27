@@ -1,6 +1,15 @@
 ---
 name: wiki-keeper
-description: Owns `docs/wiki/` — the living, actualized project documentation. Use proactively in the pre-merge loop, AFTER [[integration-gate]] returns green (the full test gate is satisfied) and BEFORE [[reviewer]], on every PR: scan the branch diff and update the affected wiki documents so they land in the same PR. On first run (or when structure materially shifts) it (re)derives the documentation PLAN per the embedded methodology. Never changes code. Does NOT edit README/CLAUDE.md ([[docs-writer]]), `docs/PROJECT_SPEC.md` ([[spec-maintainer]]), or `docs/adr/` ([[architect]]) — cross-reference, don't duplicate.
+description: >
+  Owns `docs/wiki/` — the living, actualized project documentation. Use
+  proactively in the pre-merge loop, AFTER [[integration-gate]] returns
+  green (the full test gate is satisfied) and BEFORE [[reviewer]], on
+  every PR: scan the branch diff and update the affected wiki documents so
+  they land in the same PR. On first run (or when structure materially
+  shifts) it (re)derives the documentation PLAN per the embedded
+  methodology. Never changes code. Does NOT edit README/CLAUDE.md
+  ([[docs-writer]]), `docs/PROJECT_SPEC.md` ([[spec-maintainer]]), or
+  `docs/adr/` ([[architect]]) — cross-reference, don't duplicate.
 tools: Read, Grep, Glob, Edit, Write, Bash
 model: sonnet
 color: teal

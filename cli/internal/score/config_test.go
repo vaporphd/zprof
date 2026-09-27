@@ -25,7 +25,7 @@ func TestDefaults_WeightsSumTo100(t *testing.T) {
 	require.Equal(t, Thresholds{Ideal: 85, Solid: 60}, c.Thresholds)
 	require.True(t, c.Enabled)
 	require.True(t, c.MutatingTools["Edit"])
-	require.True(t, c.ExemptRoles["auditor-deep"])
+	require.Empty(t, c.ExemptRoles, "empty since #20: doctor guarantees verdict: on every role")
 }
 
 func TestDefaults_MutatingBashExcludesBuildAndTest(t *testing.T) {

@@ -664,12 +664,29 @@ def test_run_log_persisted_for_task_runner():
 
 
 def test_verdict_absent_when_no_verdict_line():
+    """Legacy `completion:` auditors (pre-#20) are not given a compat alias
+    (ADR 0003 §D6, alternative 6): a project on an unmigrated auditor.md
+    keeps failing return_parsed, same as any other agent that skips the
+    schema — that's the honest signal, not something to paper over."""
     raw = {"dispatch_id": "toolu_a", "role": "auditor", "status": "completed",
            "returned": "completion: complete\nintegrity: clean\nevidence: x.md"}
     norm = _norm(raw)
     assert "verdict" not in norm
     assert norm["return_parsed"] is False
     assert norm.get("ext") in (None, {})
+
+
+def test_auditor_verdict_key_parses_since_20():
+    """AC5 (#20, ADR 0003 §D6): auditor.md now answers `verdict: complete`
+    instead of `completion: complete` — the collector needs no code change
+    to pick it up, since `_class_a_checks` already scans for the first
+    `verdict:` line anywhere in the response, not a fixed first line."""
+    raw = {"dispatch_id": "toolu_a2", "role": "auditor", "status": "completed",
+           "returned": "verdict: complete\nintegrity: clean\nevidence: .zprof/runs/x-audit-1.md\none_line: ok"}
+    norm = _norm(raw)
+    assert norm["return_parsed"] is True
+    assert norm["has_preamble"] is False
+    assert norm["verdict"] == "complete"
 
 
 def test_verdict_value_is_lowercased_first_token():

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/vaporphd/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/verdicts"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,7 +40,7 @@ func deployCollector(projectDir string, base *overlay.Base) ([]string, error) {
 	}
 
 	if len(base.TelemetrySchema) > 0 {
-		schema, err := yamlToJSON(base.TelemetrySchema)
+		schema, err := renderSchema(base.TelemetrySchema, base.Verdicts)
 		if err != nil {
 			return nil, fmt.Errorf("convert telemetry.yaml to schema.json: %w", err)
 		}
@@ -78,18 +79,56 @@ func DeployTelemetry(projectDir string, base *overlay.Base) ([]string, error) {
 	return written, nil
 }
 
-// yamlToJSON converts telemetry.yaml into indented JSON for schema.json.
-// yaml.v3 decodes mappings into map[string]interface{} (unlike yaml.v2's
-// map[interface{}]interface{}), so the decoded value round-trips through
-// encoding/json without any key normalization.
-func yamlToJSON(data []byte) ([]byte, error) {
+// renderSchema converts telemetry.yaml into indented JSON for schema.json,
+// merging the verdicts registry (ADR 0003, docs/adr/0003-verdicts-registry.md
+// §D4) into it under the top-level `verdicts` key when verdictsYAML is
+// non-empty. yaml.v3 decodes mappings into map[string]interface{} (unlike
+// yaml.v2's map[interface{}]interface{}), so the decoded telemetry value
+// round-trips through encoding/json without any key normalization.
+//
+// The registry is deployed by merging rather than as its own file: every
+// runtime reader of the zprof contract (collector, score, the future guard
+// renderer) already reads schema.json, and `zprof apply --telemetry-only`
+// (ADR 0001) gets the registry for free without touching DeployTelemetry's
+// signature. A bad registry fails the apply outright (fail-closed) — that's
+// an authoring error in zprof caught by the repo-level consistency test,
+// not something a project author can fix.
+func renderSchema(telemetry, verdictsYAML []byte) ([]byte, error) {
 	var v interface{}
-	if err := yaml.Unmarshal(data, &v); err != nil {
+	if err := yaml.Unmarshal(telemetry, &v); err != nil {
 		return nil, fmt.Errorf("unmarshal yaml: %w", err)
+	}
+	if len(verdictsYAML) > 0 {
+		m, ok := v.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("render verdicts into schema.json: telemetry.yaml: top level is not a mapping")
+		}
+		if err := mergeVerdicts(m, verdictsYAML); err != nil {
+			return nil, fmt.Errorf("render verdicts into schema.json: %w", err)
+		}
+		v = m
 	}
 	out, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("marshal json: %w", err)
 	}
 	return append(out, '\n'), nil
+}
+
+// mergeVerdicts parses and validates verdictsYAML, then sets telemetry's
+// `verdicts` key to its normalized form. It errors if telemetry.yaml
+// already defines that key — the two sources must not collide silently.
+func mergeVerdicts(telemetry map[string]interface{}, verdictsYAML []byte) error {
+	if _, exists := telemetry["verdicts"]; exists {
+		return fmt.Errorf("telemetry.yaml must not define top-level key %q", "verdicts")
+	}
+	reg, err := verdicts.Parse(verdictsYAML)
+	if err != nil {
+		return err
+	}
+	if err := reg.Validate(); err != nil {
+		return err
+	}
+	telemetry["verdicts"] = reg.Normalized()
+	return nil
 }

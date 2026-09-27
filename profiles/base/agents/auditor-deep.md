@@ -8,8 +8,8 @@ tools: Read, Grep, Glob, Bash
 model: opus
 color: orange
 return_format: |
-  # CRITICAL: ответ начинается с `completion:` — без преамбулы и код-фенса.
-  completion: complete|incomplete|blocked
+  # CRITICAL: ответ начинается с `verdict:` — без преамбулы и код-фенса.
+  verdict: complete|incomplete|blocked
   integrity: clean|violation
   evidence: .zprof/runs/<run-id>-audit-<n>.md
   requirements: <id>=<completed|blocked|untrusted>[, ...]
@@ -86,9 +86,9 @@ executor_one_line: <что он сказал>
    - Что увидел (конкретный вывод, ≤20 строк)
    - Вердикт по этому AC: pass / fail / cannot-verify
 
-4. **Вынеси итог.** Если все AC = pass → `completion: complete`.
-   Хотя бы один fail → `completion: incomplete`. Хотя бы один
-   cannot-verify без fail → `completion: blocked`.
+4. **Вынеси итог.** Если все AC = pass → `verdict: complete`.
+   Хотя бы один fail → `verdict: incomplete`. Хотя бы один
+   cannot-verify без fail → `verdict: blocked`.
 
 ## Evidence-файл
 
@@ -112,7 +112,7 @@ reason: <если fail/cannot-verify — почему>
 ## AC2: ...
 
 ## Summary
-completion: complete|incomplete|blocked
+verdict: complete|incomplete|blocked
 integrity: clean|violation
 ```
 
