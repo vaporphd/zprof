@@ -801,6 +801,26 @@ func TestDoctorMessagesAreEnglish(t *testing.T) {
 	}
 }
 
+// TestDiagnoseSurfacesRunnerBudgetWithoutAuditSection proves the wiring in
+// Diagnose itself, not just checkRunnerBudget in isolation: a project with
+// no `audit:` section at all (so AuditEnabled() is false) and a too-small
+// `runner.max_dispatches` must still surface the budget warning through the
+// public Diagnose entry point. A regression that re-gates the call behind
+// proj.AuditEnabled() would pass every checkRunnerBudget-direct test above
+// yet silently drop the issue here.
+func TestDiagnoseSurfacesRunnerBudgetWithoutAuditSection(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"),
+		[]byte("overlays: []\nrunner:\n  max_dispatches: 2\n"), 0o644))
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelWarn, "runner.max_dispatches"))
+	require.False(t, findIssue(issues, LevelWarn, "deprecated"),
+		"no audit.max_dispatches was set — the deprecation warning must not fire")
+}
+
 // --- global runner dispatch budget (issue #19) ---------------------------
 
 // The counter is global, not audit-gated: a too-small budget must warn even
