@@ -2,12 +2,13 @@
 
 ## Status
 - 2026-09-27: panel-2026-09-27 (#14–#22 + #34/#36/#37, plan-1.md); guard (#23–#31, plan-2.md). Решения Alex: auto-merge везде; --delete-branch остаётся; защита контрактов = required CI; guard fail-open, deny везде.
-- Done: #14 PR #32, #22 PR #33, #34 PR #35, #15 PR #38, #16 PR #39 (pr-shepherd: rulesets + self-run tests, ADR 0002), #19 PR #40 (глобальный max_dispatches: runner.max_dispatches, deprecated audit.max_dispatches alias). #18 закрыт как superseded #28.
-- Score 76/100 · Solid · done · 2026-09-27-pr-shepherd-local-green-tests · confidence full
-  30.3M tok · 12 dispatch · 298 tool calls · 43 min · sonnet×10 opus×3 · −10 P7 17 нарушений (7 ролей) · −5 P5 reviewer block ×1 · −4 P1 4% tool errors
-- Тренд P7: 15 → 5 → 17 нарушений формата за run; implementer −10. Аргумент за #26 (валидатор) и #20 (реестр).
+- Done: #14 PR #32, #22 PR #33, #34 PR #35, #15 PR #38, #16 PR #39, #19 PR #40 (runner.max_dispatches=14, audit.max_dispatches deprecated). #18 superseded #28.
+- Done: #20 PR #<N-TBD>.
+- Score 69/100 · Solid · done · 2026-09-27-runner-global-max-dispatches · confidence full
+  25.8M tok · 10 dispatch · 227 tool calls · 30 min · sonnet×9 opus×2 · −10 P7 19 нарушений (7 ролей) · −6 P6 12% токенов без результата (general-purpose, implementer) · −5 P1 5%
+- Тренд P7 за run: 15 → 5 → 17 → 19; implementer −13. Runner диспатчит general-purpose вместо отсутствующего spec-maintainer → #21.
 
 ## Next
-- В работе: #20 (реестр verdicts.yaml). Затем #21, #36, #37; Plan 2 с #23. #17 — руками Alex.
-- 5 старых remote-веток PR #3–#9 висят — удалять решает Alex.
-- Local main = origin/main (337c3cf). Untracked docs/*, thoughts/ не трогать.
+- Done: #20. В работе: #21, #36, #37; Plan 2 с #23. #17 — руками Alex.
+- Раннер #19 оставил checkout на feature-ветке и не выровнял main — main сделал сам; локальные merged-ветки не удаляю (решение Alex).
+- Local main = origin/main (4cbb907). Untracked docs/*, thoughts/ не трогать.
