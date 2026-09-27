@@ -1019,3 +1019,93 @@ func TestCheckAgentVerdicts_WarnsWhenRegistryFileMissing(t *testing.T) {
 	issues := checkAgentVerdicts(proj, repo)
 	require.True(t, findIssue(issues, LevelWarn, "verdicts.yaml not found in repo checkout"))
 }
+
+// A verdicts.yaml that fails to parse at all (e.g. a typo'd top-level key
+// tripping yaml.KnownFields) must surface as a doctor error, not a silent
+// pass-through — internal/verdicts.Load's error wraps back through
+// checkAgentVerdicts verbatim.
+func TestCheckAgentVerdicts_RegistryLoadErrorReportsIssue(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, "version: 1\nrole:\n  implementer: {}\n") // `role:` typo for `roles:`
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, "parse verdicts.yaml"))
+}
+
+// A verdicts.yaml that parses but is internally inconsistent (a spec's
+// `base` isn't in `base_enum`) must fail Registry.Validate and surface as
+// a doctor error distinct from a parse error.
+func TestCheckAgentVerdicts_RegistryValidateErrorReportsIssue(t *testing.T) {
+	inconsistent := `
+version: 1
+base_enum: [done, blocked, failed]
+actions: [next]
+roles:
+  implementer:
+    done: {base: bogus, action: next}
+`
+	repo := writeVerdictsRepoFixture(t, inconsistent)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, "verdicts.yaml is inconsistent"))
+}
+
+// A role zprof's own roster knows (agents.RoleOf resolves it, e.g.
+// "planner") but that the registry itself never defines is a genuine
+// registry/roster drift — distinct from
+// TestCheckAgentVerdicts_UserAgentOutsideRegistryIsSilent's "not a zprof
+// role at all" case, which must stay silent.
+func TestCheckAgentVerdicts_KnownRoleMissingFromRegistryErrors(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry) // defines no `planner` role
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "planner.md"),
+		[]byte("---\nname: planner\nreturn_format: |\n  verdict: done\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, `role "planner" is missing from verdicts.yaml`))
+}
+
+// When .agentlog/schema.json exists but predates the verdicts registry
+// (no `verdicts` key), doctor warns the project to redeploy rather than
+// silently trusting a stale schema.
+func TestCheckAgentVerdicts_SchemaJSONMissingVerdictsKeyWarns(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|blocked|failed\n---\nbody\n"), 0o644))
+	agentlogDir := filepath.Join(proj, ".agentlog")
+	require.NoError(t, os.MkdirAll(agentlogDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentlogDir, "schema.json"), []byte(`{"schema_version":1}`), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelWarn, "schema.json has no `verdicts` key"))
+}
+
+// The mirror of the above: once schema.json carries a `verdicts` key
+// (redeployed via `zprof apply`), the warning must not fire.
+func TestCheckAgentVerdicts_SchemaJSONWithVerdictsKeyIsSilent(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|blocked|failed\n---\nbody\n"), 0o644))
+	agentlogDir := filepath.Join(proj, ".agentlog")
+	require.NoError(t, os.MkdirAll(agentlogDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentlogDir, "schema.json"), []byte(`{"schema_version":1,"verdicts":{"version":1}}`), 0o644))
+
+	require.Empty(t, checkAgentVerdicts(proj, repo))
+}
