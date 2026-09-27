@@ -1,7 +1,7 @@
-#!/usr/bin/env python3
 """Tests for main log extraction — sync, async, legacy paths."""
-import hashlib, json, os, pathlib, shutil, sys
-import pytest
+import json
+import pathlib
+import sys
 
 # Add parent to path so we can import the module directly
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
@@ -9,6 +9,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 # Import extraction internals
 # We import from zprof-collect.py which has a hyphen, so use importlib
 import importlib
+
 _mod_path = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 _spec = importlib.util.spec_from_file_location("zprof_collect", _mod_path)
 zprof_collect = importlib.util.module_from_spec(_spec)
@@ -35,7 +36,7 @@ class TestSyncDispatch:
     """Path 1: assistant tool_use + user toolUseResult (completed)."""
 
     def test_extracts_dispatch_id(self):
-        dispatches, meta = _extract_main_log(
+        dispatches, _ = _extract_main_log(
             "sess-sync-001", FIXTURES / "sync_dispatch.jsonl", _empty_sess())
         assert len(dispatches) == 1
         assert dispatches[0]["dispatch_id"] == "toolu_01SyncDispatchAAAAAAAAAA"
@@ -109,7 +110,7 @@ class TestAsyncDispatch:
     def test_async_launch_not_complete(self):
         dispatches, _ = _extract_main_log(
             "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
-        launch = [d for d in dispatches if d["status"] == "async_launched"][0]
+        launch = next(d for d in dispatches if d["status"] == "async_launched")
         assert launch["dispatch_complete"] is False
         assert launch["agent_id"] == "abcdef1234567890a"
 
@@ -129,7 +130,7 @@ class TestAsyncDispatch:
     def test_model_on_async_launch(self):
         dispatches, _ = _extract_main_log(
             "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
-        launch = [d for d in dispatches if d["status"] == "async_launched"][0]
+        launch = next(d for d in dispatches if d["status"] == "async_launched")
         assert launch["model_resolved"] == "claude-sonnet-5"
 
 
@@ -177,7 +178,7 @@ class TestTruncatedSession:
     """Truncated file: parse up to last complete line."""
 
     def test_truncated_extracts_complete_lines(self):
-        dispatches, meta = _extract_main_log(
+        dispatches, _ = _extract_main_log(
             "sess-trunc-001", FIXTURES / "truncated_session.jsonl", _empty_sess())
         # The fixture has 3 valid lines + 1 truncated — should parse 1 dispatch
         assert len(dispatches) == 1
@@ -270,14 +271,14 @@ class TestMultiNotify:
                     "timestamp": "2026-08-01T14:15:00Z",
                     "sessionId": "s1", "version": "2.1.220"}) + "\n")
 
-        d2, m2 = _extract_main_log("s1", log, sess)
+        d2, _ = _extract_main_log("s1", log, sess)
         assert len(d2) == 1
         assert d2[0]["seq"] == 2  # persisted notify_seq ensures seq=2
 
     def test_launch_has_seq_zero(self):
         dispatches, _ = _extract_main_log(
             "sess-multi-001", FIXTURES / "multi_notify.jsonl", _empty_sess())
-        launch = [d for d in dispatches if d["status"] == "async_launched"][0]
+        launch = next(d for d in dispatches if d["status"] == "async_launched")
         assert launch["seq"] == 0
 
 
@@ -332,7 +333,7 @@ class TestOffsetVerification:
             }) + "\n")
 
         # Second read with updated session state
-        dispatches2, meta2 = _extract_main_log("test", log, sess)
+        dispatches2, _ = _extract_main_log("test", log, sess)
         assert len(dispatches2) == 1
         assert dispatches2[0]["dispatch_id"] == "toolu_01SecondDispatchAAAAAAAA"
 
@@ -505,7 +506,7 @@ class TestTerminalStatuses:
     def test_async_launched_is_not_terminal(self):
         dispatches, _ = _extract_main_log(
             "sess-async-001", FIXTURES / "async_dispatch.jsonl", _empty_sess())
-        launch = [d for d in dispatches if d["status"] == "async_launched"][0]
+        launch = next(d for d in dispatches if d["status"] == "async_launched")
         assert launch["dispatch_complete"] is False
 
     def test_sync_completed_via_toolUseResult(self, tmp_path):

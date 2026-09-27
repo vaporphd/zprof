@@ -1,15 +1,18 @@
-#!/usr/bin/env python3
 """Tests for subagent transcript capture (Task 4).
 
 Covers: transcript extraction, gzip copy, dispatch enrichment,
 tool-results copy, running/done agent skipping, meta.json correlation.
 """
-import gzip, json, os, pathlib, shutil, sys
-import pytest
+import gzip
+import json
+import pathlib
+import shutil
+import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import importlib
+
 _mod_path = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 _spec = importlib.util.spec_from_file_location("zprof_collect", _mod_path)
 zprof_collect = importlib.util.module_from_spec(_spec)
@@ -473,7 +476,7 @@ class TestCollectSubagentTranscripts:
             agentlog, "session-id", str(transcript_path), set(), sess, dispatches)
 
         assert len(dispatches) == 2
-        assert set(d["dispatch_id"] for d in dispatches) == set(tool_ids)
+        assert {d["dispatch_id"] for d in dispatches} == set(tool_ids)
         assert set(sess["agents_done"]) == set(agent_ids)
         # Both transcripts gzipped
         for aid in agent_ids:
@@ -770,7 +773,7 @@ class TestEndToEndWithMainLog:
         sess = _empty_sess()
 
         # Step 1: extract main log
-        dispatches, meta_out = _extract_main_log(
+        dispatches, _ = _extract_main_log(
             "sess-async-001", main_log, sess)
 
         # Step 2: enrich with transcripts

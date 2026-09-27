@@ -7,9 +7,20 @@ Modes: subagent-stop | stop | session-start | pick-arm
 Reads JSON payload from stdin. Writes to $ZPROF_AGENTLOG or <cwd>/.agentlog/.
 Always exits 0. Errors go to collect.log.
 """
-import fcntl, gzip, hashlib, json, os, platform, re, shutil, subprocess, sys, time, traceback
-from pathlib import Path
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+import platform
+import re
+import shutil
+import subprocess
+import sys
+import time
+import traceback
 from datetime import datetime, timezone
+from pathlib import Path
 
 VERSION = "0.1.0"
 
@@ -301,8 +312,7 @@ class Collector:
             raw_path = self.agentlog / "raw" / f"{session_id}.jsonl"
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             with open(raw_path, "a") as f:
-                for d in dispatches:
-                    f.write(json.dumps(d, ensure_ascii=False) + "\n")
+                f.writelines(json.dumps(d, ensure_ascii=False) + "\n" for d in dispatches)
                 f.flush()
                 os.fsync(f.fileno())
         # Task 5: normalize and write to dispatches.jsonl
@@ -1215,7 +1225,7 @@ def _get_project_id(cwd: str) -> tuple[str, bool]:
         result = subprocess.run(
             ["git", "rev-list", "--max-parents=0", "HEAD"],
             capture_output=True, text=True, timeout=5,
-            cwd=cwd,
+            cwd=cwd, check=False,
         )
         if result.returncode == 0 and result.stdout.strip():
             roots = sorted(result.stdout.strip().split())
@@ -1446,7 +1456,7 @@ def _make_composite_id(session_id: str, raw_id: str) -> str:
     """Prefix a raw dispatch/parent ID with claude-code:<session>:."""
     if not raw_id:
         return ""
-    if raw_id.startswith("unresolved:") or raw_id.startswith("meta:"):
+    if raw_id.startswith(("unresolved:", "meta:")):
         return raw_id
     if raw_id.startswith("claude-code:"):
         return raw_id

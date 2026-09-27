@@ -1,12 +1,16 @@
-#!/usr/bin/env python3
 """Cross-language smoke: collector → .agentlog → `zprof score` card.
 
 Skipped when `go` is not on PATH. Builds the nested-runner fixture from
 test_nested_dispatches, runs the collector in `stop` mode via subprocess
 (exactly like the hook), then runs the Go command against the result.
 """
-import json, os, pathlib, shutil, subprocess, sys
 import importlib
+import json
+import pathlib
+import shutil
+import subprocess
+import sys
+
 import pytest
 
 HERE = pathlib.Path(__file__).parent
@@ -48,14 +52,14 @@ def test_collector_then_zprof_score(tmp_path):
 
     payload = json.dumps({"session_id": main.stem, "transcript_path": str(main), "cwd": str(proj)})
     r = subprocess.run([sys.executable, str(COLLECTOR), "stop"], input=payload, text=True,
-                       capture_output=True, cwd=str(proj), timeout=60)
+                       capture_output=True, cwd=str(proj), timeout=60, check=False)
     assert r.returncode == 0, r.stderr
     agentlog = proj / ".agentlog"
     assert (agentlog / "dispatches.jsonl").exists()
     assert (agentlog / "tool-events.jsonl").exists(), (agentlog / "collect.log").read_text() if (agentlog / "collect.log").exists() else "no log"
 
     r = subprocess.run(["go", "run", "./cmd/zprof", "score", "--project", str(proj), "--no-collect"],
-                       cwd=str(REPO / "cli"), capture_output=True, text=True, timeout=300)
+                       cwd=str(REPO / "cli"), capture_output=True, text=True, timeout=300, check=False)
     assert r.returncode == 0, r.stderr
     out = r.stdout
     assert out.startswith("Score "), out

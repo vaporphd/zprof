@@ -1,9 +1,8 @@
 """Tests for pick-arm mode."""
 import json
-import os
+import pathlib
 import subprocess
 import sys
-import pathlib
 
 COLLECTOR = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 
@@ -16,7 +15,7 @@ def run_pick_arm(role, task, cwd, zprof_yaml_content=None):
     payload = json.dumps({"role": role, "task": task, "cwd": str(cwd)})
     p = subprocess.run(
         [sys.executable, str(COLLECTOR), "pick-arm"],
-        input=payload, capture_output=True, text=True, timeout=10,
+        input=payload, capture_output=True, text=True, timeout=10, check=False,
     )
     assert p.returncode == 0
     return json.loads(p.stdout)
@@ -84,7 +83,7 @@ ab_experiments:
     def test_invalid_input_exits_zero(self, tmp_path):
         p = subprocess.run(
             [sys.executable, str(COLLECTOR), "pick-arm"],
-            input="not json", capture_output=True, text=True, timeout=10,
+            input="not json", capture_output=True, text=True, timeout=10, check=False,
         )
         assert p.returncode == 0
         result = json.loads(p.stdout)
