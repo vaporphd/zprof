@@ -154,7 +154,7 @@ regex ищет по всей строке, поэтому `git status && git pus
 | `no_verify_commit` | Bash | `\bgit\s+commit\b.*\s(-n\|--no-verify)\b` | pr-shepherd.md:32 |
 | `no_verify_other` | Bash | `\bgit\s+(push\|merge\|rebase\|cherry-pick)\b.*\s--no-verify\b` | pr-shepherd.md:32 |
 | `branch_force_delete` | Bash | `\bgit\s+branch\b.*\s(-D\|-[a-zA-Z]*D[a-zA-Z]*\|--delete\s+--force\|--force\s+--delete)\b` | manifest.yaml:13 (после #15: несмерженных) |
-| `remote_ref_delete` | Bash | `\bgit\s+push\b.*(\s--delete\b\|\s-d\b\|\s:refs/\|\s\S+\s+:\S+)` | manifest.yaml:13 |
+| `remote_ref_delete` | Bash | `\bgit\s+push\b.*(\s--delete\b\|\s-d\b\|\s:refs/\|\s\S+\s+:\S+)` | manifest.yaml:13; для роли `pr-shepherd` — контекст `branch_pr_merged` (§5.2) |
 | `tag_delete` | Bash | `\bgit\s+tag\b.*\s(-d\|--delete)\b` | manifest.yaml:13 |
 | `publish` | Bash | `\b(npm\|pnpm\|yarn)\s+publish\b`, `\bcargo\s+publish\b`, `\bgh\s+release\s+(create\|upload\|edit\|delete)\b`, `\bgoreleaser\s+release\b`, `\btwine\s+upload\b`, `\bpoetry\s+publish\b`, `\bxcrun\s+altool\b.*--upload-app`, `\bfastlane\b.*\b(pilot\|deliver\|upload_to_testflight\|upload_to_app_store)\b` | manifest.yaml:15 |
 | `curl_pipe_sh` | Bash | `\b(curl\|wget)\b[^\|]*\|\s*(sudo\s+)?(ba\|z\|da)?sh\b` | manifest.yaml:17 (внешний код) |
@@ -176,10 +176,20 @@ Overlay `ios-swift` добавляет `exempt_roles: {publish: [testflight-ship
 | `rebase_published` | Bash | `\bgit\s+rebase\b(?!.*\s--abort\b)` | `head_on_remote` | `git rev-parse --abbrev-ref @{u}` успешен **и** `git branch -r --contains HEAD` непуст |
 | `amend_published` | Bash | `\bgit\s+commit\b.*\s--amend\b` | `head_on_remote` | то же |
 | `stash_in_worktree` | Bash | `\bgit\s+stash\b(?!\s+(list\|show))` | `linked_worktree` | `realpath(git rev-parse --git-dir) ≠ realpath(git rev-parse --git-common-dir)` |
+| `remote_ref_delete` (только роль `pr-shepherd`) | Bash | как в §5.1 | `branch_pr_merged` | **allow**, если `gh pr list --head <branch> --state merged --json number` (timeout 10) непуст; пусто **или ошибка `gh`** → deny. Единственный контекст с fail-closed: цена ошибки — потерянная ветка |
+
+Зачем `branch_pr_merged`: стоп-лист после #15 читается «удаление
+**несмерженных** веток и тегов», а `gh pr merge --delete-branch` пропускает
+удаление remote-ветки, когда локальный шаг падает (наблюдалось на PR #10:
+`main` был занят другим worktree). pr-shepherd тогда чистит ветку
+`git push origin --delete <branch>` — штатно, если PR с этой ветки уже
+смержен. Имя ветки берётся из аргументов (`--delete <name>`, `:<name>`,
+`:refs/heads/<name>`); не разобрано → deny. Для остальных ролей правило
+безусловное (§5.1).
 
 Контекстные команды `git` выполняются с `timeout 3` в рабочем каталоге из §4;
 любая ошибка (не git-репо, таймаут) → правило не срабатывает, событие
-`context_error`. `head_on_remote` намеренно узкий: amend/rebase поверх
+`context_error` — кроме `branch_pr_merged`, где ошибка означает deny. `head_on_remote` намеренно узкий: amend/rebase поверх
 непушенных коммитов разрешён; остаток (rebase, задевающий пушенные предки)
 упирается в `force_push` при попытке отправить.
 
