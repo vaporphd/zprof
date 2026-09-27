@@ -305,6 +305,12 @@ class Collector:
             sess["harness_version"] = meta["harness_version"]
         if meta.get("notify_seq"):
             sess["notify_seq"] = meta["notify_seq"]
+        if meta.get("agent_launch_map"):
+            sess["agent_launch_map"] = meta["agent_launch_map"]
+        if meta.get("unresolved_notifications", 0) > 0:
+            # #34: task-notification carried neither <tool-use-id> nor a
+            # resolvable <task-id> — genuine loss, not "format drift".
+            self.state.increment_losses(meta["unresolved_notifications"])
         if meta.get("unparsed_lines", 0) > 0:
             _log_error(self.agentlog,
                        f"session {session_id}: {meta['unparsed_lines']} unparsed lines (format drift?)")
@@ -387,9 +393,12 @@ def _check_offset(path: Path, sess: dict) -> int:
 def _parse_task_notification_xml(text: str) -> dict | None:
     """Extract fields from <task-notification> XML using regex.
 
-    Returns dict with task_id, tool_use_id, status, and optional
-    subagent_tokens, tool_uses, duration_ms fields.  Returns None if
-    the XML is not found or cannot be parsed.
+    Returns dict with task_id and/or tool_use_id (current Claude Code does
+    not guarantee <tool-use-id> is present, see #34), status, and optional
+    subagent_tokens, tool_uses, duration_ms fields.  Returns None if the
+    XML tag is not found or carries neither id.  This function is
+    context-free (only `text` in) and does not resolve a missing
+    tool_use_id — callers do that (see _extract_dispatches_from_text).
     """
     m = re.search(r"<task-notification>(.*?)</task-notification>", text, re.DOTALL)
     if not m:
@@ -409,7 +418,7 @@ def _parse_task_notification_xml(text: str) -> dict | None:
                 except ValueError:
                     continue
             result[key] = val
-    return result if "tool_use_id" in result else None
+    return result if ("task_id" in result or "tool_use_id" in result) else None
 
 
 def _extract_tool_uses_from_assistant(content: list) -> list[dict]:
@@ -434,20 +443,34 @@ def _extract_tool_uses_from_assistant(content: list) -> list[dict]:
 
 
 def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
-                                  seen_notifications: set) -> dict:
+                                  seen_notifications: set,
+                                  agent_index: dict[str, dict] | None = None) -> dict:
     """Extract dispatch records from JSONL text (main log or a subagent transcript).
 
     Handles the sync path (Agent tool_use + toolUseResult), the async path
     (<task-notification>), and legacy notification fields. Returns
-    {"dispatches", "unparsed_lines", "truncated", "harness_version"}.
+    {"dispatches", "unparsed_lines", "unresolved_notifications", "truncated",
+    "harness_version"}.
     `notify_seq` and `seen_notifications` are mutated in place so the main-log
     caller can persist them; nested callers pass fresh containers.
+
+    `agent_index` maps `agent_id -> {"tool_use_id", "role"}` and is used to
+    resolve <task-notification> records that carry <task-id> but no
+    <tool-use-id> (#34). It is mutated in place: every async dispatch
+    launched in `raw` adds an entry (role from `subagent_type`) unless one
+    is already present (a caller-seeded entry — typically from
+    subagents/agent-*.meta.json — takes priority). Callers that don't pass
+    it (nested/pass-1 extraction) get a fresh, non-persisted dict and no
+    resolution across chunks.
     """
+    if agent_index is None:
+        agent_index = {}
     pending_dispatches: dict[str, dict] = {}
     dispatches: list[dict] = []
     harness_version = ""
     truncated = False
     unparsed = 0
+    unresolved_notifications = 0
 
     for line in raw.split("\n"):
         line = line.strip()
@@ -549,8 +572,15 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
 
             if is_async:
                 dispatch["dispatch_complete"] = False
-                dispatch["agent_id"] = tur.get("agentId", "")
+                agent_id = tur.get("agentId", "")
+                dispatch["agent_id"] = agent_id
                 dispatch["description"] = tur.get("description", pending.get("description", ""))
+                # Feed the launch-map fallback (b): a task-notification for
+                # this agent may arrive without <tool-use-id> (#34). A
+                # caller-seeded entry (source (a), meta.json) wins.
+                if agent_id and agent_id not in agent_index:
+                    agent_index[agent_id] = {"tool_use_id": tool_use_id,
+                                             "role": dispatch.get("role", "")}
             else:
                 # Sync completion — extract cost/duration from toolUseResult
                 dispatch["tool_uses"] = tur.get("totalToolUseCount")
@@ -586,7 +616,26 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
         if notification_text:
             notif = _parse_task_notification_xml(notification_text)
             if notif:
-                tool_use_id = notif["tool_use_id"]
+                tool_use_id = notif.get("tool_use_id", "")
+                resolved_role = ""
+                if not tool_use_id:
+                    # #34: this Claude Code build omits <tool-use-id>.
+                    # Resolve via task_id -> {tool_use_id, role}: (a)
+                    # meta.json-seeded entries take priority over (b) the
+                    # launch-map fallback — both live in the same
+                    # `agent_index`, populated by the caller / the async
+                    # branch above.
+                    task_id = notif.get("task_id", "")
+                    entry = agent_index.get(task_id) if task_id else None
+                    if entry and entry.get("tool_use_id"):
+                        tool_use_id = entry["tool_use_id"]
+                        resolved_role = entry.get("role", "")
+                    else:
+                        # Neither source resolved it — do not fold this
+                        # into unparsed_lines (that means "format drift");
+                        # this is a distinct, countable loss (AC1).
+                        unresolved_notifications += 1
+                        continue
                 notif_status = notif.get("status", "completed")
 
                 # Dedup: Claude Code writes every notification twice
@@ -610,6 +659,12 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
                     "seq": seq,
                     "agent_id": notif.get("task_id", ""),
                 }
+                if resolved_role:
+                    # Set directly: pass-2 enrichment may skip this agent
+                    # (already in agents_done) and BuildRuns needs `role`
+                    # on the last row per dispatch_id to find a scoring
+                    # root (#34 AC5).
+                    dispatch["role"] = resolved_role
                 # Attach returned text from <result> for Class A checks
                 if "result" in notif:
                     dispatch["returned"] = notif["result"]
@@ -626,6 +681,7 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
                 unparsed += 1
 
     return {"dispatches": dispatches, "unparsed_lines": unparsed,
+            "unresolved_notifications": unresolved_notifications,
             "truncated": truncated, "harness_version": harness_version}
 
 
@@ -664,9 +720,24 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
 
     notify_seq: dict[str, int] = dict(sess.get("notify_seq", {}))
     seen_notifications: set[tuple[str, str]] = set()
-    out = _extract_dispatches_from_text(session_id, raw, notify_seq, seen_notifications)
+    # #34: build the agent_id -> {tool_use_id, role} index used to resolve
+    # <task-notification> records without <tool-use-id>. Source (a) is
+    # subagents/agent-<id>.meta.json (agentType is the role); source (b) is
+    # the launch map persisted across incremental reads in `sess`, since a
+    # background agent's launch and its notification routinely land in
+    # different Stop invocations (different `raw` chunks). (a) takes
+    # priority by being applied on top of (b).
+    subagents_dir = path.with_suffix("") / "subagents"
+    agent_index: dict[str, dict] = dict(sess.get("agent_launch_map", {}))
+    for agent_id, m in _read_agent_metas(subagents_dir).items():
+        tuid = m.get("toolUseId", "")
+        if tuid:
+            agent_index[agent_id] = {"tool_use_id": tuid, "role": m.get("agentType", "")}
+    out = _extract_dispatches_from_text(session_id, raw, notify_seq, seen_notifications,
+                                        agent_index=agent_index)
     dispatches = out["dispatches"]
     meta["unparsed_lines"] += out["unparsed_lines"]
+    meta["unresolved_notifications"] = out["unresolved_notifications"]
 
     # Update meta
     meta["offset"] = file_size
@@ -675,6 +746,7 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
     meta["harness_version"] = out["harness_version"] or meta["harness_version"]
     meta["truncated"] = out["truncated"]
     meta["notify_seq"] = notify_seq
+    meta["agent_launch_map"] = agent_index
 
     return dispatches, meta
 
@@ -1042,6 +1114,29 @@ def _agent_config_hash(cwd: str, agent_type: str) -> tuple[str | None, int]:
     return hashlib.sha256(data).hexdigest()[:12], count
 
 
+def _read_agent_metas(subagents_dir: Path, agentlog: Path | None = None) -> dict[str, dict]:
+    """Read every subagents/agent-*.meta.json into a dict keyed by agent_id.
+
+    Shared by `_collect_subagent_transcripts` (pass 1/2 enrichment) and
+    `_extract_main_log` (#34 task-notification resolution) so there is a
+    single glob/parse implementation. `agentlog` is optional — callers
+    without one (e.g. `_extract_main_log`, which has no agentlog handle)
+    silently skip error logging for unreadable meta.json files.
+    """
+    metas: dict[str, dict] = {}
+    if subagents_dir.is_dir():
+        for meta_file in sorted(subagents_dir.glob("agent-*.meta.json")):
+            agent_id = meta_file.name[len("agent-"):-len(".meta.json")]
+            if not agent_id:
+                continue
+            try:
+                metas[agent_id] = json.loads(meta_file.read_text())
+            except (OSError, json.JSONDecodeError):
+                if agentlog is not None:
+                    _log_error(agentlog, f"failed to read meta.json for agent {agent_id}")
+    return metas
+
+
 def _collect_subagent_transcripts(
     agentlog: Path,
     session_id: str,
@@ -1101,16 +1196,7 @@ def _collect_subagent_transcripts(
             dispatch_by_id.setdefault(did, []).append(i)
 
     # Read every meta.json once.
-    metas: dict[str, dict] = {}
-    if subagents_dir.is_dir():
-        for meta_file in sorted(subagents_dir.glob("agent-*.meta.json")):
-            agent_id = meta_file.name[len("agent-"):-len(".meta.json")]
-            if not agent_id:
-                continue
-            try:
-                metas[agent_id] = json.loads(meta_file.read_text())
-            except (OSError, json.JSONDecodeError):
-                _log_error(agentlog, f"failed to read meta.json for agent {agent_id}")
+    metas = _read_agent_metas(subagents_dir, agentlog)
 
     # Defer children whose parent is still running: their full row comes from
     # the parent's transcript, and a thin row written now would block it via
