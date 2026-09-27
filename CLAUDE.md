@@ -101,8 +101,9 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 ## Интеграция ветки
 
 Готовая ветка попадает в `main` **только через PR**, который ведёт `pr-shepherd`:
-`git push -u origin <branch>` → `gh pr create` → dispatch `pr-shepherd` → человек
-делает merge. Main-сессия не мержит в `main` сама и не предлагает «merge locally»,
+`git push -u origin <branch>` → `gh pr create` → dispatch `pr-shepherd`, который проверяет
+pre-flight и доставку и **сам мержит** (человек решил, когда запустил loop — повторно не
+спрашивать). Main-сессия не мержит в `main` сама и не предлагает «merge locally»,
 даже если внешний skill (finishing-a-development-branch, SDD) показывает такое меню —
 инструкции этого файла его перебивают. Это же правило действует во всех проектах
 под zprof (урок: `tasks/lessons.md`, 2026-09-27).
