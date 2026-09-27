@@ -7,7 +7,7 @@ color: orange
 return_format: |
   # CRITICAL: your entire response begins with `verdict:` — no preamble,
   # no code fence, no greeting. Commentary belongs in `notes:` only.
-  verdict: block|approve-with-fixes|approve|awaiting-approval
+  verdict: block|approve-with-fixes|approve|awaiting-approval|blocked
   artifact: <absolute path to review report under docs/reviews/YYYY-MM-DD-<slug>.md>
   next: implementer (with approved fix list) | null
   one_line: <≤120 chars — top verdict + finding counts, e.g. "BLOCK — 2 Critical (v-html XSS, useEffect fetch), 6 Important">
