@@ -11,3 +11,14 @@
 
 ## Backlog
 - [ ] zprof сам не ест свой корм: нет .zprof.yaml и корневого lessons.md (уроки в tasks/lessons.md) — выровнять раскладку
+
+## Plan 1: panel-2026-09-27
+- [ ] ci: pytest, gofmt -l и ruff в CI; отформатировать 20 файлов cli/ (#14)
+- [ ] ci: ruleset на main — required check test (CI), без bypass (#17) — owner, depends: #14
+- [ ] fix(base): стоп-лист — «удаление несмерженных веток и тегов», merged-ветка штатно (#15)
+- [ ] feat(base): pr-shepherd в local-green сам гоняет тесты из ## Executing (#16) — после #15
+- [ ] feat(cli): zprof apply пишет permissions.deny (force, --admin, --no-verify, curl|sh) (#18)
+- [ ] feat(base): глобальный max_dispatches task-runner'а вне секции аудита (#19)
+- [ ] feat(base): реестр verdicts.yaml, маппинг в task-runner, проверка в doctor (#20) — depends: #19
+- [ ] feat(base): один источник маршрутов, implementer в багфиксе, условные spec-maintainer/integration-gate (#21) — depends: #20
+- [ ] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
