@@ -78,6 +78,9 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  16. .agentlog/ is reminded to be vulnerable to `git clean -xdf`
 //  17. every role's return_format enum and body `verdict:` citations are
 //     covered by the verdicts.yaml registry (ADR 0003)
+//  18. every chain cell in task-runner.md's `## Роутинг` table names only
+//     agents present under .claude/agents/ or whitelisted in
+//     `### Условные агенты маршрутов`
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -101,6 +104,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkAgentModels(projectDir)...)
 	out = append(out, checkManagedMarkers(projectDir)...)
 	out = append(out, checkTaskRunner(projectDir)...)
+	out = append(out, checkRouteAgentsExist(projectDir)...)
 	out = append(out, checkStopLists(proj.Overlays, repoDir)...)
 	out = append(out, checkOrphanAgents(projectDir, repoDir, proj)...)
 	out = append(out, checkRunsGitignored(projectDir)...)
@@ -451,6 +455,105 @@ func checkTaskRunner(projectDir string) []Issue {
 				Path:    p,
 				Message: fmt.Sprintf("%s is retired but still present in the project — main could dispatch it, bypassing task-runner; run `zprof sync`", name),
 			})
+		}
+	}
+	return out
+}
+
+// routeChainBacktickRe matches a single backtick-quoted span inside
+// task-runner.md's `## Роутинг` table or its `### Условные агенты
+// маршрутов` whitelist paragraph — for example a cell reading
+// `bug-hunter → implementer → tester` or a bare name like `tester`.
+var routeChainBacktickRe = regexp.MustCompile("`([^`]+)`")
+
+// routeAgentNames splits every backtick span found in s on the route-chain
+// arrow (`→`) and returns the trimmed, non-empty names across all spans —
+// one call handles both a multi-agent chain cell and a single bare name.
+func routeAgentNames(s string) []string {
+	var out []string
+	for _, m := range routeChainBacktickRe.FindAllStringSubmatch(s, -1) {
+		for _, part := range strings.Split(m[1], "→") {
+			if name := strings.TrimSpace(part); name != "" {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
+}
+
+// sectionUntilNextH2 returns the body of the markdown section starting
+// right after the given "## "-level heading line, up to (not including)
+// the next "## " heading or end of file. Nested "### " subsections stay
+// included. Returns "" if heading isn't found.
+func sectionUntilNextH2(content, heading string) string {
+	idx := strings.Index(content, heading+"\n")
+	if idx < 0 {
+		return ""
+	}
+	rest := content[idx+len(heading):]
+	if end := strings.Index(rest, "\n## "); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// sectionParagraph returns the first paragraph (contiguous non-blank
+// lines) immediately following a markdown heading line equal to heading,
+// or "" if the heading isn't found. Used to scope a whitelist to exactly
+// the paragraph documenting it, not everything up to the next heading.
+func sectionParagraph(content, heading string) string {
+	idx := strings.Index(content, heading+"\n")
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimLeft(content[idx+len(heading):], "\n")
+	if end := strings.Index(rest, "\n\n"); end >= 0 {
+		return rest[:end]
+	}
+	return rest
+}
+
+// checkRouteAgentsExist warns when a chain cell in task-runner.md's
+// `## Роутинг` table names an agent that is neither present under
+// .claude/agents/ nor listed in the `### Условные агенты маршрутов`
+// whitelist right below it. Those two states mean different things: a
+// name that's simply missing dead-ends the route at dispatch time with a
+// `verdict: failed` main has to interpret by hand, while a whitelisted
+// name (e.g. the RE / анализ бинаря route's re-macho-only agents) is
+// expected to be absent until the owning overlay is applied — not a
+// configuration error at all.
+func checkRouteAgentsExist(projectDir string) []Issue {
+	trPath := filepath.Join(projectDir, ".claude", "agents", "task-runner.md")
+	data, err := os.ReadFile(trPath)
+	if err != nil {
+		return nil // checkTaskRunner already reports a missing task-runner.md
+	}
+	content := string(data)
+
+	whitelist := map[string]bool{}
+	for _, name := range routeAgentNames(sectionParagraph(content, "### Условные агенты маршрутов")) {
+		whitelist[name] = true
+	}
+
+	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	seen := map[string]bool{}
+	var out []Issue
+	for _, line := range strings.Split(sectionUntilNextH2(content, "## Роутинг"), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
+		for _, name := range routeAgentNames(line) {
+			if seen[name] || whitelist[name] {
+				continue
+			}
+			seen[name] = true
+			if _, err := os.Stat(filepath.Join(agentsDir, name+".md")); err != nil {
+				out = append(out, Issue{
+					Level:   LevelWarn,
+					Path:    trPath,
+					Message: fmt.Sprintf("route names agent %q, missing from .claude/agents/ and not marked conditional", name),
+				})
+			}
 		}
 	}
 	return out

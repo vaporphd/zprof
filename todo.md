@@ -21,7 +21,7 @@
 - [x] feat(cli): zprof apply пишет permissions.deny (force, --admin, --no-verify, curl|sh) (#18) — superseded by #28 (guard)
 - [x] feat(base): глобальный max_dispatches task-runner'а вне секции аудита (#19)
 - [x] feat(base): реестр verdicts.yaml, маппинг в task-runner, проверка в doctor (#20) — depends: #19 — PR #41
-- [ ] feat(base): один источник маршрутов, implementer в багфиксе, условные spec-maintainer/integration-gate (#21) — depends: #20
+- [x] feat(base): один источник маршрутов, implementer в багфиксе, условные spec-maintainer/integration-gate (#21) — depends: #20
 - [x] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
 
 - [ ] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34

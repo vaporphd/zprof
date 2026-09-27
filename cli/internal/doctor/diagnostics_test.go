@@ -273,6 +273,95 @@ func TestCheckStopListsBrokenManifestErrors(t *testing.T) {
 	require.Contains(t, issues[0].Path, "manifest.yaml")
 }
 
+// routeTaskRunnerFixture builds a minimal task-runner.md whose `## Роутинг`
+// table references routeAgent (an agent not shipped as a file) and whose
+// `### Условные агенты маршрутов` whitelist covers whitelisted.
+func routeTaskRunnerFixture(routeAgent, whitelisted string) string {
+	return "---\nname: task-runner\n---\n\n" +
+		"## Роутинг\n\n" +
+		"| Тип | Цепочка |\n" +
+		"|---|---|\n" +
+		"| Новая фича | `planner → " + routeAgent + " → tester` |\n\n" +
+		"### Условные агенты маршрутов\n\n" +
+		"Эти агенты существуют только при определённом overlay: `" + whitelisted + "`.\n\n" +
+		"Имена агентов бери из таблицы `## Consilium`.\n\n" +
+		"## Правила диспатча\n\n- Один агент за раз.\n"
+}
+
+func TestCheckRouteAgentsExistWarnsOnMissingUnwhitelisted(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "planner.md"), []byte("---\nname: planner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte(routeTaskRunnerFixture("ghost-agent", "report-writer")), 0o644))
+
+	issues := checkRouteAgentsExist(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, `"ghost-agent"`)
+}
+
+func TestCheckRouteAgentsExistSilentWhenWhitelisted(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "planner.md"), []byte("---\nname: planner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte(routeTaskRunnerFixture("report-writer", "report-writer")), 0o644))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
+// A route agent that's physically present must never warn, regardless of
+// the whitelist.
+func TestCheckRouteAgentsExistSilentWhenAgentPresent(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	for _, name := range []string{"planner", "tester", "implementer"} {
+		require.NoError(t, os.WriteFile(filepath.Join(agentsDir, name+".md"), []byte("---\nname: "+name+"\n---\n"), 0o644))
+	}
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte(routeTaskRunnerFixture("implementer", "report-writer")), 0o644))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
+// The same missing, unwhitelisted agent named in multiple chain cells must
+// only warn once.
+func TestCheckRouteAgentsExistDedupesRepeatedAgent(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	trContent := "---\nname: task-runner\n---\n\n" +
+		"## Роутинг\n\n" +
+		"| Тип | Цепочка |\n" +
+		"|---|---|\n" +
+		"| Новая фича | `ghost-agent → tester` |\n" +
+		"| Багфикс | `ghost-agent → tester` |\n\n" +
+		"### Условные агенты маршрутов\n\n" +
+		"Эти агенты существуют только при определённом overlay: `report-writer`.\n\n" +
+		"## Правила диспатча\n\n- Один агент за раз.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"), []byte(trContent), 0o644))
+
+	issues := checkRouteAgentsExist(dir)
+	require.Len(t, issues, 1)
+	require.Contains(t, issues[0].Message, `"ghost-agent"`)
+}
+
+// No task-runner.md at all — checkTaskRunner already reports that; this
+// check must stay silent rather than double-report.
+func TestCheckRouteAgentsExistSilentWithoutTaskRunner(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude", "agents"), 0o755))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
 func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {
 	dir := t.TempDir()
 	runs := filepath.Join(dir, ".zprof", "runs")
