@@ -21,7 +21,7 @@
 - [ ] feat(base): глобальный max_dispatches task-runner'а вне секции аудита (#19)
 - [ ] feat(base): реестр verdicts.yaml, маппинг в task-runner, проверка в doctor (#20) — depends: #19
 - [ ] feat(base): один источник маршрутов, implementer в багфиксе, условные spec-maintainer/integration-gate (#21) — depends: #20
-- [ ] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
+- [x] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
 
 ## Plan 2: guard
 - [ ] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)
