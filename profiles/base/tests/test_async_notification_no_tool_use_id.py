@@ -174,3 +174,31 @@ def test_unresolvable_notification_records_loss(tmp_path):
     assert [r["status"] for r in rows] == ["async_launched"]
     state = json.loads((agentlog / "state.json").read_text())
     assert state.get("losses", 0) >= 1, "#34 AC1: unresolved notification must be counted as loss"
+
+
+# --- AC1 priority: source (a) meta.json wins over source (b) launch map ----
+
+def test_meta_index_priority_over_launch_map():
+    """A caller-seeded (meta.json) entry must not be clobbered by the async
+    launch found later in the same chunk (root-cause doc: "(a) takes
+    priority by being applied on top of (b)"). Regression guard for the
+    `if agent_id and agent_id not in agent_index` seed-priority check in
+    the async branch of _extract_dispatches_from_text.
+    """
+    seeded_tuid = "toolu_01MetaSeeded"
+    agent_index = {AID: {"tool_use_id": seeded_tuid, "role": "task-runner"}}
+    raw = "\n".join(_launch_lines() + _notification_lines())
+    out = zprof_collect._extract_dispatches_from_text(SESSION, raw, {}, set(),
+                                                       agent_index=agent_index)
+    dispatches = out["dispatches"]
+
+    launch = next(d for d in dispatches if d["status"] == "async_launched")
+    assert launch["dispatch_id"] == TUID, "the launch's own dispatch_id is always its tool_use_id"
+
+    notif = next(d for d in dispatches if d.get("status") == "completed")
+    assert notif["dispatch_id"] == seeded_tuid, (
+        "#34: source (b), the in-chunk launch, must not overwrite the "
+        "meta.json-seeded (a) entry already in agent_index")
+    assert notif["role"] == "task-runner"
+    # The pre-seeded entry itself must be left untouched (not repointed at TUID).
+    assert agent_index[AID]["tool_use_id"] == seeded_tuid
