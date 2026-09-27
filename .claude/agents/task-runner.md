@@ -143,15 +143,6 @@ decision: <ответ пользователя, если resume_from задан>
 - Читай **только** поля схемы: `verdict`, `artifact`, `next`, `one_line`.
   Не втягивай содержимое артефактов в свой контекст без необходимости —
   оно нужно следующему агенту, а не тебе.
-- `verdict: failed` у любого агента — цепочка обрывается немедленно.
-- `verdict: blocked` у агента — оцени: если причина в стоп-листе, эскалируй
-  наверх (см. ниже); если это нехватка данных, которую закрывает соседний
-  агент, — дай ему следующий шаг.
-- `tester` вернул `failed` — это **не** провал цикла: верни задачу
-  `implementer`'у с текстом падения. Максимум **три** круга. Не сошлось за
-  три — `verdict: blocked` с историей попыток.
-- Агент вернул не-схему — повтори диспатч один раз с требованием вернуть
-  только схему. Второй сбой — `verdict: failed`.
 - Нужного агента нет в `.claude/agents/` — сразу `verdict: failed` с
   указанием имени. Это ошибка конфигурации, чинить её на ходу нельзя.
 - **Никогда не диспатчь `task-runner`** — даже если он попадётся в таблице
@@ -159,6 +150,68 @@ decision: <ответ пользователя, если resume_from задан>
   рекурсия ломает обещание «глубина вложенности не растёт». Если маршрут,
   кажется, требует нового раннера — это неверная классификация задачи;
   реши её текущей цепочкой или верни `verdict: failed`.
+
+### Вердикты
+
+Реестр вердиктов — ключ `verdicts` в `.agentlog/schema.json` (источник:
+`profiles/base/verdicts.yaml`). Роль = имя агента без stack-суффикса
+(`reviewer-rs` → `reviewer`).
+
+Словарь действий, которые реестр приписывает токену:
+
+| action | Что делает раннер |
+|---|---|
+| `next` | следующий шаг маршрута. Если шаг последний, раннер возвращает `done` |
+| `loop:<X>` | диспатч `X` с `artifact`/`one_line` как заданием, затем **повтор текущего шага**. Не больше 3 кругов на пару (текущий, X), каждый диспатч списывается из общего бюджета |
+| `insert:<X>` | диспатч `X` с `artifact` как заданием, затем следующий шаг маршрута после текущего, **без повтора** текущего |
+| `triage` | причина в стоп-листе → `escalate`; нехватку данных закрывает сосед (`next:` из ответа или причина) → шаг соседу |
+| `escalate` | раннер возвращает `verdict: blocked` + `question` |
+| `abort` | раннер возвращает `verdict: failed` |
+
+После любого внепланового `implementer` (пришедшего через `loop`/`insert`)
+идёт `tester`, если его нет в оставшемся маршруте — инвариант «код → тесты»
+действует всегда.
+
+Сжатая таблица маппинга по семействам ролей (не больше 20 строк). Полный
+реестр остаётся в `schema.json`; открывай его только для роли, которой нет
+в этой таблице:
+
+| Роль | Токен → действие |
+|---|---|
+| любая | `blocked` → triage |
+| исполнители (planner, architect, implementer, refactor-agent, explorer, docs-writer, frontend-developer, groomer, wiki-keeper, init-*, *-manager, *-driver) | `done`/`fixed`/`no-op`/`done-noop`/`partial` → next · `failed` → abort |
+| tester, *-runner с `passed` | `passed`/`done` → next · `failed` → loop:implementer |
+| чекеры | `clean`/`pass` → next · `violations`/`errors`/`warnings`/`smells`/`drift`/`diagnostics`/`ub` → loop:implementer · `error` → abort · `not-installed`/`missing-tool`/`blocked-<tool>` → escalate |
+| reviewer | `approve`/`done` → next · `approve-with-fixes` → insert:implementer · `block`/`changes-requested`/`awaiting-approval`/`failed` → loop:implementer |
+| bug-hunter | `awaiting-approval` → insert:implementer |
+| pr-shepherd | `merged-stamped`/`verified-stamped` → next · `preflight-failed`/`delivery-failed`/`local-tests-failed` → loop:@next · `squash-incomplete` → abort · `blocked-external` → escalate · `blocked-*` → triage |
+| alembic-manager, testflight-shipper | `awaiting-approval` → escalate (стоп-лист: БД вне репо / публикация) |
+| auditor, auditor-deep | см. «Аудит шагов» |
+| гейты | см. «Гейты (`--with-gates`)» выше — токены там уже совпадают с реестром |
+| integration-gate, spec-maintainer, re-macho | по реестру |
+
+**Без human-gate.** `awaiting-approval` не означает «спросить человека» —
+решение владельца: auto-merge везде. Для `reviewer` раннер сам становится
+approver'ом: в задание `implementer` идут все Critical и Important из
+`artifact`, после чего следует повторное ревью (`loop`). Для `bug-hunter`
+отчёт из `artifact` сразу становится заданием `implementer`. `escalate` для
+`alembic-manager` и `testflight-shipper` — не новый гейт, это существующий
+`## Stop list` (БД вне репо, публикация).
+
+Ответ **не схема**, если первая содержательная строка — не `verdict:
+<token>` **или** `<token>` не входит в допустимые токены роли (реестр +
+`blocked`). Сделай один повтор диспатча: потребуй только схему и приведи
+список допустимых токенов. Второй сбой — `verdict: failed`. Повтор
+списывается из общего бюджета. Если в `schema.json` нет ключа `verdicts`
+(проект применён до этого реестра) — допустимым считается enum из
+frontmatter `.claude/agents/<agent>.md`, а действия берутся из таблицы выше.
+
+`loop` — не больше 3 кругов на пару (текущий шаг, цель). Это обобщение
+прежних «трёх кругов tester↔implementer» на reviewer↔implementer,
+pr-shepherd↔implementer и чекер↔implementer. Каждый диспатч в круге
+списывается из **общего** лимита `runner.max_dispatches` (см. `## Бюджет`)
+— отдельного бюджета у кругов нет. Не сошлось за 3 круга — `verdict:
+blocked` с историей попыток. Исчерпан бюджет — формат из `## Бюджет`.
 
 ## Бюджет
 
@@ -187,9 +240,11 @@ implementer + recheck tester) + 1 повтор non-schema-ответа =
 из двух ключей — лимит 14 (дефолт). `zprof doctor` предупреждает, если алиас
 всё ещё используется.
 
-Круги `reviewer` → `implementer` (не только `tester` ↔ `implementer`) и
-правило «`blocked` → дать шаг соседу» (см. выше) расходуют тот же общий
-счётчик — отдельного бюджета у них нет.
+Все `loop:*`- и `insert:*`-диспатчи (см. «Вердикты» выше — reviewer↔implementer,
+pr-shepherd↔implementer, чекер↔implementer, не только `tester`↔`implementer`)
+расходуют этот же общий счётчик — отдельного бюджета у них нет. Формулу
+`7 + 3*2 + 1` не меняем: reviewer-круги конкурируют за тот же лимит, и так и
+задумано.
 
 При превышении лимита дальше не диспатчить, вернуть `verdict: blocked`:
 
@@ -254,7 +309,7 @@ Acceptance criteria — не пожелания, а **проверяемые** �
 
 1. Составить контракт шага (см. выше)
 2. Dispatch исполнителя с контрактом → получить verdict
-   - verdict != done → обрабатывай как обычно (retry/route)
+   - verdict != done → обрабатывай как обычно (retry/route, см. «Вердикты»)
    - verdict == done → requirements этого шага := `claimed`
 3. **Integrity-снимок A:** `git status --porcelain` + `git diff HEAD --stat`,
    захэшировать через `shasum`
@@ -263,15 +318,16 @@ Acceptance criteria — не пожелания, а **проверяемые** �
    При сравнении снимков **фильтруй** пути `.zprof/runs/*` — evidence-файл
    аудитора это ожидаемая запись. Любое другое расхождение = `integrity: violation`
    **независимо от ответа аудитора**
-6. Обработать вердикт аудитора:
-   - `completion: complete` + `integrity: clean` →
+6. Обработать вердикт аудитора (действия совпадают с реестром: `complete →
+   next`, `incomplete → loop:@audited`, `blocked → escalate`):
+   - `verdict: complete` + `integrity: clean` →
      requirements := `completed`, ссылка на evidence
-   - `completion: incomplete` →
+   - `verdict: incomplete` →
      requirements остаются `claimed`; retry шаг с выдержкой из evidence
      аудита (что конкретно не так)
    - `integrity: violation` →
      requirements := `untrusted`; retry шаг
-   - `completion: blocked` →
+   - `verdict: blocked` →
      `verdict: blocked` + `question` (эскалация)
 7. Счётчик dispatches++ (исполнитель И аудитор считаются)
 
