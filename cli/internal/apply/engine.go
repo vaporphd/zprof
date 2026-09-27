@@ -144,20 +144,16 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	}
 	res.StateFiles = state
 
-	// 5.5. Deploy telemetry collector (zprof-collect.py + .agentlog/schema.json)
-	collectorFiles, err := deployCollector(opts)
+	// 5.5/5.6. Deploy telemetry: zprof-collect.py + .agentlog/schema.json,
+	// then upsert the telemetry hooks into .claude/settings.local.json so
+	// the collector actually fires (SubagentStop/Stop/SessionStart).
+	// Idempotent JSON upsert: never clobbers hooks or keys the user added
+	// by hand. Shared with `zprof apply --telemetry-only` (DeployTelemetry).
+	telemetryFiles, err := DeployTelemetry(opts.ProjectDir, opts.Base)
 	if err != nil {
-		return nil, fmt.Errorf("deploy collector: %w", err)
+		return nil, err
 	}
-	res.UpdatedFiles = append(res.UpdatedFiles, collectorFiles...)
-
-	// 5.6. Upsert telemetry hooks into .claude/settings.local.json so the
-	// collector actually fires (SubagentStop/Stop/SessionStart). Idempotent
-	// JSON upsert: never clobbers hooks or keys the user added by hand.
-	if err := EnsureHooks(opts.ProjectDir); err != nil {
-		return nil, fmt.Errorf("ensure telemetry hooks: %w", err)
-	}
-	res.UpdatedFiles = append(res.UpdatedFiles, filepath.Join(opts.ProjectDir, ".claude", "settings.local.json"))
+	res.UpdatedFiles = append(res.UpdatedFiles, telemetryFiles...)
 
 	// 6. .gitignore append (base entries + per-overlay contributions).
 	if err := ensureGitignore(opts.ProjectDir, opts.Overlays); err != nil {

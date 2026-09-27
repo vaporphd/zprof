@@ -15,24 +15,57 @@ import (
 // NewApplyCmd returns the `zprof apply <overlay> [<overlay>...]` command.
 func NewApplyCmd() *cobra.Command {
 	var (
-		minimal   bool
-		withGates bool
-		dryRun    bool
-		mergeFlag string
+		minimal       bool
+		withGates     bool
+		dryRun        bool
+		mergeFlag     string
+		telemetryOnly bool
 	)
 	c := &cobra.Command{
 		Use:   "apply <overlay> [<overlay>...]",
 		Short: "Применить один или несколько overlays в текущем проекте",
-		Args:  cobra.MinimumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			mode, resolver, err := parseMergeFlag(mergeFlag)
-			if err != nil {
-				return err
+		Args: func(cmd *cobra.Command, args []string) error {
+			if telemetryOnly {
+				if len(args) > 0 {
+					return fmt.Errorf("--telemetry-only не принимает имена overlay (получено: %v)", args)
+				}
+				return nil
 			}
+			return cobra.MinimumNArgs(1)(cmd, args)
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 			repo := repoDir()
 			base, err := overlay.LoadBase(filepath.Join(repo, "base"))
 			if err != nil {
 				return fmt.Errorf("load base: %w", err)
+			}
+
+			if telemetryOnly {
+				pwd, err := os.Getwd()
+				if err != nil {
+					return fmt.Errorf("getwd: %w", err)
+				}
+				if dryRun {
+					fmt.Println("[dry-run] --telemetry-only would write:")
+					fmt.Println("  .claude/zprof-collect.py")
+					fmt.Println("  .agentlog/schema.json")
+					fmt.Println("  .claude/settings.local.json (telemetry hooks)")
+					return nil
+				}
+				written, err := apply.DeployTelemetry(pwd, base)
+				if err != nil {
+					return err
+				}
+				fmt.Printf("Обновлено файлов: %d\n", len(written))
+				for _, f := range written {
+					fmt.Println(" ", f)
+				}
+				return nil
+			}
+
+			mode, resolver, err := parseMergeFlag(mergeFlag)
+			if err != nil {
+				return err
 			}
 			var overlays []*overlay.Overlay
 			// base is applied implicitly and can never be an overlay arg;
@@ -98,10 +131,12 @@ func NewApplyCmd() *cobra.Command {
 			return nil
 		},
 	}
-	c.Flags().BoolVar(&minimal, "minimal", false, "Пропустить docs/PROJECT_SPEC.md и docs/adr/")
-	c.Flags().BoolVar(&withGates, "with-gates", false, "Включить north-star-auditor / evidence-auditor / plan-reviewer")
+	c.Flags().BoolVar(&minimal, "minimal", false, "Пропустить docs/PROJECT_SPEC.md и docs/adr/ (не действует с --telemetry-only)")
+	c.Flags().BoolVar(&withGates, "with-gates", false, "Включить north-star-auditor / evidence-auditor / plan-reviewer (не действует с --telemetry-only)")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "Только показать план, не писать файлы")
-	c.Flags().StringVar(&mergeFlag, "merge", "overwrite", "Стратегия конфликтов managed-блоков: overwrite | preserve | interactive")
+	c.Flags().StringVar(&mergeFlag, "merge", "overwrite", "Стратегия конфликтов managed-блоков: overwrite | preserve | interactive (не действует с --telemetry-only)")
+	c.Flags().BoolVar(&telemetryOnly, "telemetry-only", false,
+		"Передеплоить только телеметрию (.claude/zprof-collect.py, .agentlog/schema.json, хуки) без overlay, агентов и .zprof.yaml")
 	return c
 }
 
