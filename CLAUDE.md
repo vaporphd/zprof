@@ -105,4 +105,4 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 делает merge. Main-сессия не мержит в `main` сама и не предлагает «merge locally»,
 даже если внешний skill (finishing-a-development-branch, SDD) показывает такое меню —
 инструкции этого файла его перебивают. Это же правило действует во всех проектах
-под zprof (urok: `tasks/lessons.md`, 2026-09-27).
+под zprof (урок: `tasks/lessons.md`, 2026-09-27).
