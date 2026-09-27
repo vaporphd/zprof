@@ -6,5 +6,6 @@
 - Тесты на head: pytest 181, go test ./... зелёный.
 
 ## Next
+- PR expert-panel (#12): pr-shepherd мержит сам по новому контракту; после merge — `zprof sync` в проектах, панель доступна фразой «собери панель экспертов».
 - pr-shepherd: pre-flight + delivery verification PR #10, затем merge делает Алекс.
 - После merge: zprof sync в jarvis-in-hermes и apple-health-sync; первые живые карточки; калибровка порогов Ideal/Solid.
