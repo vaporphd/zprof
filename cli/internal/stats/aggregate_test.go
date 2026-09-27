@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -89,4 +90,61 @@ func TestPercentile(t *testing.T) {
 func TestTokenBreakdown_Total(t *testing.T) {
 	tb := TokenBreakdown{Input: 100, Output: 200, CacheRead: 300, CacheCreation: 400}
 	require.Equal(t, 1000, tb.Total())
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+func TestAggregate_DriftGroupsByConfigHash(t *testing.T) {
+	base := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	ds := []Dispatch{
+		{
+			DispatchComplete: true, ConfigHash: "abc123", TokensInput: 1000, TokensOutput: 500,
+			HasPreamble: boolPtr(false), Timestamp: base, DurationMs: 100,
+		},
+		{
+			DispatchComplete: true, ConfigHash: "abc123", TokensInput: 2000, TokensOutput: 1000,
+			HasPreamble: boolPtr(true), Timestamp: base.Add(time.Hour), DurationMs: 200,
+		},
+		{
+			DispatchComplete: true, ConfigHash: "def456", TokensInput: 500, TokensOutput: 250,
+			HasPreamble: boolPtr(false), Timestamp: base.Add(2 * time.Hour), DurationMs: 300,
+		},
+		// no config_hash: must not create a spurious group and must not panic.
+		{DispatchComplete: true, ConfigHash: "", TokensInput: 10, Timestamp: base},
+		// not complete: must be excluded from drift entirely.
+		{DispatchComplete: false, ConfigHash: "zzz999", TokensInput: 999},
+	}
+	r := Aggregate(ds, Losses{})
+	require.Len(t, r.Drift, 2, "two distinct non-empty config_hash values among completed dispatches")
+
+	byHash := map[string]DriftEntry{}
+	for _, de := range r.Drift {
+		byHash[de.ConfigHash] = de
+	}
+	require.NotContains(t, byHash, "", "dispatches without config_hash must not form a group")
+	require.NotContains(t, byHash, "zzz999", "incomplete dispatches must not be counted")
+
+	abc := byHash["abc123"]
+	require.Equal(t, 2, abc.Dispatches)
+	require.Equal(t, (1000+500+2000+1000)/2, abc.AvgTokens)
+	require.Equal(t, 50.0, abc.ComplianceRate, "1 of 2 dispatches has_preamble=false -> compliant")
+	require.Equal(t, base, abc.FirstSeen)
+	require.Equal(t, base.Add(time.Hour), abc.LastSeen)
+
+	def := byHash["def456"]
+	require.Equal(t, 1, def.Dispatches)
+	require.Equal(t, 100.0, def.ComplianceRate, "sole dispatch has_preamble=false -> compliant")
+
+	// Sorted by LastSeen descending: def456 (newest) before abc123.
+	require.Equal(t, "def456", r.Drift[0].ConfigHash)
+	require.Equal(t, "abc123", r.Drift[1].ConfigHash)
+}
+
+func TestAggregate_DriftNilWhenSingleConfigHash(t *testing.T) {
+	ds := []Dispatch{
+		{DispatchComplete: true, ConfigHash: "only1", TokensInput: 100},
+		{DispatchComplete: true, ConfigHash: "only1", TokensInput: 200},
+	}
+	r := Aggregate(ds, Losses{})
+	require.Nil(t, r.Drift, "drift comparison needs >1 distinct config_hash to be meaningful")
 }
