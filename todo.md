@@ -17,7 +17,7 @@
 - [x] ci: pytest, gofmt -l и ruff в CI; отформатировать 20 файлов cli/ (#14, PR 32)
 - [ ] ci: ruleset на main — required check test (CI), без bypass (#17) — owner, depends: #14
 - [x] fix(base): стоп-лист — «удаление несмерженных веток и тегов», merged-ветка штатно (#15)
-- [ ] feat(base): pr-shepherd в local-green сам гоняет тесты из ## Executing (#16) — после #15
+- [x] feat(base): pr-shepherd в local-green сам гоняет тесты из ## Executing (#16) — после #15
 - [ ] feat(cli): zprof apply пишет permissions.deny (force, --admin, --no-verify, curl|sh) (#18)
 - [ ] feat(base): глобальный max_dispatches task-runner'а вне секции аудита (#19)
 - [ ] feat(base): реестр verdicts.yaml, маппинг в task-runner, проверка в doctor (#20) — depends: #19
@@ -25,6 +25,7 @@
 - [x] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
 
 - [ ] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34
+- [ ] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
 
 ## Plan 2: guard
 - [ ] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)

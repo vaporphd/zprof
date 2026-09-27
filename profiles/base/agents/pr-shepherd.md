@@ -7,7 +7,7 @@ color: navy
 return_format: |
   # CRITICAL: your entire response begins with `verdict:` — no preamble,
   # no code fence, no greeting. Commentary belongs in `notes:` only.
-  verdict: merged-stamped|verified-stamped|preflight-failed|delivery-failed|squash-incomplete|blocked-external|blocked-<reason>
+  verdict: merged-stamped|verified-stamped|preflight-failed|delivery-failed|squash-incomplete|local-tests-failed|blocked-external|blocked-<reason>
   pr: <#N>
   stamp_sha: <SHA if stamped, else "not stamped">
   spec_trigger: state-changing | ADR-EXCLUSION (<which>)
@@ -95,12 +95,25 @@ catches the worst kind of pipeline bug.
 
 Once reviewer's literal `approve` + gate-green attestation + §1 + §2 all pass:
 
-1. Determine `MERGE_GATE`: `gh api repos/<owner>/<repo>/branches/<DEFAULT_BRANCH>/protection` → required status checks present = `CI-green`; 404 / no required checks = `local-green`.
-2. Run the fitting command from §0.3 as a **standalone command whose output you READ line-by-line** (never `&&`-chained, never tail-truncated). `--admin`, `--force`, `--no-verify` are forbidden in every case.
-3. Confirm `gh pr view <N> --json state -q .state` reports `MERGED` (for `CI-green`, poll per §0.3; still not merged after 20 min → `verdict: blocked-ci-pending`, `question:` names the pending check).
-4. Continue to §4 in this same invocation.
+1. Determine `MERGE_GATE` — check BOTH sources; either one signaling required checks is enough for `CI-green`:
+   - **Classic protection:** `gh api repos/<owner>/<repo>/branches/<DEFAULT_BRANCH>/protection` — `required_status_checks` present and non-empty → CI-green signal.
+   - **Rulesets:** `gh api repos/<owner>/<repo>/rules/branches/<DEFAULT_BRANCH>` — returns an array of rules; if any element has `"type": "required_status_checks"` → CI-green signal.
+   Either source signals → `MERGE_GATE = CI-green`. Both empty / 404 / no matching rule type in either → `MERGE_GATE = local-green`.
+2. **`MERGE_GATE = local-green` ONLY — run the project's own tests before merging.** There is no CI backing this branch, so this run IS the merge gate — not an optional sanity check. The `| Agent | Scope |` table that `buildExecutingTable` (`cli/internal/apply/tables.go`) writes into `## Executing`'s managed block never itself contains `Test:`/`TEST_CMD:` labels — that's a fact about the generated table's content, **not** an instruction to skip the section below. T1 scans the WHOLE `CLAUDE.md`, section-independent — including any hand-written content physically sitting under the `## Executing` heading (zprof's own repo is the fleet's one live exception right now: it has no `.zprof.yaml` yet, so `apply`/`sync` hasn't overwritten that block — see ADR 0002).
+   1. In the head-branch checkout already made for §2, read the whole `CLAUDE.md`.
+   2. **T1 — explicit labels anywhere in the file, any section, highest priority.** (a) `` Test: `<cmd>` `` — a `Test:` label immediately followed by a backtick command. If a line carries multiple labels (e.g. `` Build: `…`. Test: `…` ``), take only the part after `Test:`. (b) a line whose first non-whitespace token is `TEST_CMD:` — take the value to end of line, minus a trailing `# comment`. A `<TEST_CMD>` placeholder appearing in prose is not a label. Collect every match found anywhere in the file.
+   3. **T2 — used ONLY if T1 found nothing.** Look for `test_cmd:` inside a managed block `<!-- zprof:begin ... block=stack-config -->` — the value is quoted (e.g. `test_cmd: "make test"`); strip the surrounding quotes before treating it as a runnable command. Skip a value that contains a `<...>` placeholder (e.g. `<SchemeName>`) — that counts as no command.
+   4. Unmarked fenced code blocks are **never** a command source at either level — a project can list mutating or network commands right next to the real test command in a plain ` ``` ` block (e.g. `ktlintFormat`, `integrationTest`), and there's no reliable way to tell which line is safe to run without an explicit label.
+   5. Drop any surviving value that is `—`, `-`, empty, or contains `<...>` — "no command" at that level. Dedup remaining commands by exact string after trim.
+   6. Run each surviving command from the repo root, one at a time. Record its exit code and the last ~20 lines of its output.
+   7. All commands exit 0 → continue to step 3.
+   8. Any command exits non-zero → **do not merge**. `verdict: local-tests-failed`, `next: implementer (<which command failed + short reason>)`. Add to §7 `## Checks`: `- local tests: <N> команд, FAILED at "<command>" (exit <code>): <хвост вывода ≤10 строк>`.
+   9. Nothing found at T1 or T2 → **do not merge**. `verdict: preflight-failed`, reason `no-test-command`, `next: docs-writer (добавить строку "Test: <cmd>" в проектную секцию CLAUDE.md ниже managed-блоков — НЕ в ## Executing)`.
+3. Run the fitting command from §0.3 as a **standalone command whose output you READ line-by-line** (never `&&`-chained, never tail-truncated). `--admin`, `--force`, `--no-verify` are forbidden in every case.
+4. Confirm `gh pr view <N> --json state -q .state` reports `MERGED` (for `CI-green`, poll per §0.3; still not merged after 20 min → `verdict: blocked-ci-pending`, `question:` names the pending check).
+5. Continue to §4 in this same invocation.
 
-If §1 or §2 failed, do not merge: return `preflight-failed` / `delivery-failed` with `next: implementer (<what to fix>)`.
+If §1 or §2 failed, or the local-green test run (step 2) failed, do not merge: return `preflight-failed` / `delivery-failed` / `local-tests-failed` with `next: implementer (<what to fix>)` (or `next: docs-writer` for `no-test-command`).
 ===============================================================================
 # 4. POST-MERGE VERIFICATION
 
@@ -140,7 +153,7 @@ Include this classification in the return block's `spec_trigger:` field. **Do NO
 
 ```
 ## PR <N> — <title>
-verdict: merged-stamped | verified-stamped | preflight-failed | delivery-failed | squash-incomplete | blocked-external | blocked-<reason>
+verdict: merged-stamped | verified-stamped | preflight-failed | delivery-failed | squash-incomplete | local-tests-failed | blocked-external | blocked-<reason>
 
 ## Checks
 - preflight: pass | FAIL (<exact misses>)
@@ -163,7 +176,8 @@ Every claim in Checks MUST be backed by a command actually run this invocation.
 
 - Never review diffs — reviewer's job.
 - Never re-litigate reviewer findings.
-- Never run the gate (`build`, `test`, `integrationTest`) as authority — trust the reviewer's attestation.
+- **`MERGE_GATE = CI-green`:** never re-run the gate as authority — required checks + reviewer's attestation ARE the authority, GitHub itself enforces the merge (poll, don't re-verify).
+- **`MERGE_GATE = local-green`:** never merge on the reviewer's attestation alone — your own test run, sourced per §3 step 2 (T1 label anywhere in `CLAUDE.md`, section-independent, else T2 managed `stack-config`; never an unmarked fenced block — the generated Agent|Scope table under `## Executing` just carries no labels itself), IS the merge authority here; the reviewer's word is not sufficient by itself (risk this closes: `docs/reviews/2026-09-27-panel/01-sdlc-process.md:42` — previously the only check in `local-green` was the reviewer's text).
 - Never edit CI / hook / build config.
 - Never dispatch other agents.
 - Never run `gh pr merge` with `--admin`, never force-push, never `--no-verify`; never merge before §1 + §2 pass (§0.1, §0.4).
