@@ -208,10 +208,13 @@ Overlay `ios-swift` добавляет `exempt_roles: {publish: [testflight-ship
 `readonly_roles` по умолчанию: `auditor`, `auditor-deep`, `explorer`,
 `architect`, `reviewer`, `bug-hunter`, `expert-panel`, `evaluator`,
 `evaluator-telemetry`, `evidence-auditor`, `north-star-auditor`,
-`plan-reviewer`, `pr-shepherd`. У pr-shepherd `tools: Read, Grep, Glob, Bash`
-и контракт «never writes code»; его штатные `gh …`, `git fetch`, `git log`,
-`git rev-parse` в `mutating_bash_patterns` не входят. Overlay-роли с теми же
-именами (reviewer из `backend-python`) наследуют правило по имени.
+`plan-reviewer`. **pr-shepherd в список не входит**: несмотря на «never writes
+code», его контракт штатно выполняет `git checkout <DEFAULT_BRANCH> && git pull
+--ff-only` (§4 шаг 2, `pr-shepherd.md:110`) и `git add -u && git commit` для
+штампа (§5 шаг 3, `pr-shepherd.md:121`) — обе команды совпадают с
+`mutating_bash_patterns`. Его ограничивают стоп-лист (§5.1) и merge-гейт
+(§5.5). Overlay-роли с теми же именами (reviewer из `backend-python`)
+наследуют правило по имени.
 
 ### 5.5 Merge-гейт
 
@@ -303,18 +306,25 @@ Exit 0. Никаких `updatedInput` в фазе 1. Никаких `ask`.
 
 ```json
 {"ts":"2026-09-27T14:02:11Z","session_id":"…","event":"pre-tool","role":"implementer",
- "tool":"Bash","rule":"force_push","decision":"deny","target":"git push","input_hash":"a1b2c3d4e5f6","run_id":null}
+ "dispatch_id":"toolu_01AbC…","tool":"Bash","rule":"force_push","decision":"deny",
+ "target":"git push","input_hash":"a1b2c3d4e5f6"}
 ```
 
-`decision` ∈ `deny | block | allow_unverified | error`. `target` — первые два
-токена команды или basename файла; полная команда не сохраняется (может
-содержать секреты). `input_hash` — sha1 канонического `tool_input`[:12], как в
-`tool-events.jsonl`. Ошибки скрипта (`decision: error`, поле `detail` — класс
-исключения) пишутся из внешнего `try/except`; если и запись упала — тишина.
+`decision` ∈ `deny | block | allow_unverified | error`. `dispatch_id` —
+`toolUseId` из `agent-<id>.meta.json` (тот же идентификатор, которым коллектор
+связывает субагента с dispatch, `zprof-collect.py:917`); для роли `main` и
+`unknown` — `null`. `target` — первые два токена команды или basename файла;
+полная команда не сохраняется (может содержать секреты). `input_hash` — sha1
+канонического `tool_input`[:12], как в `tool-events.jsonl`. Ошибки скрипта
+(`decision: error`, поле `detail` — класс исключения) пишутся из внешнего
+`try/except`; если и запись упала — тишина.
 
-**Коллектор.** На `stop` присваивает `run_id` строкам guard-events тем же
-оконным правилом, что tool-events (C4, `_assign_run_ids`), и переписывает файл
-атомарно. **Score.** Reader загружает `guard-events.jsonl`; `computeP7`
+**Привязка к run.** Никаких временных окон: событие с `dispatch_id` относится
+к тому же dispatch и run, что и `tool-events.jsonl` с этим `dispatch_id`
+(`score/reader.go`, `BuildRuns`). События с `dispatch_id: null` (main)
+относятся к run, чей корневой dispatch активен по `ts` — единственный
+временной fallback, и только для main. Коллектор файл не переписывает.
+**Score.** Reader загружает `guard-events.jsonl`; `computeP7`
 прибавляет по одному нарушению за каждую строку `deny`/`block` в окне run, по
 роли; `verdict_exempt_roles` от этого слагаемого не освобождены (deny на
 мутацию auditor'а — нарушение). Веса и saturation P7 не меняются (10, sat 4);
@@ -330,7 +340,7 @@ Exit 0. Никаких `updatedInput` в фазе 1. Никаких `ask`.
 version: 1
 readonly_roles: [auditor, auditor-deep, explorer, architect, reviewer, bug-hunter,
                  expert-panel, evaluator, evaluator-telemetry, evidence-auditor,
-                 north-star-auditor, plan-reviewer, pr-shepherd]
+                 north-star-auditor, plan-reviewer]      # pr-shepherd намеренно нет, §5.4
 merge_roles: [pr-shepherd]
 allow_write_prefixes: ["$CLAUDE_PROJECT_DIR", "~/.claude/projects/*/memory/", "~/.claude/plans/",
                        "/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*"]
@@ -372,10 +382,12 @@ rules:
 
 `base/guard.yaml` → каждый активный overlay `guard.yaml` (если есть) →
 `.zprof.yaml: guard:`. Правила: списки (`rules`, `readonly_roles`,
-`merge_roles`, `allow_write_prefixes`, `permissions_deny`) — конкатенация с
-дедупликацией по значению (для `rules` — по `id`, поздний слой заменяет правило
-целиком); `exempt_roles` — map `rule_id → [roles]`, объединение списков;
-скаляры — поздний слой перекрывает.
+`allow_write_prefixes`, `permissions_deny`) — конкатенация с дедупликацией по
+значению (для `rules` — по `id`, поздний слой заменяет правило целиком);
+`exempt_roles` — map `rule_id → [roles]`, объединение списков; скаляры —
+поздний слой перекрывает. **Исключение — `merge_roles`:** overlay дописывает,
+а проектный слой (`.zprof.yaml`) **заменяет список целиком** — это явное
+решение владельца, кому в этом проекте можно мержить.
 
 ### 8.3 `.zprof.yaml`
 
@@ -383,7 +395,7 @@ rules:
 guard:
   enabled: true                 # false → apply снимает хуки guard и permissions_deny
   extra_deny_bash: []           # доп. regex, правило extra_deny с общей причиной
-  merge_roles: [pr-shepherd]    # переопределение
+  merge_roles: [pr-shepherd]    # заменяет список целиком (overlay — дописывает), §8.2
   readonly_roles: []            # дополнение
   allow_write_outside: []       # дополнительные префиксы для write_outside_repo
   exempt_roles: {}              # rule_id → [roles]
@@ -421,7 +433,7 @@ guard и все `permissions_deny` из `guard.json` удаляются, чуж�
 | `profiles/overlays/backend-python/guard.yaml` | правило `pip_install` |
 | `cli/internal/overlay/loader.go` | `Base.GuardScript`, `Base.GuardSchema`, `Overlay.GuardSchema []byte` |
 | `cli/internal/apply/guard.go` | новый; `deployGuard`: скрипт, merge слоёв, подстановка `$mutating_bash_patterns` из `Base.TelemetrySchema`, рендер `guard.json`; вызов из `engine.go` после `deployCollector` |
-| `cli/internal/apply/settings.go` | `hookSpec.matcher`; `zprofHookIndex(entries, script)`; спеки guard; `ensurePermissionsDeny`; снятие при `enabled=false` |
+| `cli/internal/apply/settings.go` | `hookSpec.matcher`; `zprofHookIndex(entries, script)`; спеки guard; `ensurePermissionsDeny`; снятие при `enabled=false`; существующую константу `hookGuardTemplate` (обёртка `test -x … &&` для коллектора) переименовать в `collectorHookTemplate`, чтобы не путать с guard |
 | `cli/internal/manifest/project.go` | `GuardConfig` |
 | `cli/internal/doctor/diagnostics.go` | `checkGuardHooks`, `checkGuardConfig`, `checkPermissionsDeny`, `checkRoleResolution` |
 | `profiles/base/zprof-collect.py` | `_assign_run_ids` также для `guard-events.jsonl` |
@@ -445,7 +457,8 @@ guard и все `permissions_deny` из `guard.json` удаляются, чуж�
 
 ## 11. Тестирование
 
-- **pytest `profiles/base/tests/test_guard.py`**, табличные: для каждого
+- **pytest `profiles/base/tests/test_guard*.py`** (допустимо по файлу на
+  группу правил, чтобы параллельные ветки не конфликтовали), табличные: для каждого
   правила §5 — минимум один deny и два allow (похожая, но легитимная команда:
   `git push`, `git branch -d`, `gh pr merge` из pr-shepherd с валидным PR через
   подменённый `gh`); `rtk`-префикс; `cd path &&`; роль из `meta.json`; роль
