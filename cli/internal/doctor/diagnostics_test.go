@@ -801,6 +801,52 @@ func TestDoctorMessagesAreEnglish(t *testing.T) {
 	}
 }
 
+// --- global runner dispatch budget (issue #19) ---------------------------
+
+// The counter is global, not audit-gated: a too-small budget must warn even
+// with no audit: section at all.
+func TestCheckRunnerBudgetWarnsBelowThreeWithoutAuditSection(t *testing.T) {
+	proj := &manifest.ProjectManifest{Runner: &manifest.RunnerConfig{MaxDispatches: 2}}
+
+	issues := checkRunnerBudget(proj)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "runner.max_dispatches")
+}
+
+// A too-small budget set only via the deprecated audit.max_dispatches alias
+// still falls through RunnerMaxDispatches() and must still warn — the
+// budget check doesn't care which key set it. Setting the alias also trips
+// the separate deprecation warning, so both fire together.
+func TestCheckRunnerBudgetWarnsBelowThreeViaAuditAlias(t *testing.T) {
+	proj := &manifest.ProjectManifest{Audit: &manifest.AuditConfig{Enabled: false, MaxDispatches: 2}}
+
+	issues := checkRunnerBudget(proj)
+	require.Len(t, issues, 2)
+	require.True(t, findIssue(issues, LevelWarn, "runner.max_dispatches"))
+	require.True(t, findIssue(issues, LevelWarn, "deprecated"))
+}
+
+// audit.max_dispatches being set at all is a deprecation warning,
+// regardless of audit.enabled or whether the value is otherwise healthy.
+func TestCheckRunnerBudgetWarnsOnDeprecatedAuditAlias(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		proj := &manifest.ProjectManifest{Audit: &manifest.AuditConfig{Enabled: enabled, MaxDispatches: 9}}
+
+		issues := checkRunnerBudget(proj)
+		require.Len(t, issues, 1)
+		require.Equal(t, LevelWarn, issues[0].Level)
+		require.Contains(t, issues[0].Message, "deprecated")
+		require.Contains(t, issues[0].Message, "9")
+	}
+}
+
+// Neither key set: default budget (14) is healthy and there's no alias to
+// deprecate — silent.
+func TestCheckRunnerBudgetSilentWhenNothingConfigured(t *testing.T) {
+	require.Empty(t, checkRunnerBudget(&manifest.ProjectManifest{}))
+}
+
 func mustAgentsDirProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
