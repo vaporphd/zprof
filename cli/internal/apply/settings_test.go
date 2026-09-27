@@ -105,3 +105,58 @@ func TestEnsureHooksGuardCommand(t *testing.T) {
 	require.Contains(t, string(data), " stop ")
 	require.Contains(t, string(data), "session-start")
 }
+
+func stopCommands(t *testing.T, dir string) []string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	entries := settings["hooks"].(map[string]any)["Stop"].([]any)
+	var cmds []string
+	for _, e := range entries {
+		for _, h := range e.(map[string]any)["hooks"].([]any) {
+			cmds = append(cmds, h.(map[string]any)["command"].(string))
+		}
+	}
+	return cmds
+}
+
+func TestEnsureHooksStopChainsScore(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, EnsureHooks(dir))
+	cmds := stopCommands(t, dir)
+	require.Len(t, cmds, 1, "one chained command, not two parallel hooks")
+	c := cmds[0]
+	require.Contains(t, c, `zprof-collect.py" stop`)
+	require.Contains(t, c, "zprof score --latest --quiet --no-collect")
+	require.Less(t, strings.Index(c, "zprof-collect.py"), strings.Index(c, "zprof score"), "collector runs first")
+	require.Contains(t, c, `command -v zprof >/dev/null 2>&1 &&`, "score is skipped when zprof is not installed")
+	require.True(t, strings.HasSuffix(c, "|| true"))
+
+	// other events do not get the score chain
+	data, _ := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	require.Equal(t, 1, strings.Count(string(data), "zprof score"))
+}
+
+func TestEnsureHooksUpgradesOldStopCommand(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	old := map[string]any{"hooks": map[string]any{
+		"Stop": []any{map[string]any{"hooks": []any{map[string]any{
+			"type":    "command",
+			"command": `test -x "$CLAUDE_PROJECT_DIR/.claude/zprof-collect.py" && "$CLAUDE_PROJECT_DIR/.claude/zprof-collect.py" stop || true`,
+		}}}},
+	}}
+	data, _ := json.MarshalIndent(old, "", "  ")
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), data, 0o644))
+
+	require.NoError(t, EnsureHooks(dir))
+	cmds := stopCommands(t, dir)
+	require.Len(t, cmds, 1, "old entry replaced, not duplicated")
+	require.Contains(t, cmds[0], "zprof score --latest --quiet --no-collect")
+
+	require.NoError(t, EnsureHooks(dir)) // and it stays stable
+	require.Len(t, stopCommands(t, dir), 1)
+}

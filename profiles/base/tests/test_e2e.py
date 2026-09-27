@@ -283,6 +283,30 @@ def _setup_full_session(tmp_path, session_id="e2e-session-001"):
             cache_read=50000, cache_creation=3000,
             last_text="verdict: done\nartifact: commit e2eabc123",
         ))
+    # agent1 dispatched the child reviewer synchronously: its transcript holds
+    # the child's Agent tool_use + toolUseResult, as a real parent's does.
+    # (No usage/text on these records, so agent1's tokens and return are unchanged.)
+    t1 = subagents_dir / f"agent-{agent1_id}.jsonl"
+    t1_lines = t1.read_text().splitlines()
+    t1_lines[1:1] = [
+        json.dumps({"type": "assistant", "timestamp": "2026-08-02T10:01:29.100Z",
+                    "message": {"role": "assistant", "model": "claude-sonnet-5",
+                                "content": [{"type": "tool_use", "id": "toolu_01E2EChildReview00001",
+                                             "name": "Agent",
+                                             "input": {"description": "review",
+                                                       "subagent_type": "code-reviewer",
+                                                       "prompt": "review"}}]}}),
+        json.dumps({"type": "user", "timestamp": "2026-08-02T10:01:29.900Z",
+                    "message": {"role": "user",
+                                "content": [{"type": "tool_result",
+                                             "tool_use_id": "toolu_01E2EChildReview00001",
+                                             "content": [{"type": "text",
+                                                          "text": "verdict: approve"}]}]},
+                    "toolUseResult": {"status": "completed", "agentId": "e2eagent_child_review1",
+                                      "agentType": "code-reviewer",
+                                      "resolvedModel": "claude-opus-5"}}),
+    ]
+    t1.write_text("\n".join(t1_lines) + "\n")
 
     # --- Subagent 2: child of agent1, spawnDepth=2, parentAgentId ---
     agent2_id = "e2eagent_child_review1"

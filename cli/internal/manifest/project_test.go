@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -42,4 +43,26 @@ func TestResolvedModelReturnsErrorWhenNoOverride(t *testing.T) {
 	m := &ProjectManifest{ModelOverrides: map[string]string{}}
 	_, err := m.ResolvedModel("architect")
 	require.ErrorIs(t, err, ErrNoOverride)
+}
+
+func TestLoadProjectManifest_ScoreSection(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, ".zprof.yaml")
+	require.NoError(t, os.WriteFile(p, []byte("overlays: [x]\nscore:\n  enabled: false\n  weights: {P1: 30}\n  thresholds: {ideal: 90}\n"), 0o644))
+	m, err := LoadProject(p)
+	require.NoError(t, err)
+	require.NotNil(t, m.Score)
+	require.NotNil(t, m.Score.Enabled)
+	require.False(t, *m.Score.Enabled)
+	require.Equal(t, 30.0, m.Score.Weights["P1"])
+	require.Equal(t, 90, m.Score.Thresholds.Ideal)
+	require.Equal(t, 0, m.Score.Thresholds.Solid)
+}
+
+func TestCarryOverFrom_KeepsScore(t *testing.T) {
+	enabled := false
+	prev := &ProjectManifest{Score: &ScoreConfig{Enabled: &enabled}}
+	m := &ProjectManifest{}
+	m.CarryOverFrom(prev)
+	require.Same(t, prev.Score, m.Score)
 }

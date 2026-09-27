@@ -620,3 +620,70 @@ class TestDynamicRoles:
         roles = _get_known_roles(str(tmp_path))
         assert "reviewer" in roles  # builtin
         assert "custom" in roles  # dynamic
+
+
+def _norm(raw):
+    norm, _ = _normalize_dispatch(
+        raw, session_id="s1", harness_version="2.1.220", machine_id="m",
+        project_id="p", project_id_provisional=False, redaction_patterns=[],
+        known_roles=frozenset({"reviewer", "implementer"}),
+    )
+    return norm
+
+
+def test_verdict_value_persisted():
+    raw = {"dispatch_id": "toolu_1", "role": "implementer", "status": "completed",
+           "returned": "verdict: done\nartifact: commit abc\nnext: reviewer\none_line: ok"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "done"
+    assert norm["ext"]["next"] == "reviewer"
+    assert norm["ext"]["artifact"] == "commit abc"
+    assert "run_log" not in norm["ext"]
+
+
+def test_run_log_persisted_for_task_runner():
+    raw = {"dispatch_id": "toolu_r", "role": "task-runner", "status": "completed",
+           "returned": "verdict: blocked\nartifact: none\nrun_log: .zprof/runs/2026-09-26-x.md\none_line: q\nquestion: which?"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "blocked"
+    assert norm["ext"]["run_log"] == ".zprof/runs/2026-09-26-x.md"
+
+
+def test_verdict_absent_when_no_verdict_line():
+    raw = {"dispatch_id": "toolu_a", "role": "auditor", "status": "completed",
+           "returned": "completion: complete\nintegrity: clean\nevidence: x.md"}
+    norm = _norm(raw)
+    assert "verdict" not in norm
+    assert norm["return_parsed"] is False
+    assert norm.get("ext") in (None, {})
+
+
+def test_verdict_value_is_lowercased_first_token():
+    raw = {"dispatch_id": "toolu_b", "role": "reviewer", "status": "completed",
+           "returned": "verdict: Approve-With-Fixes   \nartifact: docs/reviews/r.md"}
+    norm = _norm(raw)
+    assert norm["verdict"] == "approve-with-fixes"
+
+_assign_run_ids = zprof_collect._assign_run_ids
+
+
+def test_assign_run_ids_walks_parent_chain():
+    ds = [
+        {"dispatch_id": "toolu_R", "role": "task-runner"},
+        {"dispatch_id": "toolu_I", "role": "implementer", "parent_dispatch_id": "toolu_R"},
+        {"dispatch_id": "toolu_A", "role": "auditor", "parent_dispatch_id": "toolu_I"},
+        {"dispatch_id": "toolu_X", "role": "explorer"},  # dispatched by main, no runner ancestor
+    ]
+    _assign_run_ids(ds)
+    assert ds[0]["ext"]["run_id"] == "toolu_R", "the runner is its own run"
+    assert ds[1]["ext"]["run_id"] == "toolu_R"
+    assert ds[2]["ext"]["run_id"] == "toolu_R"
+    assert "ext" not in ds[3] or "run_id" not in ds[3]["ext"]
+
+
+def test_run_id_is_composite_after_normalization():
+    raw = {"dispatch_id": "toolu_I", "role": "implementer", "parent_dispatch_id": "toolu_R",
+           "status": "completed", "ext": {"run_id": "toolu_R"}}
+    norm = _norm(raw)
+    assert norm["ext"]["run_id"] == "claude-code:s1:toolu_R"
+    assert norm["parent_dispatch_id"] == "claude-code:s1:toolu_R"

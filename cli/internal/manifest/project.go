@@ -37,21 +37,41 @@ type ProjectManifest struct {
 
 	// Audit configures the MEA-style step auditor in task-runner's loop.
 	Audit *AuditConfig `yaml:"audit,omitempty"`
+
+	// Score configures `zprof score` (per-task scorecard). Nil = defaults
+	// from telemetry.yaml / the compiled-in table; enabled unless
+	// `enabled: false` is set explicitly.
+	Score *ScoreConfig `yaml:"score,omitempty"`
 }
 
 // AuditConfig controls the blocking auditor in task-runner's dispatch loop.
 // When Enabled is false (the default), task-runner behaves identically to
 // the pre-auditor version — no auditor dispatches, no Requirements section.
 type AuditConfig struct {
-	Enabled        bool              `yaml:"enabled"`
-	MaxDispatches  int               `yaml:"max_dispatches,omitempty"`
-	ModelByRole    map[string]string `yaml:"model_by_role,omitempty"`
+	Enabled       bool              `yaml:"enabled"`
+	MaxDispatches int               `yaml:"max_dispatches,omitempty"`
+	ModelByRole   map[string]string `yaml:"model_by_role,omitempty"`
 }
 
 // ABExperiment defines the control and candidate models for a role.
 type ABExperiment struct {
 	Control   string `yaml:"control"`
 	Candidate string `yaml:"candidate"`
+}
+
+// ScoreConfig overrides scorecard weights, saturation points and tier thresholds.
+// Only keys present override; the rest fall back to defaults.
+type ScoreConfig struct {
+	Enabled    *bool              `yaml:"enabled,omitempty"`
+	Weights    map[string]float64 `yaml:"weights,omitempty"`
+	Saturation map[string]float64 `yaml:"saturation,omitempty"`
+	Thresholds *ScoreThresholds   `yaml:"thresholds,omitempty"`
+}
+
+// ScoreThresholds are tier cut-offs; zero means "not set".
+type ScoreThresholds struct {
+	Ideal int `yaml:"ideal,omitempty"`
+	Solid int `yaml:"solid,omitempty"`
 }
 
 // LoadProject reads and parses a project manifest (.zprof.yaml) at path.
@@ -107,6 +127,9 @@ func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
 	}
 	if m.Audit == nil {
 		m.Audit = prev.Audit
+	}
+	if m.Score == nil {
+		m.Score = prev.Score
 	}
 }
 

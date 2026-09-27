@@ -1,7 +1,7 @@
 # profiles/base/telemetry.yaml
 # Core schema for .agentlog/dispatches.jsonl
 # All projects write these fields; cross-project comparison uses only these.
-version: 1
+version: 2
 
 core_fields:
   # identity
@@ -28,7 +28,7 @@ core_fields:
   - {name: model_resolved,      type: string, required: false}
 
   # outcome
-  - {name: verdict,             type: string, required: false}
+  - {name: verdict,             type: string, required: false} # first `verdict:` value from the return text (collector ≥ 0.2)
   - {name: status,              type: string, required: false}
   - {name: dispatch_complete,   type: bool,   required: true,  default: false}
 
@@ -63,3 +63,50 @@ redaction_patterns:
   - "-----BEGIN [A-Z ]+ PRIVATE KEY-----"
   - "password=[^\\s&]+"
   - "api_key=[^\\s&]+"
+
+# --- tool-events.jsonl (collector ≥ 0.2, spec 2026-09-26-task-scorecard §5 C3) ---
+# One row per leaf tool call inside a subagent transcript. Agent/Task calls are
+# dispatches and live in dispatches.jsonl instead.
+tool_events:
+  - {name: schema_version,      type: int,    required: true}
+  - {name: dispatch_id,         type: string, required: true}   # same composite id as dispatches.jsonl
+  - {name: seq,                 type: int,    required: true}   # order inside the dispatch, from 1
+  - {name: ts,                  type: string, required: false}  # timestamp of the tool_use record
+  - {name: tool,                type: string, required: true}   # Read | Edit | Bash | Grep | ...
+  - {name: input_hash,          type: string, required: true}   # sha1(canonical json input)[:12]
+  - {name: target,              type: string, required: false}  # file_path | command[:60] | pattern, redacted
+  - {name: is_error,            type: bool,   required: false}  # null when the tool_result never arrived
+  - {name: mutating,            type: bool,   required: false}  # Bash only; computed on the full command
+  - {name: result_chars,        type: int,    required: false}
+
+# Bash commands that change files/state. Used by Go `zprof score` to decide
+# whether a repeated failing command is a blind retry (P2) and whether a
+# re-read (P3) is legitimate. Build/test/read commands are deliberately absent.
+mutating_bash_patterns:
+  - "\\s>>?\\s"
+  - "\\bsed\\s+-i\\b"
+  - "\\btee\\b"
+  - "\\b(mv|cp|rm|touch|mkdir)\\b"
+  - "\\bgit\\s+(commit|checkout|stash|reset|apply|cherry-pick|merge|rebase)\\b"
+  - "\\bxcodegen\\b"
+  - "\\b(cargo|go|swift)\\s+fmt\\b"
+  - "\\b(gofmt\\s+-w|swiftformat|rustfmt)\\b"
+
+# Roles whose contract does not start with `verdict:` (they return `completion:`).
+# Excluded from P6-by-return_parsed and from P7.
+verdict_exempt_roles:
+  - "auditor"
+  - "auditor-deep"
+
+# Verdict words a reviewer uses to send work back to the implementer.
+# P5 counts reviewer steps whose verdict is in this list.
+review_block_verdicts:
+  - "block"
+  - "changes-requested"
+  - "blocked"
+
+# Defaults for `zprof score`; `.zprof.yaml: score:` overrides any key.
+score_defaults:
+  weights:    {P1: 20, P2: 15, P3: 10, P4: 20, P5: 10, P6: 15, P7: 10}
+  saturation: {P1: 0.20, P2: 3, P3: 0.5, P4: 2, P5: 2, P6: 0.30, P7: 4}
+  thresholds: {ideal: 85, solid: 60}
