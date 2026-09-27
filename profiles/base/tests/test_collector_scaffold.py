@@ -1,7 +1,9 @@
-#!/usr/bin/env python3
 """Tests for collector scaffold: payload, state, locking."""
-import json, os, tempfile, pathlib, subprocess, sys
-import pytest
+import json
+import os
+import pathlib
+import subprocess
+import sys
 
 COLLECTOR = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 
@@ -14,7 +16,7 @@ def run_collector(mode, payload, agentlog_dir, env_extra=None):
     p = subprocess.run(
         [sys.executable, str(COLLECTOR), mode],
         input=json.dumps(payload),
-        capture_output=True, text=True, env=env, timeout=10,
+        capture_output=True, text=True, env=env, timeout=10, check=False,
     )
     log = (agentlog_dir / "collect.log").read_text() if (agentlog_dir / "collect.log").exists() else ""
     return p.returncode, log
@@ -56,7 +58,7 @@ class TestPayloadParsing:
             input="not json",
             capture_output=True, text=True,
             env={**os.environ, "ZPROF_AGENTLOG": str(tmp_path)},
-            timeout=10,
+            timeout=10, check=False,
         )
         assert p.returncode == 0
         assert (tmp_path / "collect.log").exists()

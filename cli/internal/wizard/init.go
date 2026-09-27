@@ -6,12 +6,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/charmbracelet/huh"
 	"github.com/vaporphd/zprof/internal/apply"
 	"github.com/vaporphd/zprof/internal/detect"
 	"github.com/vaporphd/zprof/internal/managed"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/overlay"
-	"github.com/charmbracelet/huh"
 )
 
 // Opts bundles the paths Run needs: the project being initialized and the

@@ -269,4 +269,3 @@ func lastLine(s string) string {
 	}
 	return lines[len(lines)-1]
 }
-

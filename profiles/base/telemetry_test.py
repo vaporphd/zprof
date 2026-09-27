@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Validate telemetry.yaml self-consistency.
 
 Stdlib-only by design: this schema is the contract between the Python
@@ -12,9 +11,8 @@ mappings (`- {name: x, type: y, required: true}`), and a
 `redaction_patterns:` list of double-quoted strings. It is not a
 general-purpose YAML parser and should not be used as one.
 """
-import re
-import sys
 import pathlib
+import re
 
 SCHEMA_PATH = pathlib.Path(__file__).parent / "telemetry.yaml"
 
@@ -92,18 +90,19 @@ def load_schema(text):
                 if pattern_match:
                     schema[section].append(_unescape_dq(pattern_match.group("body")))
                     continue
-        elif section == "score_defaults":
-            # Handle indented lines like `  weights: {P1: 20, P2: 15, ...}`
-            if raw_line.startswith((" ", "\t")):
-                header_match = _SECTION_HEADER.match(stripped)
-                if header_match:
-                    key = header_match.group("key")
-                    value = header_match.group("value").strip()
-                    if value.startswith("{") and value.endswith("}"):
-                        # Parse the flow mapping
-                        body = value[1:-1]  # Remove { }
-                        schema["score_defaults"][key] = _parse_field_body(body)
-                    continue
+        # Handle indented lines like `  weights: {P1: 20, P2: 15, ...}`
+        elif (
+            section == "score_defaults"
+            and raw_line.startswith((" ", "\t"))
+            and (header_match := _SECTION_HEADER.match(stripped))
+        ):
+            key = header_match.group("key")
+            value = header_match.group("value").strip()
+            if value.startswith("{") and value.endswith("}"):
+                # Parse the flow mapping
+                body = value[1:-1]  # Remove { }
+                schema["score_defaults"][key] = _parse_field_body(body)
+            continue
 
         if not raw_line.startswith((" ", "\t")):
             header_match = _SECTION_HEADER.match(stripped)

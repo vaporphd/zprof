@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """End-to-end integration tests for the telemetry collector pipeline.
 
 Exercises the full pipeline via subprocess: fixture setup -> collector invocation
@@ -9,7 +8,13 @@ Test 1: Full pipeline  -- SubagentStop -> Stop -> verify
 Test 2: SessionStart recovery -- previous session data collected on start
 Test 3: Secret redaction in pipeline -- AWS key redacted, count logged
 """
-import gzip, json, os, pathlib, subprocess, sys
+import gzip
+import json
+import os
+import pathlib
+import subprocess
+import sys
+
 import pytest
 
 COLLECTOR = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
@@ -29,7 +34,7 @@ def run_collector(mode, payload, agentlog_dir, timeout=30):
     p = subprocess.run(
         [sys.executable, str(COLLECTOR), mode],
         input=json.dumps(payload),
-        capture_output=True, text=True, env=env, timeout=timeout,
+        capture_output=True, text=True, env=env, timeout=timeout, check=False,
     )
     log_path = agentlog_dir / "collect.log"
     log_text = log_path.read_text() if log_path.exists() else ""
@@ -412,7 +417,7 @@ class TestFullPipeline:
         # Verify composite dispatch_id format
         for row in rows:
             did = row["dispatch_id"]
-            assert did.startswith("claude-code:") or did.startswith("meta:"), (
+            assert did.startswith(("claude-code:", "meta:")), (
                 f"dispatch_id should be composite, got: {did}")
 
         # Check specific dispatches exist
@@ -555,7 +560,7 @@ class TestSessionStartRecovery:
             "hook_event_name": "SessionStart",
             "background_tasks": [],
         }
-        rc, _, _, log_text = run_collector("session-start", start_payload, agentlog_dir)
+        rc, _, _, _ = run_collector("session-start", start_payload, agentlog_dir)
         assert rc == 0
 
         # Verify old session's dispatches were collected
@@ -669,7 +674,7 @@ class TestSecretRedactionPipeline:
             "stop_hook_active": False,
             "background_tasks": [],
         }
-        rc, _, _, log_text = run_collector("stop", stop_payload, agentlog_dir)
+        rc, _, _, _ = run_collector("stop", stop_payload, agentlog_dir)
         assert rc == 0
 
         # dispatches.jsonl must NOT contain the raw secret

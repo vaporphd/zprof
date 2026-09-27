@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Tests for normalization, Class A checks, secret redaction, and dedup (Task 5).
 
 Covers:
@@ -11,12 +10,15 @@ Covers:
 - machine_id stable across calls
 - ext field preserved as-is
 """
-import json, os, pathlib, platform, sys, subprocess, tempfile
-import pytest
+import json
+import pathlib
+import subprocess
+import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 
 import importlib
+
 _mod_path = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 _spec = importlib.util.spec_from_file_location("zprof_collect", _mod_path)
 zprof_collect = importlib.util.module_from_spec(_spec)
@@ -382,15 +384,15 @@ class TestProjectId:
     def test_project_id_from_git(self, tmp_path):
         """In a real git repo, project_id is the hash of the root commit SHA."""
         # Create a temporary git repo
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "config", "user.email", "test@test.com"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "config", "user.name", "Test"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
         (tmp_path / "f.txt").write_text("x")
-        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "commit", "-m", "init", "--no-gpg-sign"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
 
         pid, provisional = _get_project_id(str(tmp_path))
         assert pid  # non-empty
@@ -406,15 +408,15 @@ class TestProjectId:
 
     def test_project_id_deterministic(self, tmp_path):
         """Same directory should produce the same project_id."""
-        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "config", "user.email", "test@test.com"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "config", "user.name", "Test"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
         (tmp_path / "f.txt").write_text("x")
-        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, capture_output=True)
+        subprocess.run(["git", "add", "f.txt"], cwd=tmp_path, capture_output=True, check=False)
         subprocess.run(["git", "commit", "-m", "init", "--no-gpg-sign"],
-                       cwd=tmp_path, capture_output=True)
+                       cwd=tmp_path, capture_output=True, check=False)
 
         pid1, _ = _get_project_id(str(tmp_path))
         pid2, _ = _get_project_id(str(tmp_path))
@@ -517,7 +519,7 @@ class TestReturnedTextExtraction:
 
     def test_sync_dispatch_extracts_returned_text(self):
         """Sync fixture with verdict in tool_result content."""
-        dispatches, meta = _extract_main_log(
+        dispatches, _ = _extract_main_log(
             "sess-verdict-001",
             FIXTURES / "sync_with_verdict.jsonl",
             _empty_sess(),
@@ -528,7 +530,7 @@ class TestReturnedTextExtraction:
 
     def test_sync_returned_text_plain_string(self):
         """Original sync fixture has plain string content (no verdict)."""
-        dispatches, meta = _extract_main_log(
+        dispatches, _ = _extract_main_log(
             "sess-sync-001",
             FIXTURES / "sync_dispatch.jsonl",
             _empty_sess(),

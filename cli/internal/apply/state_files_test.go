@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/vaporphd/zprof/internal/overlay"
 	"github.com/stretchr/testify/require"
+	"github.com/vaporphd/zprof/internal/overlay"
 )
 
 func TestEnsureStateFilesCreatesMissing(t *testing.T) {

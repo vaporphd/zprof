@@ -1,0 +1,21 @@
+# ruff.toml — lint config for profiles/base/ (Python collector, stdlib-only
+# at runtime). ruff itself is a CI-only tool (pip install ruff in ci.yml),
+# not a runtime dependency of the collector (issue #14 AC4).
+#
+# No custom `select` — default rule set (F, E, B, UP, RUF + more; see
+# https://docs.astral.sh/ruff/rules/). Point exceptions below are scoped to
+# the collector script only and documented, not a blanket relaxation.
+
+target-version = "py310"
+
+[lint.per-file-ignores]
+# zprof-collect.py runs as a Claude Code hook and must never crash the
+# session: "Always exits 0. Errors go to collect.log." (module docstring).
+# Catching bare `Exception` — and, in one best-effort state read, swallowing
+# it silently — is that contract, not an oversight. Semantics are out of
+# scope for this lint gate; do not rewrite the error handling to satisfy
+# these two rules.
+"profiles/base/zprof-collect.py" = [
+    "BLE001", # blind `except Exception` — required by the never-crash hook contract
+    "S110",   # `except Exception: pass` — best-effort state load, failure is non-fatal
+]

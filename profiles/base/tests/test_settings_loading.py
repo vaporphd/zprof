@@ -1,7 +1,9 @@
-#!/usr/bin/env python3
 """Pattern lists load in both the source layout (telemetry.yaml next to the
 script) and the deployed layout (.claude/zprof-collect.py + .agentlog/schema.json)."""
-import importlib.util, json, pathlib, shutil
+import importlib.util
+import json
+import pathlib
+import shutil
 
 _SRC = pathlib.Path(__file__).parent.parent
 _SCRIPT = _SRC / "zprof-collect.py"

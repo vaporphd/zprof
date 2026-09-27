@@ -50,9 +50,9 @@ func TestExtractWorkingDirAcceptsEnglishAndRussianHints(t *testing.T) {
 	// instead of the subagent's project root.
 	cases := map[string]string{
 		"Working directory: /Users/alex/proj\nDo the thing.":        "/Users/alex/proj",
-		"Рабочий каталог: /Users/alex/proj\nСделай штуку.":           "/Users/alex/proj",
-		"РАБОЧИЙ КАТАЛОГ: /Users/alex/proj":                          "/Users/alex/proj",
-		"  `Рабочий каталог: /Users/alex/proj`  ":                    "/Users/alex/proj",
+		"Рабочий каталог: /Users/alex/proj\nСделай штуку.":          "/Users/alex/proj",
+		"РАБОЧИЙ КАТАЛОГ: /Users/alex/proj":                         "/Users/alex/proj",
+		"  `Рабочий каталог: /Users/alex/proj`  ":                   "/Users/alex/proj",
 		"Some unrelated prompt line with no directory hint at all.": "",
 	}
 	for input, want := range cases {
@@ -64,15 +64,15 @@ func TestExtractWorkingDirAcceptsEnglishAndRussianHints(t *testing.T) {
 
 func TestGuessRole(t *testing.T) {
 	cases := map[string]string{
-		"Architect run 1 for MoodJournal":         "architect",
-		"Implementer — MoodJournalInterface":      "implementer",
-		"Tester — StreakCalculatorImpl":           "tester",
-		"Reviewer — MoodJournalInterface":         "reviewer",
-		"Dispatch architect on mood feature":      "architect", // token not at start
-		"refactor-agent on something":             "refactor-agent",
-		"Refactor MoodEntry":                      "refactor-agent",
-		"Some totally different task":             "other",
-		"xcodegen-driver: add scheme":             "xcodegen-driver",
+		"Architect run 1 for MoodJournal":    "architect",
+		"Implementer — MoodJournalInterface": "implementer",
+		"Tester — StreakCalculatorImpl":      "tester",
+		"Reviewer — MoodJournalInterface":    "reviewer",
+		"Dispatch architect on mood feature": "architect", // token not at start
+		"refactor-agent on something":        "refactor-agent",
+		"Refactor MoodEntry":                 "refactor-agent",
+		"Some totally different task":        "other",
+		"xcodegen-driver: add scheme":        "xcodegen-driver",
 		// "Explore" ≠ "explorer" — role tokens must match a full known
 		// word; "Explore" bucket-outs to "other" honestly. Callers who
 		// want the Explore subagent labeled should use "explorer" in the
@@ -93,7 +93,7 @@ func TestGuessRole(t *testing.T) {
 // and every relative artifact under that root was reported missing.
 func TestExtractWorkingDirStripsTrailingPunctuation(t *testing.T) {
 	cases := map[string]string{
-		"Рабочий каталог: `/tmp/e2e-py`.":  "/tmp/e2e-py",
+		"Рабочий каталог: `/tmp/e2e-py`.":   "/tmp/e2e-py",
 		"Working directory: `/tmp/e2e-py`.": "/tmp/e2e-py",
 		"Рабочий каталог: /tmp/e2e-py,":     "/tmp/e2e-py",
 		"Working directory: `/tmp/e2e-py`":  "/tmp/e2e-py",

@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/cobra"
 	"github.com/vaporphd/zprof/internal/apply"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/models"
-	"github.com/spf13/cobra"
 )
 
 // NewAgentsCmd returns the `zprof agents` command group.

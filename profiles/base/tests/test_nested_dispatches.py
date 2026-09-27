@@ -1,10 +1,11 @@
-#!/usr/bin/env python3
 """Tests for nested dispatch extraction (spec §5 C1): children of task-runner get full rows."""
-import json, pathlib, sys
-import pytest
+import json
+import pathlib
+import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent))
 import importlib
+
 _mod_path = pathlib.Path(__file__).parent.parent / "zprof-collect.py"
 _spec = importlib.util.spec_from_file_location("zprof_collect", _mod_path)
 zprof_collect = importlib.util.module_from_spec(_spec)

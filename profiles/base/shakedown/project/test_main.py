@@ -1,5 +1,5 @@
 """Tests for calculator module."""
-from main import add, subtract, multiply, divide
+from main import add, divide, multiply, subtract
 
 
 def test_add():

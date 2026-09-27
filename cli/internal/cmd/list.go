@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 func NewListCmd() *cobra.Command {

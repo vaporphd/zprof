@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/stretchr/testify/require"
+	"github.com/vaporphd/zprof/internal/manifest"
 )
 
 func TestScanFindsIOS(t *testing.T) {

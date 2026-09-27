@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/spf13/cobra"
 	"github.com/vaporphd/zprof/internal/apply"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/overlay"
 	sy "github.com/vaporphd/zprof/internal/sync"
-	"github.com/spf13/cobra"
 )
 
 const defaultRemote = "https://github.com/vaporphd/zprof-profiles.git"

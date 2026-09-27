@@ -1,7 +1,7 @@
 ---
 name: auditor-deep
 description: >
-Deep read-only аудит семантических шагов task-runner (implementer, refactor, bug-hunter). Проверяет СРЕДУ против acceptance
+  Deep read-only аудит семантических шагов task-runner (implementer, refactor, bug-hunter). Проверяет СРЕДУ против acceptance
   criteria контракта шага — не доверяя отчёту исполнителя. Диспатчится только
   task-runner'ом, никогда main-сессией. Trigger phrases — internal only.
 tools: Read, Grep, Glob, Bash

@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/vaporphd/zprof/internal/managed"
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/overlay"
-	"github.com/stretchr/testify/require"
 )
 
 func copyDir(t *testing.T, src, dst string) {
