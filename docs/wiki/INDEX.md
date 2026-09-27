@@ -1,13 +1,13 @@
 # Component Index
 
-Generated: 2026-09-27 · Head: `ae7e136c00ad82fdff9a13a7112fd1c7a7977207`
+Generated: 2026-09-27 · Head: `32be8d054fe9e3e62a1366970e9b120de51671e4`
 
 ## Components
 
 | Component | Path | Status | Depends | Doc |
 |-----------|------|--------|---------|-----|
 | collector | `profiles/base/zprof-collect.py` | implemented | profiles-base | [collector.md](collector.md) |
-| apply | `cli/internal/apply/`, `cli/internal/cmd/apply.go` | implemented | overlay, manifest, managed, models, agents, fsutil | [apply.md](apply.md) |
+| apply | `cli/internal/apply/`, `cli/internal/cmd/apply.go` | implemented | overlay, manifest, managed, models, agents, fsutil, verdicts | [apply.md](apply.md) |
 | overlay | `cli/internal/overlay/` | implemented | manifest | — |
 | manifest | `cli/internal/manifest/` | implemented | fsutil, models | — |
 | managed | `cli/internal/managed/` | implemented | — | — |
@@ -17,12 +17,13 @@ Generated: 2026-09-27 · Head: `ae7e136c00ad82fdff9a13a7112fd1c7a7977207`
 | agents | `cli/internal/agents/` | implemented | — | — |
 | models | `cli/internal/models/` | implemented | — | — |
 | detect | `cli/internal/detect/` | implemented | manifest | — |
-| doctor | `cli/internal/doctor/` | implemented | agents, managed, manifest, models, overlay | — |
+| doctor | `cli/internal/doctor/` | implemented | agents, managed, manifest, models, overlay, verdicts | — |
+| verdicts | `cli/internal/verdicts/` | implemented | — | — |
 | wizard | `cli/internal/wizard/` | implemented | apply, detect, managed, manifest, overlay | — |
 | sync | `cli/internal/sync/` | implemented | — | — |
 | fsutil | `cli/internal/fsutil/` | implemented | — | — |
 | cmd | `cli/internal/cmd/`, `cli/cmd/zprof/main.go` | implemented | apply, doctor, eval, managed, manifest, models, overlay, score, stats, sync, wizard | — |
-| profiles-base | `profiles/base/agents/`, `profiles/base/workflows/`, `profiles/base/telemetry.yaml`, `profiles/base/manifest.yaml` | implemented | — | — |
+| profiles-base | `profiles/base/agents/`, `profiles/base/workflows/`, `profiles/base/telemetry.yaml`, `profiles/base/manifest.yaml`, `profiles/base/verdicts.yaml` | implemented | — | — |
 | overlays | `profiles/overlays/*` (backend-kotlin-jvm, backend-python, frontend-web, ios-swift, issue-loop-github-strict, kotlin-multiplatform, re-macho, systems-cpp, systems-rust, zcode-harness) | implemented | profiles-base | — |
 | shakedown | `profiles/base/shakedown/` | implemented | — | — |
 
@@ -42,21 +43,26 @@ fsutil
 ├── manifest → [fsutil, models]
 │   ├── overlay → [manifest]
 │   ├── detect → [manifest]
-│   └── doctor → [agents, managed, manifest, models, overlay]
+│   └── doctor → [agents, managed, manifest, models, overlay, verdicts]
 ├── score → [fsutil, manifest, stats]
-└── apply → [overlay, manifest, managed, models, agents, fsutil]  (deploys collector as an artifact, not a Go import)
+└── apply → [overlay, manifest, managed, models, agents, fsutil, verdicts]  (deploys collector as an artifact, not a Go import)
     └── wizard → [apply, detect, managed, manifest, overlay]
         └── cmd → [apply, doctor, eval, managed, manifest, models, overlay, score, stats, sync, wizard]
+
+verdicts  (leaf; loads/validates profiles/base/verdicts.yaml — ADR-0003)
+├── doctor → [..., verdicts]   (checkAgentVerdicts diagnostic)
+└── apply → [..., verdicts]    (renderSchema merges the registry into schema.json)
 ```
 
 ## Status Summary
 
-- Implemented: 19
+- Implemented: 20
 - In progress: 0
 - Planned: 0
-- Undocumented (has code, no wiki): 17 (overlay, manifest, managed, score, stats, eval,
-  agents, models, detect, doctor, wizard, sync, fsutil, cmd, profiles-base, overlays,
-  shakedown — see `PLAN.md` for the P1/P2/P3 write order)
+- Undocumented (has code, no wiki): 18 (overlay, manifest, managed, score, stats, eval,
+  agents, models, detect, doctor, verdicts, wizard, sync, fsutil, cmd, profiles-base,
+  overlays, shakedown — see `PLAN.md` for the P1/P2/P3 write order; `verdicts`
+  (`cli/internal/verdicts/`) is new on `feat/verdicts-registry` / #20, ADR-0003)
 
 ## Known drift (flagged, not fixed)
 

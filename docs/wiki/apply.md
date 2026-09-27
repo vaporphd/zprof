@@ -3,7 +3,7 @@
 Component: apply
 Path: `cli/internal/apply/` (CLI wiring: `cli/internal/cmd/apply.go`)
 Status: implemented
-Depends: [overlay, manifest, managed, models, agents, fsutil]
+Depends: [overlay, manifest, managed, models, agents, fsutil, verdicts]
 Dependants: [cmd]
 Exports: [Apply, ApplyOpts, ApplyResult, DeployTelemetry, EnsureHooks, WriteAgent, FormatRemovedAgents]
 Key invariants:
@@ -17,6 +17,13 @@ Key invariants:
   - `deployCollector` unconditionally overwrites the collector script and schema on every
     call — they are generated artifacts owned by the base profile, not user-editable state
     files (`collector.go:14-19`).
+  - `renderSchema` merges `Base.Verdicts` (`verdicts.yaml`, parsed and validated via
+    `internal/verdicts`) into `.agentlog/schema.json` under a top-level `verdicts` key,
+    normalized (universal tokens folded into each role) so a schema.json reader never
+    needs the registry's anchors/`templates`/`quotes`. `telemetry.yaml` defining its own
+    `verdicts` key, or a registry that fails `Validate()`, fails the apply outright
+    (fail-closed) rather than deploying a stale or ambiguous contract
+    (`collector.go:82-134`; ADR-0003 §D4).
   - `zprof apply --telemetry-only` rejects overlay arguments (mutually exclusive with the
     flag) and shares the same `DeployTelemetry` call as the full `Apply` path
     (`cli/internal/cmd/apply.go:27-35, 43-64`).
@@ -27,14 +34,21 @@ Key invariants:
   - Deleting an agent file is the only destructive step `Apply` performs on its own; it is
     always reported by name with a `.bak` left alongside
     (`PruneOrphanAgents` / `FormatRemovedAgents`, `engine.go:39-52, 104-108`).
-Spec refs: docs/adr/0001-collector-config-hash-and-telemetry-redeploy.md
-Test coverage: `go test ./cli/internal/apply/... ./cli/internal/cmd/...` — 63 tests passed
-  (verified 2026-09-27), including `collector_test.go` (`TestDeployTelemetry`,
-  `TestDeployTelemetryIdempotent`) and `cmd/apply_test.go`
+Spec refs: docs/adr/0001-collector-config-hash-and-telemetry-redeploy.md,
+  docs/adr/0003-verdicts-registry.md
+Test coverage: `go test ./cli/internal/apply/... ./cli/internal/cmd/...` — 69 tests passed
+  (verified 2026-09-27, branch `feat/verdicts-registry`), including `collector_test.go`'s
+  `TestDeployTelemetry`, `TestDeployTelemetryIdempotent`, and the six added for the
+  `verdicts.yaml` merge (`TestRenderSchema_MergesVerdictsUnderTopLevelKey`,
+  `TestRenderSchema_WithoutVerdictsYAMLMatchesPriorOutputByteForByte`,
+  `TestRenderSchema_TelemetryDefiningVerdictsKeyIsAnError`,
+  `TestRenderSchema_InvalidVerdictsYAMLIsAnError`,
+  `TestDeployTelemetry_SchemaJSONHasVerdictsKeyWhenBaseProvidesRegistry`,
+  `TestDeployTelemetry_NoVerdictsYAMLMeansNoVerdictsKey`), plus `cmd/apply_test.go`
   (`TestApplyTelemetryOnlyArgs`, `TestApplyTelemetryOnlyDeploysWithoutOverlay`,
-  `TestApplyTelemetryOnlyDryRunWritesNothing`) for the code this branch added, plus the
-  pre-existing `engine_test.go`, `e2e_test.go`, `settings_test.go`, `prune_test.go`,
-  `agent_write_test.go`, `tables_test.go`, `state_files_test.go` for the full `Apply` path.
+  `TestApplyTelemetryOnlyDryRunWritesNothing`) and the pre-existing `engine_test.go`,
+  `e2e_test.go`, `settings_test.go`, `prune_test.go`, `agent_write_test.go`,
+  `tables_test.go`, `state_files_test.go` for the full `Apply` path.
 
 ---
 
@@ -74,6 +88,16 @@ func DeployTelemetry(projectDir string, base *overlay.Base) ([]string, error)
 hook entries). `Apply` itself now calls `DeployTelemetry` rather than duplicating the two
 steps (`engine.go:147-156`).
 
+Since ADR-0003 (#20), `deployCollector`'s schema step also folds `base.Verdicts`
+(`profiles/base/verdicts.yaml`) into the rendered `schema.json` under a top-level
+`verdicts` key (`renderSchema` / `mergeVerdicts`, `collector.go:82-134`). The registry is
+parsed and `Validate()`-checked with the same `internal/verdicts` package `doctor` uses,
+so a project's `zprof apply` and CI's repo-level consistency check can never disagree on
+what a valid registry looks like. Deploying it as a merged key rather than a separate file
+means the registry rides along for any consumer that already reads `schema.json` (the
+Python collector, `zprof score`, and a planned guard renderer) without a new file to wire
+up, and `--telemetry-only` redeploys it without any signature change.
+
 This exists because a full `Apply` requires at least one overlay and, applied in zprof's
 own repo, would overwrite zprof's own hand-written executor agents and rewrite managed
 `CLAUDE.md` blocks — destructive for a project that only needs its telemetry collector
@@ -99,5 +123,11 @@ needed for this to "just work" once the hook entry is refreshed by a redeploy.
 - `collector` (`profiles/base/zprof-collect.py`) — [collector.md](collector.md), the script
   this package deploys and keeps up to date
 - `overlay` (`cli/internal/overlay/`, doc not yet written — see `PLAN.md`) — loads
-  `Base`/`Overlay` from `profiles/`, source of `CollectorScript`/`TelemetrySchema`
+  `Base`/`Overlay` from `profiles/`, source of `CollectorScript`/`TelemetrySchema`/`Verdicts`
+  (`overlay/loader.go:48-51, 205-218`, reading `profiles/base/verdicts.yaml`)
+- `verdicts` (`cli/internal/verdicts/`, doc not yet written — see `INDEX.md`) — parses and
+  validates `verdicts.yaml`; `apply.renderSchema` calls `verdicts.Parse`/`Registry.Validate`/
+  `Registry.Normalized` to produce the merged `schema.json` key; `doctor`'s
+  `checkAgentVerdicts` uses the same package against every applied agent's contract
 - [ADR-0001: config_hash resolution and telemetry-only redeploy](../adr/0001-collector-config-hash-and-telemetry-redeploy.md)
+- [ADR-0003: verdicts registry — task-runner mapping, doctor check, schema.json deploy](../adr/0003-verdicts-registry.md)
