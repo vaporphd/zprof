@@ -104,10 +104,12 @@ return_format: |
 # .zprof.yaml
 audit:
   enabled: true          # дефолт false
-  max_dispatches: 7      # дефолт 7 (решение Алекса: 5–7)
+  max_dispatches: 7      # deprecated-алиас (issue #19); реальный источник лимита — runner.max_dispatches, дефолт 14
   model_by_role:         # опционально, override §4
     docs-writer: opus
 ```
+
+**Deprecated (issue #19):** `max_dispatches` внутри `audit:` — устаревший алиас старого дефолта (7). Глобальный лимит диспатчей теперь задаётся `runner.max_dispatches` (дефолт 14), см. `profiles/base/agents/task-runner.md` §«Бюджет».
 
 - Go CLI: парсинг блока в конфиг-структуру; `zprof apply` кладёт auditor/auditor-deep в `.claude/agents/` и вносит в `managed_agents` (миграция бесплатно, task-runner design §9); `zprof doctor` предупреждает, если `audit.enabled` при отсутствующем auditor.md
 - dispatches.jsonl `ext`: `audited: true|false|skipped`, `audit_verdict: "complete/clean"|...`, `dispatch_budget_used: n/7`. `skipped` — аудит выключен; `false` — шаг мутирующий, аудита не было при включённом (это баг-сигнал)

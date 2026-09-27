@@ -38,6 +38,10 @@ type ProjectManifest struct {
 	// Audit configures the MEA-style step auditor in task-runner's loop.
 	Audit *AuditConfig `yaml:"audit,omitempty"`
 
+	// Runner controls task-runner's global dispatch budget — independent
+	// of the audit subsystem, active regardless of audit.enabled.
+	Runner *RunnerConfig `yaml:"runner,omitempty"`
+
 	// Score configures `zprof score` (per-task scorecard). Nil = defaults
 	// from telemetry.yaml / the compiled-in table; enabled unless
 	// `enabled: false` is set explicitly.
@@ -51,6 +55,12 @@ type AuditConfig struct {
 	Enabled       bool              `yaml:"enabled"`
 	MaxDispatches int               `yaml:"max_dispatches,omitempty"`
 	ModelByRole   map[string]string `yaml:"model_by_role,omitempty"`
+}
+
+// RunnerConfig controls task-runner's global dispatch budget —
+// independent of the audit subsystem, active regardless of audit.enabled.
+type RunnerConfig struct {
+	MaxDispatches int `yaml:"max_dispatches,omitempty"`
 }
 
 // ABExperiment defines the control and candidate models for a role.
@@ -128,6 +138,9 @@ func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
 	if m.Audit == nil {
 		m.Audit = prev.Audit
 	}
+	if m.Runner == nil {
+		m.Runner = prev.Runner
+	}
 	if m.Score == nil {
 		m.Score = prev.Score
 	}
@@ -138,13 +151,57 @@ func (m *ProjectManifest) AuditEnabled() bool {
 	return m.Audit != nil && m.Audit.Enabled
 }
 
+// defaultRunnerMaxDispatches covers the longest base feature route —
+// planner, architect, implementer, tester, wiki-keeper, reviewer,
+// pr-shepherd = 7 dispatches — plus three tester<->implementer retry
+// rounds (2 dispatches per round: implementer retry + tester recheck)
+// plus one non-schema-response retry:
+//
+//	7 + 3*2 + 1 = 14
+const defaultRunnerMaxDispatches = 14
+
 // AuditMaxDispatches returns the dispatch budget for a single run.
 // Returns 7 when unconfigured.
+//
+// Deprecated: the global dispatch budget is now sourced via
+// RunnerMaxDispatches(); this method stays for backward-compat callers.
 func (m *ProjectManifest) AuditMaxDispatches() int {
 	if m.Audit != nil && m.Audit.MaxDispatches > 0 {
 		return m.Audit.MaxDispatches
 	}
 	return 7
+}
+
+// RunnerMaxDispatches returns the global dispatch budget for a single
+// task-runner run: every executor, auditor, gate and non-schema-retry
+// dispatch counts against it, regardless of audit.enabled.
+//
+// runner.max_dispatches is the source of truth. audit.max_dispatches is
+// kept as a deprecated alias for backward compat: if both are set, the
+// larger of the two wins (an upgrade never silently shrinks an existing
+// budget). Falls back to defaultRunnerMaxDispatches if neither is set.
+func (m *ProjectManifest) RunnerMaxDispatches() int {
+	runnerVal := 0
+	if m.Runner != nil && m.Runner.MaxDispatches > 0 {
+		runnerVal = m.Runner.MaxDispatches
+	}
+	auditVal := 0
+	if m.Audit != nil && m.Audit.MaxDispatches > 0 {
+		auditVal = m.Audit.MaxDispatches
+	}
+	switch {
+	case runnerVal > 0 && auditVal > 0:
+		if runnerVal >= auditVal {
+			return runnerVal
+		}
+		return auditVal
+	case runnerVal > 0:
+		return runnerVal
+	case auditVal > 0:
+		return auditVal
+	default:
+		return defaultRunnerMaxDispatches
+	}
 }
 
 // ResolvedModel returns the exact model ID for a role from ModelOverrides.

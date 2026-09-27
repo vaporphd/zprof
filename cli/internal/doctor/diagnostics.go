@@ -106,6 +106,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkPython3Available()...)
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
 	out = append(out, checkAuditConfig(projectDir, proj)...)
+	out = append(out, checkRunnerBudget(proj)...)
 	return out, nil
 }
 
@@ -744,10 +745,29 @@ func checkAuditConfig(projectDir string, proj *manifest.ProjectManifest) []Issue
 			})
 		}
 	}
-	if proj.Audit.MaxDispatches > 0 && proj.Audit.MaxDispatches < 3 {
+	return out
+}
+
+// checkRunnerBudget warns when task-runner's global dispatch budget
+// (manifest.ProjectManifest.RunnerMaxDispatches) is too small to survive a
+// single executor+auditor+retry cycle, and flags the deprecated
+// audit.max_dispatches alias. Runs unconditionally — the runner's dispatch
+// counter is active regardless of audit.enabled, so this check must not be
+// gated on it either.
+func checkRunnerBudget(proj *manifest.ProjectManifest) []Issue {
+	var out []Issue
+	if budget := proj.RunnerMaxDispatches(); budget < 3 {
 		out = append(out, Issue{
 			Level:   LevelWarn,
-			Message: fmt.Sprintf("audit.max_dispatches is %d — at least 3 needed for a single executor+auditor+retry cycle", proj.Audit.MaxDispatches),
+			Message: fmt.Sprintf("runner.max_dispatches is %d — at least 3 needed for a single executor+auditor+retry cycle", budget),
+		})
+	}
+	if proj.Audit != nil && proj.Audit.MaxDispatches > 0 {
+		out = append(out, Issue{
+			Level: LevelWarn,
+			Message: fmt.Sprintf(
+				"audit.max_dispatches is deprecated — use runner.max_dispatches instead (effective budget: %d, via RunnerMaxDispatches())",
+				proj.RunnerMaxDispatches()),
 		})
 	}
 	return out

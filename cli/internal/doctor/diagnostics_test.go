@@ -801,6 +801,72 @@ func TestDoctorMessagesAreEnglish(t *testing.T) {
 	}
 }
 
+// TestDiagnoseSurfacesRunnerBudgetWithoutAuditSection proves the wiring in
+// Diagnose itself, not just checkRunnerBudget in isolation: a project with
+// no `audit:` section at all (so AuditEnabled() is false) and a too-small
+// `runner.max_dispatches` must still surface the budget warning through the
+// public Diagnose entry point. A regression that re-gates the call behind
+// proj.AuditEnabled() would pass every checkRunnerBudget-direct test above
+// yet silently drop the issue here.
+func TestDiagnoseSurfacesRunnerBudgetWithoutAuditSection(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"),
+		[]byte("overlays: []\nrunner:\n  max_dispatches: 2\n"), 0o644))
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelWarn, "runner.max_dispatches"))
+	require.False(t, findIssue(issues, LevelWarn, "deprecated"),
+		"no audit.max_dispatches was set — the deprecation warning must not fire")
+}
+
+// --- global runner dispatch budget (issue #19) ---------------------------
+
+// The counter is global, not audit-gated: a too-small budget must warn even
+// with no audit: section at all.
+func TestCheckRunnerBudgetWarnsBelowThreeWithoutAuditSection(t *testing.T) {
+	proj := &manifest.ProjectManifest{Runner: &manifest.RunnerConfig{MaxDispatches: 2}}
+
+	issues := checkRunnerBudget(proj)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "runner.max_dispatches")
+}
+
+// A too-small budget set only via the deprecated audit.max_dispatches alias
+// still falls through RunnerMaxDispatches() and must still warn — the
+// budget check doesn't care which key set it. Setting the alias also trips
+// the separate deprecation warning, so both fire together.
+func TestCheckRunnerBudgetWarnsBelowThreeViaAuditAlias(t *testing.T) {
+	proj := &manifest.ProjectManifest{Audit: &manifest.AuditConfig{Enabled: false, MaxDispatches: 2}}
+
+	issues := checkRunnerBudget(proj)
+	require.Len(t, issues, 2)
+	require.True(t, findIssue(issues, LevelWarn, "runner.max_dispatches"))
+	require.True(t, findIssue(issues, LevelWarn, "deprecated"))
+}
+
+// audit.max_dispatches being set at all is a deprecation warning,
+// regardless of audit.enabled or whether the value is otherwise healthy.
+func TestCheckRunnerBudgetWarnsOnDeprecatedAuditAlias(t *testing.T) {
+	for _, enabled := range []bool{true, false} {
+		proj := &manifest.ProjectManifest{Audit: &manifest.AuditConfig{Enabled: enabled, MaxDispatches: 9}}
+
+		issues := checkRunnerBudget(proj)
+		require.Len(t, issues, 1)
+		require.Equal(t, LevelWarn, issues[0].Level)
+		require.Contains(t, issues[0].Message, "deprecated")
+		require.Contains(t, issues[0].Message, "9")
+	}
+}
+
+// Neither key set: default budget (14) is healthy and there's no alias to
+// deprecate — silent.
+func TestCheckRunnerBudgetSilentWhenNothingConfigured(t *testing.T) {
+	require.Empty(t, checkRunnerBudget(&manifest.ProjectManifest{}))
+}
+
 func mustAgentsDirProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

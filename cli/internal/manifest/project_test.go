@@ -66,3 +66,52 @@ func TestCarryOverFrom_KeepsScore(t *testing.T) {
 	m.CarryOverFrom(prev)
 	require.Same(t, prev.Score, m.Score)
 }
+
+func TestCarryOverFrom_KeepsRunner(t *testing.T) {
+	prev := &ProjectManifest{Runner: &RunnerConfig{MaxDispatches: 20}}
+	m := &ProjectManifest{}
+	m.CarryOverFrom(prev)
+	require.Same(t, prev.Runner, m.Runner)
+}
+
+func TestRunnerMaxDispatches(t *testing.T) {
+	tests := []struct {
+		name   string
+		runner *RunnerConfig
+		audit  *AuditConfig
+		want   int
+	}{
+		{
+			name: "neither set falls back to default",
+			want: defaultRunnerMaxDispatches,
+		},
+		{
+			name:  "only audit.max_dispatches set",
+			audit: &AuditConfig{MaxDispatches: 9},
+			want:  9,
+		},
+		{
+			name:   "only runner.max_dispatches set",
+			runner: &RunnerConfig{MaxDispatches: 20},
+			want:   20,
+		},
+		{
+			name:   "both set, runner larger wins",
+			runner: &RunnerConfig{MaxDispatches: 20},
+			audit:  &AuditConfig{MaxDispatches: 9},
+			want:   20,
+		},
+		{
+			name:   "both set, audit larger wins",
+			runner: &RunnerConfig{MaxDispatches: 5},
+			audit:  &AuditConfig{MaxDispatches: 12},
+			want:   12,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &ProjectManifest{Runner: tt.runner, Audit: tt.audit}
+			require.Equal(t, tt.want, m.RunnerMaxDispatches())
+		})
+	}
+}
