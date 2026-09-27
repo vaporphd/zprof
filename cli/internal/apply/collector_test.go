@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/vaporphd/zprof/internal/overlay"
+	"gopkg.in/yaml.v3"
 )
 
 func fullTelemetryBase() *overlay.Base {
@@ -15,6 +16,100 @@ func fullTelemetryBase() *overlay.Base {
 		CollectorScript: []byte("#!/usr/bin/env python3\nprint('collect')\n"),
 		TelemetrySchema: []byte("redaction_patterns:\n  - \"sk-[a-zA-Z0-9]+\"\n"),
 	}
+}
+
+// minimalVerdictsYAML is a tiny but internally consistent verdicts.yaml,
+// enough to exercise renderSchema's merge without pulling in the full
+// profiles/base/verdicts.yaml.
+const minimalVerdictsYAML = `
+version: 1
+base_enum: [done, blocked, failed]
+actions: [next, loop, insert, triage, escalate, abort]
+universal:
+  blocked: {base: blocked, action: triage}
+roles:
+  implementer:
+    done: {base: done, action: next}
+  reviewer:
+    approve: {base: done,   action: next}
+    block:   {base: failed, action: "loop:implementer"}
+`
+
+// --- renderSchema / verdicts merge (ADR 0003 §D4) -------------------------
+
+func TestRenderSchema_MergesVerdictsUnderTopLevelKey(t *testing.T) {
+	out, err := renderSchema([]byte("redaction_patterns: []\n"), []byte(minimalVerdictsYAML))
+	require.NoError(t, err)
+
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(out, &schema))
+	verdictsField, ok := schema["verdicts"].(map[string]any)
+	require.True(t, ok, "schema.json must have a `verdicts` object")
+	require.Equal(t, float64(1), verdictsField["version"])
+	roles, ok := verdictsField["roles"].(map[string]any)
+	require.True(t, ok)
+	reviewer, ok := roles["reviewer"].(map[string]any)
+	require.True(t, ok)
+	approve, ok := reviewer["approve"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "done", approve["base"])
+	require.Equal(t, "next", approve["action"])
+	// universal token merged into the role.
+	blocked, ok := reviewer["blocked"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "blocked", blocked["base"])
+}
+
+func TestRenderSchema_WithoutVerdictsYAMLMatchesPriorOutputByteForByte(t *testing.T) {
+	telemetry := []byte("redaction_patterns:\n  - \"sk-[a-zA-Z0-9]+\"\n")
+	withoutVerdicts, err := renderSchema(telemetry, nil)
+	require.NoError(t, err)
+
+	var v interface{}
+	require.NoError(t, yaml.Unmarshal(telemetry, &v))
+	expected, err := json.MarshalIndent(v, "", "  ")
+	require.NoError(t, err)
+	expected = append(expected, '\n')
+
+	require.Equal(t, expected, withoutVerdicts)
+}
+
+func TestRenderSchema_TelemetryDefiningVerdictsKeyIsAnError(t *testing.T) {
+	_, err := renderSchema([]byte("verdicts: {}\n"), []byte(minimalVerdictsYAML))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), `must not define top-level key "verdicts"`)
+}
+
+func TestRenderSchema_InvalidVerdictsYAMLIsAnError(t *testing.T) {
+	_, err := renderSchema([]byte("redaction_patterns: []\n"), []byte("version: 1\nroles:\n  x:\n    done: {base: bogus-base, action: next}\n"))
+	require.Error(t, err)
+}
+
+func TestDeployTelemetry_SchemaJSONHasVerdictsKeyWhenBaseProvidesRegistry(t *testing.T) {
+	base := fullTelemetryBase()
+	base.Verdicts = []byte(minimalVerdictsYAML)
+	projectDir := t.TempDir()
+
+	_, err := DeployTelemetry(projectDir, base)
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(projectDir, ".agentlog", "schema.json"))
+	require.NoError(t, err)
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(data, &schema))
+	require.Contains(t, schema, "verdicts")
+}
+
+func TestDeployTelemetry_NoVerdictsYAMLMeansNoVerdictsKey(t *testing.T) {
+	projectDir := t.TempDir()
+	_, err := DeployTelemetry(projectDir, fullTelemetryBase())
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(projectDir, ".agentlog", "schema.json"))
+	require.NoError(t, err)
+	var schema map[string]any
+	require.NoError(t, json.Unmarshal(data, &schema))
+	require.NotContains(t, schema, "verdicts")
 }
 
 // TestDeployTelemetry is table-driven over the scenarios ADR 0001 (D5) calls

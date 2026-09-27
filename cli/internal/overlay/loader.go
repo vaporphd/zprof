@@ -45,6 +45,10 @@ type Base struct {
 	// TelemetrySchema is the raw contents of telemetry.yaml (the
 	// .agentlog/dispatches.jsonl schema), deployed as <project>/.agentlog/schema.json.
 	TelemetrySchema []byte
+	// Verdicts is the raw contents of verdicts.yaml (ADR 0003's verdict
+	// registry). Its normalized form is merged into schema.json under the
+	// `verdicts` key — see apply.renderSchema.
+	Verdicts []byte
 }
 
 // readAgents walks dir and returns a map of agent name (relative path, without
@@ -198,6 +202,10 @@ func LoadBase(dir string) (*Base, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read telemetry.yaml: %w", err)
 	}
+	verdictsYAML, err := os.ReadFile(filepath.Join(dir, "verdicts.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read verdicts.yaml: %w", err)
+	}
 	return &Base{
 		Manifest:        m,
 		Agents:          agents,
@@ -207,6 +215,7 @@ func LoadBase(dir string) (*Base, error) {
 		Router:          router,
 		CollectorScript: collectorScript,
 		TelemetrySchema: telemetrySchema,
+		Verdicts:        verdictsYAML,
 	}, nil
 }
 

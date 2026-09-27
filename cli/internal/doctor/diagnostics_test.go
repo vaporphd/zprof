@@ -876,3 +876,146 @@ func mustAgentsDirProject(t *testing.T) string {
 		[]byte("---\nname: dev-orchestrator\n---\n"), 0o644))
 	return dir
 }
+
+// --- verdicts registry (ADR 0003 / issue #20) ----------------------------
+
+// smallVerdictsRegistry is a minimal but internally consistent
+// verdicts.yaml covering just the roles these tests exercise.
+const smallVerdictsRegistry = `
+version: 1
+base_enum: [done, blocked, failed]
+actions: [next, loop, insert, triage, escalate, abort]
+universal:
+  blocked: {base: blocked, action: triage}
+quotes:
+  auditor: [done]
+roles:
+  implementer:
+    done:   {base: done,   action: next}
+    failed: {base: failed, action: abort}
+  reviewer:
+    approve:            {base: done,   action: next}
+    approve-with-fixes: {base: done,   action: "insert:implementer"}
+    block:              {base: failed, action: "loop:implementer"}
+  auditor:
+    complete:   {base: done,    action: next}
+    incomplete: {base: failed,  action: "loop:@audited"}
+    blocked:    {base: blocked, action: escalate}
+`
+
+// writeVerdictsRepoFixture writes a repo checkout containing just
+// base/verdicts.yaml at the path checkAgentVerdicts expects.
+func writeVerdictsRepoFixture(t *testing.T, registry string) string {
+	t.Helper()
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "base"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(repo, "base", "verdicts.yaml"), []byte(registry), 0o644))
+	return repo
+}
+
+func TestCheckAgentVerdicts_CleanAgentIsSilent(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|blocked|failed\n---\nReturn `verdict: done` when finished.\n"), 0o644))
+
+	require.Empty(t, checkAgentVerdicts(proj, repo))
+}
+
+func TestCheckAgentVerdicts_UnknownTokenInReturnFormatErrors(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|zzz\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, `token "zzz" of role "implementer" is not in verdicts.yaml`))
+}
+
+// TestCheckAgentVerdicts_BodyVerdictOutsideEnumErrors is the AC4 regression:
+// a reviewer whose body returns `verdict: blocked` when `blocked` is not in
+// its own return_format enum (systems-rust/reviewer.md's :10 vs :25 before
+// the fix).
+func TestCheckAgentVerdicts_BodyVerdictOutsideEnumErrors(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "reviewer.md"),
+		[]byte("---\nname: reviewer\nreturn_format: |\n  verdict: approve|block\n---\n"+
+			"Refuse self-review and return `verdict: blocked` with a reason.\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, "is outside this agent's return_format enum"))
+}
+
+func TestCheckAgentVerdicts_LegacyCompletionKeyErrors(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "auditor.md"),
+		[]byte("---\nname: auditor\nreturn_format: |\n  completion: complete|incomplete|blocked\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, `return_format must start with "verdict:", got "completion:"`))
+}
+
+// A namespaced role name (`reviewer-rs`, the way a multi-overlay apply
+// writes it) must still resolve to `reviewer` in the registry.
+func TestCheckAgentVerdicts_NamespacedRoleResolves(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "reviewer-rs.md"),
+		[]byte("---\nname: reviewer-rs\nreturn_format: |\n  verdict: approve|zzz\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelError, `token "zzz" of role "reviewer" is not in verdicts.yaml`))
+}
+
+// A user's own agent (not a zprof role at all) outside the registry
+// produces no issue — "none of doctor's business".
+func TestCheckAgentVerdicts_UserAgentOutsideRegistryIsSilent(t *testing.T) {
+	repo := writeVerdictsRepoFixture(t, smallVerdictsRegistry)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "my-custom-agent.md"),
+		[]byte("---\nname: my-custom-agent\nreturn_format: |\n  verdict: whatever\n---\nbody\n"), 0o644))
+
+	require.Empty(t, checkAgentVerdicts(proj, repo))
+}
+
+// checkAgentVerdicts is gated on repoDir/base existing at all — a bare temp
+// dir (what most doctor tests pass as repoDir) means nothing to validate
+// against, not a project misconfiguration.
+func TestCheckAgentVerdicts_SilentWhenRepoHasNoBaseDir(t *testing.T) {
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|blocked|failed\n---\nbody\n"), 0o644))
+
+	require.Empty(t, checkAgentVerdicts(proj, t.TempDir()))
+}
+
+// Once repoDir/base is a real checkout but predates the registry file
+// itself, doctor warns rather than silently skipping.
+func TestCheckAgentVerdicts_WarnsWhenRegistryFileMissing(t *testing.T) {
+	repo := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(repo, "base"), 0o755))
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer.md"),
+		[]byte("---\nname: implementer\nreturn_format: |\n  verdict: done|blocked|failed\n---\nbody\n"), 0o644))
+
+	issues := checkAgentVerdicts(proj, repo)
+	require.True(t, findIssue(issues, LevelWarn, "verdicts.yaml not found in repo checkout"))
+}

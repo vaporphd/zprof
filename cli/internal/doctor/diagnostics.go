@@ -4,6 +4,7 @@ package doctor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,6 +20,7 @@ import (
 	"github.com/vaporphd/zprof/internal/manifest"
 	"github.com/vaporphd/zprof/internal/models"
 	"github.com/vaporphd/zprof/internal/overlay"
+	"github.com/vaporphd/zprof/internal/verdicts"
 )
 
 // Issue severity levels.
@@ -74,6 +76,8 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  14. settings.local.json wires up all three telemetry hooks
 //  15. python3 -c 'pass' actually runs (macOS without Xcode CLT hangs it)
 //  16. .agentlog/ is reminded to be vulnerable to `git clean -xdf`
+//  17. every role's return_format enum and body `verdict:` citations are
+//      covered by the verdicts.yaml registry (ADR 0003)
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -93,6 +97,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkOverlayCount(proj.Overlays)...)
 	out = append(out, checkOverlaysExist(proj.Overlays, repoDir)...)
 	out = append(out, checkAgentFrontmatter(projectDir)...)
+	out = append(out, checkAgentVerdicts(projectDir, repoDir)...)
 	out = append(out, checkAgentModels(projectDir)...)
 	out = append(out, checkManagedMarkers(projectDir)...)
 	out = append(out, checkTaskRunner(projectDir)...)
@@ -137,28 +142,14 @@ func checkAgentFrontmatter(projectDir string) []Issue {
 		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			// checkAgentModels will report read failures too; avoid
-			// duplicating the issue here.
-			return nil
-		}
-		m := frontmatterRe.FindSubmatch(data)
-		if m == nil {
-			out = append(out, Issue{
-				Level:   LevelError,
-				Path:    path,
-				Message: "no YAML frontmatter (must begin with `---` fence)",
-			})
-			return nil
-		}
-		var fm map[string]any
-		if err := yaml.Unmarshal(m[1], &fm); err != nil {
-			out = append(out, Issue{
-				Level:   LevelError,
-				Path:    path,
-				Message: fmt.Sprintf("YAML frontmatter parse error: %v", err),
-			})
+		fm, _, _, parseErr := parseAgentFile(path)
+		if parseErr != nil {
+			if errors.Is(parseErr, errReadAgentFile) {
+				// checkAgentModels will report read failures too; avoid
+				// duplicating the issue here.
+				return nil
+			}
+			out = append(out, Issue{Level: LevelError, Path: path, Message: parseErr.Error()})
 			return nil
 		}
 		if name, ok := fm["name"].(string); !ok || name == "" {
@@ -179,6 +170,131 @@ func checkAgentFrontmatter(projectDir string) []Issue {
 		}
 		return nil
 	})
+	return out
+}
+
+// errReadAgentFile marks a parseAgentFile failure that came from the
+// os.ReadFile call itself, as opposed to a frontmatter/YAML problem in the
+// file's contents. Callers that already have a dedicated read-failure
+// check elsewhere (checkAgentModels) use it to skip reporting the same
+// failure twice.
+var errReadAgentFile = errors.New("read agent file")
+
+// parseAgentFile splits an agent .md file into its YAML frontmatter (as a
+// map), the body that follows the closing `---` fence, and the 1-based
+// line number in the full file where that body begins. Shared by
+// checkAgentFrontmatter and checkAgentVerdicts so both agree on exactly
+// where the frontmatter ends — a prerequisite for checkAgentVerdicts to
+// report body findings at the right absolute line number.
+func parseAgentFile(path string) (fm map[string]any, body []byte, bodyStartLine int, err error) {
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		return nil, nil, 0, fmt.Errorf("%w: %v", errReadAgentFile, readErr)
+	}
+	m := frontmatterRe.FindSubmatch(data)
+	if m == nil {
+		return nil, nil, 0, errors.New("no YAML frontmatter (must begin with `---` fence)")
+	}
+	if err := yaml.Unmarshal(m[1], &fm); err != nil {
+		return nil, nil, 0, fmt.Errorf("YAML frontmatter parse error: %v", err)
+	}
+	bodyStartLine = strings.Count(string(m[0]), "\n") + 1
+	body = data[len(m[0]):]
+	return fm, body, bodyStartLine, nil
+}
+
+// checkAgentVerdicts loads the verdicts registry (profiles/base/verdicts.yaml
+// under repoDir) and checks every role among .claude/agents/**/*.md against
+// it: its return_format enum must be a subset of the registry's allowance
+// for its role (internal/verdicts.Registry.Allows), and every `verdict:`
+// token its body cites must be inside its own enum or the registry's
+// `quotes` allowance (internal/verdicts.CheckAgent). See ADR
+// docs/adr/0003-verdicts-registry.md §D3.
+//
+// Gated on repoDir/base existing as a directory — same posture as
+// checkOrphanAgents' expectedAgentNames: a repoDir that isn't a real
+// profiles checkout (most unit-test fixtures pass a bare temp dir) has
+// nothing to validate against, and that's not a project misconfiguration
+// worth reporting. Once repoDir/base is a real checkout, a missing
+// verdicts.yaml specifically means "checkout predates this registry" and
+// is worth a warning.
+func checkAgentVerdicts(projectDir, repoDir string) []Issue {
+	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	if info, err := os.Stat(agentsDir); err != nil || !info.IsDir() {
+		return nil
+	}
+	baseDir := filepath.Join(repoDir, "base")
+	if info, err := os.Stat(baseDir); err != nil || !info.IsDir() {
+		return nil
+	}
+
+	regPath := filepath.Join(baseDir, "verdicts.yaml")
+	if _, err := os.Stat(regPath); err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    regPath,
+			Message: "verdicts.yaml not found in repo checkout — skipping verdict checks (checkout predates ADR 0003 / #20); run `zprof sync`",
+		}}
+	}
+	reg, err := verdicts.Load(regPath)
+	if err != nil {
+		return []Issue{{Level: LevelError, Path: regPath, Message: err.Error()}}
+	}
+	if err := reg.Validate(); err != nil {
+		return []Issue{{Level: LevelError, Path: regPath, Message: fmt.Sprintf("verdicts.yaml is inconsistent: %v", err)}}
+	}
+
+	var out []Issue
+	_ = filepath.Walk(agentsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		fm, body, bodyStartLine, parseErr := parseAgentFile(path)
+		if parseErr != nil {
+			// checkAgentFrontmatter already reports broken frontmatter.
+			return nil
+		}
+		rf, _ := fm["return_format"].(string)
+		if strings.TrimSpace(rf) == "" {
+			return nil // no contract; checkAgentFrontmatter flags roles missing it
+		}
+
+		name := agentNameFor(agentsDir, path)
+		role, ok := reg.Lookup(name)
+		if !ok {
+			if roleName := agents.RoleOf(name); roleName != "" {
+				out = append(out, Issue{
+					Level:   LevelError,
+					Path:    path,
+					Message: fmt.Sprintf("role %q is missing from verdicts.yaml", roleName),
+				})
+			}
+			// Not a role zprof's registry tracks (a user's own agent, or a
+			// tool-agent) — none of doctor's business.
+			return nil
+		}
+		_ = role
+
+		for _, f := range verdicts.CheckAgent(reg, name, fm, body, bodyStartLine) {
+			out = append(out, Issue{Level: LevelError, Path: path, Message: f.Msg})
+		}
+		return nil
+	})
+
+	schemaPath := filepath.Join(projectDir, ".agentlog", "schema.json")
+	if data, err := os.ReadFile(schemaPath); err == nil {
+		var schema map[string]any
+		if json.Unmarshal(data, &schema) == nil {
+			if _, hasVerdicts := schema["verdicts"]; !hasVerdicts {
+				out = append(out, Issue{
+					Level:   LevelWarn,
+					Path:    schemaPath,
+					Message: "schema.json has no `verdicts` key — run `zprof apply` (or `--telemetry-only`) to redeploy the verdicts registry",
+				})
+			}
+		}
+	}
+
 	return out
 }
 
