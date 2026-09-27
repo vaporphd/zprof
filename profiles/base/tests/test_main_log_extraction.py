@@ -441,9 +441,16 @@ class TestParseTaskNotificationXml:
     def test_no_notification_returns_none(self):
         assert _parse_task_notification_xml("just some text") is None
 
-    def test_missing_tool_use_id_returns_none(self):
+    def test_missing_tool_use_id_keeps_task_id(self):
+        # #34: current Claude Code omits <tool-use-id> from some
+        # notifications; the parser must not drop them when <task-id> is
+        # present — resolution happens downstream in
+        # _extract_dispatches_from_text.
         xml = "<task-notification><task-id>abc</task-id></task-notification>"
-        assert _parse_task_notification_xml(xml) is None
+        result = _parse_task_notification_xml(xml)
+        assert result is not None
+        assert result["task_id"] == "abc"
+        assert "tool_use_id" not in result
 
 
 class TestTerminalStatuses:

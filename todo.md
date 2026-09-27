@@ -13,6 +13,7 @@
 - [ ] zprof сам не ест свой корм: нет .zprof.yaml и корневого lessons.md (уроки в tasks/lessons.md) — выровнять раскладку
 
 ## Plan 1: panel-2026-09-27
+- [x] fix(base): коллектор не сшивает async Agent-dispatch с task-notification без <tool-use-id> (#34) — вне очереди, блокирует карточки
 - [x] ci: pytest, gofmt -l и ruff в CI; отформатировать 20 файлов cli/ (#14, PR 32)
 - [ ] ci: ruleset на main — required check test (CI), без bypass (#17) — owner, depends: #14
 - [ ] fix(base): стоп-лист — «удаление несмерженных веток и тегов», merged-ветка штатно (#15)
