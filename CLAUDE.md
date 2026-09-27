@@ -62,6 +62,7 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 |-------|-----------|
 | evaluator | shakedown eval scoring |
 | evaluator-telemetry | telemetry-driven contract diffs |
+| expert-panel | AI4SDLC/AI4PDLC панель: 6 read-only линз + сводный разбор в docs/reviews |
 <!-- zprof:end consilium -->
 
 <!-- zprof:begin stop-list -->

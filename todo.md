@@ -6,6 +6,7 @@
 - [ ] Per-task scorecard — фаза 3: гейт в pr-shepherd после калибровки порогов
 
 ## Current
+- [x] expert-panel: base tool agent для повторного экспертного разбора (#12, PR: см. ниже)
 - [ ] После merge PR 10: zprof sync в jarvis-in-hermes и apple-health-sync, первый живой прогон zprof score
 
 ## Backlog
