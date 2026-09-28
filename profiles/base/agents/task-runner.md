@@ -207,7 +207,7 @@ decision: <ответ пользователя, если resume_from задан>
 | tester, *-runner с `passed` | `passed`/`done` → next · `failed` → loop:implementer |
 | чекеры | `clean`/`pass` → next · `violations`/`errors`/`warnings`/`smells`/`drift`/`diagnostics`/`ub` → loop:implementer · `error` → abort · `not-installed`/`missing-tool`/`blocked-<tool>` → escalate |
 | reviewer | `approve`/`done` → next · `approve-with-fixes` → insert:implementer · `block`/`changes-requested`/`awaiting-approval`/`failed` → loop:implementer |
-| bug-hunter | `awaiting-approval` → insert:implementer |
+| bug-hunter | `awaiting-approval`/`done` → next (implementer уже в маршруте) · `fixed` → next (implementer-шаг пропускается, см. «Роутинг») |
 | pr-shepherd | `merged-stamped`/`verified-stamped` → next · `preflight-failed`/`delivery-failed`/`local-tests-failed` → loop:@next · `squash-incomplete` → abort · `blocked-external` → escalate · `blocked-*` → triage |
 | alembic-manager, testflight-shipper | `awaiting-approval` → escalate (стоп-лист: БД вне репо / публикация) |
 | auditor, auditor-deep | см. «Аудит шагов» |
@@ -218,9 +218,10 @@ decision: <ответ пользователя, если resume_from задан>
 решение владельца: auto-merge везде. Для `reviewer` раннер сам становится
 approver'ом: в задание `implementer` идут все Critical и Important из
 `artifact`, после чего следует повторное ревью (`loop`). Для `bug-hunter`
-отчёт из `artifact` сразу становится заданием `implementer`. `escalate` для
-`alembic-manager` и `testflight-shipper` — не новый гейт, это существующий
-`## Stop list` (БД вне репо, публикация).
+это не гейт вовсе — `next` ведёт на обычный следующий шаг маршрута, чей
+вход (diagnosis + repro artifact) описан в «Багфикс-маршрут ветвится...»
+выше. `escalate` для `alembic-manager` и `testflight-shipper` — не новый
+гейт, это существующий `## Stop list` (БД вне репо, публикация).
 
 Ответ **не схема**, если первая содержательная строка — не `verdict:
 <token>` **или** `<token>` не входит в допустимые токены роли (реестр +
