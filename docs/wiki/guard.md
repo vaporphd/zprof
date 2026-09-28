@@ -119,12 +119,12 @@ Key invariants:
     gate on `.zprof.yaml`'s `guard.enabled: false`: when set, it returns one
     `info` Issue and skips `checkGuardHooks`/`checkGuardConfig`/
     `checkPermissionsDeny` entirely, so a project that opted out isn't nagged
-    about a deployment it declined (`cli/internal/doctor/diagnostics.go:1131-1146`).
+    about a deployment it declined (`cli/internal/doctor/diagnostics.go:1344-1353`).
     `checkRoleResolution` is the one guard-adjacent check that ignores that
     gate — it inspects `~/.claude/projects/<slug>/*/subagents/*.meta.json` for
     an `agentType` key regardless of `guard.enabled`, since role resolution
     also feeds `resolve_role`'s non-guard callers
-    (`cli/internal/doctor/diagnostics.go:1247-1273`).
+    (`cli/internal/doctor/diagnostics.go:1454-1480`).
   - The guard *doctrine* (the one-line policy an agent reads, distinct from the
     `zprof-guard.py`/`guard.yaml` mechanism above) lives entirely in the
     prompt layer, not in the script: `profiles/base/manifest.yaml`'s
@@ -148,12 +148,20 @@ Key invariants:
     `.claude/zprof-guard.py` — zprof's own repo checkout, `--telemetry-only`,
     ADR-0001/#22 — runs `checkGuardDeployment` against a zero-value
     `&manifest.ProjectManifest{}` instead of skipping it: its `proj.Guard !=
-    nil && !proj.Guard.IsEnabled()` gate (`diagnostics.go:1187`) short-circuits
+    nil && !proj.Guard.IsEnabled()` gate (`diagnostics.go:1345`) short-circuits
     on `proj.Guard == nil` without ever calling `IsEnabled()`, so guard is
     diagnosed as enabled — the same outcome `GuardConfig.IsEnabled()`'s own
     nil-receiver default gives (ADR-0009 §8.3, `manifest/project.go:126-128`),
-    just reached without calling it (#64; `diagnostics.go:159-174`; see
+    just reached without calling it (#64; `diagnostics.go:163-179`; see
     "Telemetry-only diagnostics" below).
+  - `checkGitCheckoutHygiene` (#62) is unrelated to guard's own artifacts —
+    it reads `git worktree list --porcelain` for the pr-shepherd
+    worktree-leak pattern and the main tree's own checkout state, gated on
+    nothing (`guard.enabled` included), and stays silent whenever `git`
+    itself can't answer (not a repo, no `git` binary). It runs in both
+    `Diagnose` and `diagnoseTelemetryOnly`, unconditionally, right after
+    `checkAgentlogNotTracked` (`diagnostics.go:1061-1103`; see "Checkout
+    hygiene diagnostics" below).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
   §8.1–§8.4, §9, §10, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
@@ -735,16 +743,19 @@ is a single post-merge pass, the exact `extra_deny` reason text, and why
 
 `zprof doctor` (`cli/internal/doctor/diagnostics.go`) diagnoses guard's
 *deployed* state — the same artifacts `deployGuard` writes above — entirely
-read-only, five checks past design §10, appended at the end of `Diagnose()`'s
-existing 18-check list (`diagnostics.go:122-123`):
+read-only, five checks past design §10, appended near the end of `Diagnose()`'s
+check list, currently 20 checks deep before these two (`diagnostics.go:116-137`;
+line count includes #64's `checkAuditConfig`/`checkRunnerBudget` and #62's
+`checkGitCheckoutHygiene`, none of which existed when this table's "18" was
+first written for #29):
 
 | Check | Gate | Level | Reports |
 |---|---|---|---|
-| `checkGuardHooks` (`:985-1021`) | `.claude/zprof-guard.py` exists | warn | `settings.local.json` is missing either the `PreToolUse` or `SubagentStop` hook entry running `zprof-guard.py` (one unified message for "file missing" and "hooks incomplete" — unlike `checkTelemetryHooks`'s two separate messages, per AC1) |
-| `checkGuardConfig` (`:1036-1062`) | none — always runs | warn | `.claude/guard.json` missing, unparseable, or its `rules` list is empty |
-| `checkPermissionsDeny` (`:1083-1129`) | self-gates on a readable, non-empty `guard.json.permissions_deny` | warn | `settings.local.json`'s `permissions.deny` is missing one or more of those values, lists them by name |
-| `checkGuardDeployment` (`:1137-1146`) | `proj.Guard != nil && !proj.Guard.IsEnabled()` | info (gate) / aggregates the three above | when guard is disabled: `"guard disabled by project config"`, and the three checks above never run at all — a project that opted out isn't nagged about a deployment it declined |
-| `checkRoleResolution` (`:1247-1273`) | none — ignores `guard.enabled` | info | no `*/subagents/*.meta.json` with an `agentType` key found yet under `~/.claude/projects/<slug>/`, `slug` = project path with `/`→`-` |
+| `checkGuardHooks` (`:1192-1228`) | `.claude/zprof-guard.py` exists | warn | `settings.local.json` is missing either the `PreToolUse` or `SubagentStop` hook entry running `zprof-guard.py` (one unified message for "file missing" and "hooks incomplete" — unlike `checkTelemetryHooks`'s two separate messages, per AC1) |
+| `checkGuardConfig` (`:1243-1269`) | none — always runs | warn | `.claude/guard.json` missing, unparseable, or its `rules` list is empty |
+| `checkPermissionsDeny` (`:1290-1336`) | self-gates on a readable, non-empty `guard.json.permissions_deny` | warn | `settings.local.json`'s `permissions.deny` is missing one or more of those values, lists them by name |
+| `checkGuardDeployment` (`:1344-1353`) | `proj.Guard != nil && !proj.Guard.IsEnabled()` | info (gate) / aggregates the three above | when guard is disabled: `"guard disabled by project config"`, and the three checks above never run at all — a project that opted out isn't nagged about a deployment it declined |
+| `checkRoleResolution` (`:1454-1480`) | none — ignores `guard.enabled` | info | no `*/subagents/*.meta.json` with an `agentType` key found yet under `~/.claude/projects/<slug>/`, `slug` = project path with `/`→`-` |
 
 **`checkGuardConfig` deliberately has no `.claude/zprof-guard.py` gate**,
 unlike `checkGuardHooks` — an asymmetry from design §10's table, not an
@@ -760,14 +771,14 @@ from `internal/eval.LocateSession`'s otherwise-identical slug algorithm, so
 tests can override it with `t.Setenv` (design §10, `plan-issue-29.md` item 8).
 
 `checkGuardHooks` reuses `hookArrayHasScript` (renamed from
-`hookArrayHasCollector` for this issue, `diagnostics.go:954-969`) — the same
+`hookArrayHasCollector` for this issue, `diagnostics.go:1161-1176`) — the same
 helper `checkTelemetryHooks` uses for `zprof-collect.py` — parameterized on
 the script substring instead of hardcoding it, a pure signature refactor that
 doesn't change `checkTelemetryHooks`'s own behavior.
 
 ### Telemetry-only diagnostics (no `.zprof.yaml`, #64)
 
-Before #64, `Diagnose()` (`cli/internal/doctor/diagnostics.go:98-135`) had one
+Before #64, `Diagnose()` (`cli/internal/doctor/diagnostics.go:101-139`) had one
 failure mode for any `manifest.LoadProject` error, physically-missing file or
 malformed YAML alike: a single `LevelError` Issue and nothing else. That broke
 `zprof doctor` on zprof's own repo checkout — telemetry/guard are deployed
@@ -776,13 +787,13 @@ is ever written by a `--telemetry-only` deployment (unless one already
 existed from a prior full `apply`), so every run reported a false top-level
 error instead of the report below.
 
-`Diagnose` now branches on the load error (`diagnostics.go:98-110`):
+`Diagnose` now branches on the load error (`diagnostics.go:102-113`):
 
 - **File physically absent** (`errors.Is(err, fs.ErrNotExist)`) **and**
   `telemetryDeployed(projectDir)` finds `.claude/zprof-collect.py` or
-  `.claude/zprof-guard.py` on disk (`diagnostics.go:141-148`, a plain
+  `.claude/zprof-guard.py` on disk (`diagnostics.go:145-152`, a plain
   `os.Stat`, checked either-or) → `diagnoseTelemetryOnly` runs instead of the
-  error path (`diagnostics.go:159-174`).
+  error path (`diagnostics.go:163-179`).
 - **File physically absent, nothing deployed** → unchanged: the single
   `LevelError` "failed to parse .zprof.yaml" Issue.
 - **File present but broken** (a YAML parse error — not `fs.ErrNotExist`) →
@@ -791,14 +802,15 @@ error instead of the report below.
   "no manifest" — see `TestDiagnoseTelemetryOnlyMode`'s "broken manifest with
   telemetry deployed stays an error" case above.
 
-`diagnoseTelemetryOnly` (`diagnostics.go:159-174`) opens with one `LevelInfo`
+`diagnoseTelemetryOnly` (`diagnostics.go:163-179`) opens with one `LevelInfo`
 Issue — `"no .zprof.yaml — manifest checks skipped (telemetry-only
-project)"` — then runs exactly the 9 of `Diagnose`'s ~21 checks that need no
+project)"` — then runs exactly the 10 of `Diagnose`'s ~22 checks that need no
 manifest at all: `checkRunsGitignored`, `checkRunLogs`,
-`checkAgentlogGitignored`, `checkAgentlogNotTracked`, `checkTelemetryHooks`,
+`checkAgentlogGitignored`, `checkAgentlogNotTracked`, `checkGitCheckoutHygiene`
+(#62 — see "Checkout hygiene diagnostics" below), `checkTelemetryHooks`,
 `checkPython3Available`, `checkAgentlogCleanVulnerability`,
-`checkGuardDeployment`, `checkRoleResolution` — the same nine, in the same
-order, as their position in the full list (`diagnostics.go:113-133`). Every
+`checkGuardDeployment`, `checkRoleResolution` — the same ten, in the same
+order, as their position in the full list (`diagnostics.go:116-137`). Every
 check gated on `proj` itself — `checkOverlayCount`, `checkOverlaysExist`,
 `checkAgentFrontmatter`, `checkAgentVerdicts`, `checkAgentModels`,
 `checkManagedMarkers`, `checkTaskRunner`, `checkRouteAgentsExist`,
@@ -818,6 +830,84 @@ freestanding `doctor.md` (still P2, not yet written, per `PLAN.md`) because
 already `zprof doctor`'s documented home (see "Doctor checks" above and
 [Apply](apply.md)'s "DeployTelemetry and `--telemetry-only`" section, which
 this feature diagnoses the deployed shape of).
+
+### Checkout hygiene diagnostics (`checkGitCheckoutHygiene`, #62)
+
+Also unrelated to guard's own artifacts — recorded here for the same reason
+as "Telemetry-only diagnostics" above: `zprof doctor` has no wiki file of its
+own yet (still P2, `PLAN.md`), and this file is already its documented home.
+
+Issue #62: pr-shepherd's old §4 post-merge verification ran `git checkout
+<DEFAULT_BRANCH>` directly in the main working tree; when the tree was
+dirty this failed, and pr-shepherd's own workaround — an ad-hoc `git
+worktree add` onto `main` in the scratchpad — was never cleaned up (§0.6
+forbade `rm -rf`), permanently occupying `main` and breaking every later
+`git checkout main`. Three fixes landed together:
+
+1. **pr-shepherd** (`.claude/agents/pr-shepherd.md` §4 / `profiles/base/agents/pr-shepherd.md`
+   — identical): §4 step 2 now creates its own **detached** worktree
+   (`mktemp -d` + `git worktree add --detach "$WT" origin/<DEFAULT_BRANCH>`),
+   verifies the squash SHA/diff against that worktree instead of the main
+   tree, and removes it (`git worktree remove "$WT"`) in step 5 before
+   continuing — a narrow, named exception carved into both §0.6
+   (destructive-command ban) and §8 (stop-list summary) for `git worktree
+   remove`/`prune` on that one worktree.
+2. **task-runner** (`.claude/agents/task-runner.md` / `profiles/base/agents/task-runner.md`):
+   new `## Завершение run (checkout hygiene)` section, run as the last step
+   before writing `## Итог` — `git status --porcelain` first; if the tree
+   carries foreign uncommitted changes, checkout is left alone (`checkout:
+   dirty, left on <branch>` in `## Итог`); otherwise `git checkout
+   <DEFAULT_BRANCH>` + `git fetch origin` + `git merge --ff-only
+   origin/<DEFAULT_BRANCH>` + `git worktree prune`, then `git worktree list
+   --porcelain` to report (never remove) any *foreign* worktree still
+   holding the default branch. The Bash whitelist gained the seven commands
+   this requires. A new dispatch rule: commits go on the feature branch
+   only, never local `<DEFAULT_BRANCH>` (precedent #15).
+3. **`checkGitCheckoutHygiene`** (`cli/internal/doctor/diagnostics.go:1061-1103`)
+   is the read-only detector for exactly the failure mode #1/#2 fix: it runs
+   unconditionally (no `guard.enabled`/manifest gate) in both `Diagnose` and
+   `diagnoseTelemetryOnly`, right after `checkAgentlogNotTracked`. One `git
+   worktree list --porcelain` call (`parseWorktreeListPorcelain`,
+   `:955-995`) feeds two independent warnings:
+   - any worktree *other than* the main one has `<DEFAULT_BRANCH>` checked
+     out non-detached — the leak itself; the message names the path and
+     suggests `git worktree remove <path>` or re-adding it `--detach`.
+   - the *main* working tree itself isn't on `<DEFAULT_BRANCH>` and
+     `hasActiveGitRun` (`:1017-1042`) says no — a heuristic off the newest
+     `.zprof/runs/*.md`: missing a `## Итог` section means a run is still in
+     flight, and the main checkout is allowed to sit on a feature branch. A
+     run log that already has `## Итог` does **not** suppress the warning —
+     task-runner should have restored checkout by then.
+
+`gitDefaultBranch` (`:1003-1010`) resolves `<DEFAULT_BRANCH>` from
+`origin/HEAD`'s local symref, falling back to `"main"` if there's no origin
+remote or it was never fetched — a wrong guess only costs a possibly-noisy
+warning, not a false sense of safety. The whole check is silent whenever
+`git` itself can't answer (`git worktree list` failing — not a repo, no
+`git` binary): mirrors `checkAgentlogNotTracked`'s posture, nothing to
+diagnose without a working `git`.
+
+Test coverage: 10 new test functions across two commits — `db7e720`
+(`TestCheckGitCheckoutHygieneCleanRepoOnDefaultBranchIsSilent`,
+`...WarnsOnNonDetachedWorktreeOnDefaultBranch`,
+`...SilentOnDetachedWorktreeOnDefaultBranch`,
+`...WarnsWhenMainNotOnDefaultBranchNoActiveRun`,
+`...SilentWhenMainNotOnDefaultBranchButRunActive`,
+`...SilentWithoutGitRepo`) and `0800e51` strengthening coverage
+(`...WarnsWithDetachedHEADLabelWhenMainItselfIsDetached`,
+`...WarnsWhenMainNotOnDefaultBranchAndRunLogIsCompleted` — a *completed* run
+log must not suppress the wrong-branch warning the way an in-flight one
+does — plus `TestGitDefaultBranchResolvesFromOriginHEADSymref` and
+`TestGitDefaultBranchFallsBackToMainWithoutOriginRemote`) — `go test
+./internal/doctor/...` → 129 passed, 95.4% coverage (verified 2026-09-29,
+`fix/worktree-checkout-hygiene-62`@`0800e51`).
+
+A related Phase-2 backlog item was recorded, not implemented:
+`docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §12 gained a
+pending entry for a future `guard.yaml` rule that would `deny` `git
+worktree add ... <DEFAULT_BRANCH>` without `--detach` outright — the same
+pattern this doctor check can currently only warn about after the fact.
+`guard.yaml`/`zprof-guard.py` themselves are untouched by #62.
 
 ### Doctrine and prompt contracts (#30)
 
@@ -892,12 +982,15 @@ and Go E2E cases (`TestE2E_GuardDeploysAndEnforcesForcePush`'s new
 - [Apply](apply.md) — deploys guard since #28: `guard.yaml` → `guard.json`
   rendering and the `PreToolUse`/`SubagentStop` hook entries, see
   "Deployment" above
-- `cli/internal/score/` — reads `guard-events.jsonl` (§7 format), no wiki file
-  yet (P1 in `PLAN.md`); see "Score and stats integration" above
+- [Score](score.md) — reads `guard-events.jsonl` (§7 format); see "Score and
+  stats integration" above
 - `cli/internal/doctor/` — diagnoses guard's deployed state read-only (§10),
-  no wiki file yet (P2 in `PLAN.md`); see "Doctor checks" above, and
+  no wiki file yet (P2 in `PLAN.md`); see "Doctor checks" above,
   "Telemetry-only diagnostics" above for the `.zprof.yaml`-absent branch
-  (#64) that reaches `checkGuardDeployment` with a zero-value manifest
+  (#64) that reaches `checkGuardDeployment` with a zero-value manifest, and
+  "Checkout hygiene diagnostics" above for the worktree/checkout check (#62)
+  that is unrelated to guard's own artifacts but lives here for the same
+  reason
 - [ADR-0001: config_hash resolution and telemetry-only redeploy](../adr/0001-collector-config-hash-and-telemetry-redeploy.md)
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
 - [ADR-0005: guard — context-evaluators `head_on_remote`, `linked_worktree`, `write_outside_repo`, `branch_pr_merged`](../adr/0005-guard-context-evaluators.md)

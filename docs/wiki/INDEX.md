@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-29 · Head: `71f14efd2c218fdaa28388b1936990bd28583865`
+Generated: 2026-09-29 · Head: `0800e5163b3548b52632768f8c79eabd27fcfbc9`
 
 ## Components
 
@@ -56,7 +56,12 @@ fsutil
 │       (+ reads guard's deployed .claude/guard.json/settings.local.json as
 │        data, not a Go import — #29; falls back to a manifest-independent
 │        check subset when .zprof.yaml is absent but telemetry/guard is
-│        deployed on disk, instead of erroring — #64, ADR-0001)
+│        deployed on disk, instead of erroring — #64, ADR-0001; also warns
+│        on git checkout/worktree hygiene via `git worktree list`
+│        --porcelain, reading task-runner's `.zprof/runs/*.md` `## Итог`
+│        marker as a heuristic data signal for "run still in flight", not a
+│        Go import — #62, unrelated to guard, see guard.md's "Checkout
+│        hygiene diagnostics")
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
 │                                        guard-events.jsonl as data, not Go imports;
