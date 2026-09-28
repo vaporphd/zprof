@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/vaporphd/zprof/internal/score"
 	"github.com/vaporphd/zprof/internal/stats"
 )
 
@@ -84,6 +87,14 @@ Use --role to filter to a single role.`,
 					return fmt.Errorf("write %s: %w", dest, err)
 				}
 				fmt.Fprintf(cmd.ErrOrStderr(), "saved: %s (%d dispatches, %d sessions)\n", dest, report.TotalDispatches, report.Sessions)
+
+				guardEvs, err := score.ReadGuardEvents(filepath.Join(dir, "guard-events.jsonl"))
+				if err != nil {
+					return fmt.Errorf("read guard events: %w", err)
+				}
+				if line := guardTopRules(guardEvs, sessionID, role); line != "" {
+					fmt.Fprintln(cmd.ErrOrStderr(), line)
+				}
 			}
 			return nil
 		},
@@ -93,4 +104,50 @@ Use --role to filter to a single role.`,
 	c.Flags().StringVar(&sessionID, "session", "", "Filter to a single session ID")
 	c.Flags().StringVar(&role, "role", "", "Filter to a single role")
 	return c
+}
+
+// guardTopRules counts guard-events.jsonl deny/block rows by rule — the same
+// "what counts as a violation" filter as computeP7 (ADR-0008 H3/H6) — after
+// applying the same --session/--role filters already applied to dispatches
+// above. Returns "" when nothing was counted (missing file or every row
+// filtered out); otherwise one line, top 5 rules, count desc then rule asc.
+func guardTopRules(events []score.GuardEvent, sessionID, role string) string {
+	counts := map[string]int{}
+	for _, e := range events {
+		if e.Decision != "deny" && e.Decision != "block" {
+			continue
+		}
+		if sessionID != "" && e.SessionID != sessionID {
+			continue
+		}
+		if role != "" && e.Role != role {
+			continue
+		}
+		counts[e.Rule]++
+	}
+	if len(counts) == 0 {
+		return ""
+	}
+	type kv struct {
+		rule  string
+		count int
+	}
+	items := make([]kv, 0, len(counts))
+	for r, n := range counts {
+		items = append(items, kv{r, n})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count != items[j].count {
+			return items[i].count > items[j].count
+		}
+		return items[i].rule < items[j].rule
+	})
+	if len(items) > 5 {
+		items = items[:5]
+	}
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, fmt.Sprintf("%s×%d", it.rule, it.count))
+	}
+	return "guard: top rules: " + strings.Join(parts, " ")
 }

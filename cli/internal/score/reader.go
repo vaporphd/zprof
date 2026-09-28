@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/vaporphd/zprof/internal/stats"
 )
@@ -70,14 +71,63 @@ func ReadToolEvents(path string) ([]ToolEvent, error) {
 	return out, nil
 }
 
+// GuardEvent is one row of .agentlog/guard-events.jsonl (guard spec §7).
+type GuardEvent struct {
+	Ts         string `json:"ts"`
+	SessionID  string `json:"session_id"`
+	Event      string `json:"event"`
+	Role       string `json:"role"`
+	DispatchID string `json:"dispatch_id"` // raw toolUseId; "" for main/unknown (JSON null)
+	Tool       string `json:"tool"`
+	Rule       string `json:"rule"`
+	Decision   string `json:"decision"`
+	Target     string `json:"target"`
+	InputHash  string `json:"input_hash"`
+}
+
+// ReadGuardEvents parses guard-events.jsonl (guard spec §7, ADR-0008 H1). A
+// missing file yields (nil, nil). Malformed lines are skipped. Unlike
+// ReadToolEvents, an empty dispatch_id is NOT a reason to skip a row — it is
+// the legitimate value for role main/unknown and the only entry point into
+// the temporal fallback in AttachGuardEvents. No dedup: rows carry no seq
+// and the collector never rewrites the file — events are returned in file
+// order. Filtering by decision/event is left to the caller (P7, `zprof
+// stats`).
+func ReadGuardEvents(path string) ([]GuardEvent, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	var out []GuardEvent
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 0, 256*1024), 4*1024*1024)
+	for sc.Scan() {
+		var ev GuardEvent
+		if err := json.Unmarshal(sc.Bytes(), &ev); err != nil {
+			continue
+		}
+		out = append(out, ev)
+	}
+	if err := sc.Err(); err != nil {
+		return nil, fmt.Errorf("scan %s: %w", path, err)
+	}
+	return out, nil
+}
+
 // Run is one task-runner dispatch with everything it spawned.
 type Run struct {
-	ID         string
-	Root       stats.Dispatch
-	Dispatches []stats.Dispatch
-	Steps      []stats.Dispatch
-	Events     map[string][]ToolEvent
-	RunLog     string
+	ID          string
+	Root        stats.Dispatch
+	Dispatches  []stats.Dispatch
+	Steps       []stats.Dispatch
+	Events      map[string][]ToolEvent
+	GuardEvents []GuardEvent // in file order; flat — GuardEvent carries its own Role
+	RunLog      string
 }
 
 const maxChainHops = 16
@@ -162,6 +212,73 @@ func lessDispatch(a, b stats.Dispatch) bool {
 		return a.Timestamp.Before(b.Timestamp)
 	}
 	return a.DispatchID < b.DispatchID
+}
+
+// rawID strips a dispatch_id down to its last ":"-separated segment: guard
+// events carry the raw toolUseId, dispatches.jsonl/tool-events.jsonl carry
+// the composite claude-code:<session_id>:<toolUseId> (ADR-0008 H2.1). A
+// string without ":" passes through unchanged.
+func rawID(s string) string {
+	if i := strings.LastIndex(s, ":"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
+}
+
+// AttachGuardEvents distributes guard events over runs already built by
+// BuildRuns (ADR-0008 H2). BuildRuns itself is not called and its signature
+// does not change.
+//
+//   - DispatchID != "": matched by rawID against every run.Dispatches entry
+//     (including the root). No match — the dispatch is outside any complete
+//     run — drops the event, symmetric to ToolEvent handling in BuildRuns.
+//     No temporal fallback for these rows.
+//   - DispatchID == "" (main/unknown): the only temporal fallback. Ts is
+//     parsed as RFC3339Nano; unparsable — dropped. The event attaches to the
+//     first run (runs is already sorted ascending by root timestamp) whose
+//     window [Root.Timestamp−DurationMs, Root.Timestamp] contains ts
+//     (inclusive both ends) and whose SessionID matches when both the event
+//     and the root have one set. A run is skipped as a candidate when its
+//     Root.Timestamp is zero or DurationMs <= 0 — "active" is undefined for
+//     it. No window matches — dropped.
+//
+// Pure: no stderr, no errors; runs is returned in the same order, mutated in
+// place — a run that received no events keeps GuardEvents == nil.
+func AttachGuardEvents(runs []Run, events []GuardEvent) []Run {
+	byRaw := map[string]int{}
+	for i := range runs {
+		for _, d := range runs[i].Dispatches {
+			byRaw[rawID(d.DispatchID)] = i
+		}
+	}
+	for _, e := range events {
+		if e.DispatchID != "" {
+			if i, ok := byRaw[rawID(e.DispatchID)]; ok {
+				runs[i].GuardEvents = append(runs[i].GuardEvents, e)
+			}
+			continue
+		}
+		ts, err := time.Parse(time.RFC3339Nano, e.Ts)
+		if err != nil {
+			continue
+		}
+		for i := range runs {
+			root := runs[i].Root
+			if root.Timestamp.IsZero() || root.DurationMs <= 0 {
+				continue
+			}
+			start := root.Timestamp.Add(-time.Duration(root.DurationMs) * time.Millisecond)
+			if ts.Before(start) || ts.After(root.Timestamp) {
+				continue
+			}
+			if e.SessionID != "" && root.SessionID != "" && e.SessionID != root.SessionID {
+				continue
+			}
+			runs[i].GuardEvents = append(runs[i].GuardEvents, e)
+			break
+		}
+	}
+	return runs
 }
 
 // LatestRun returns the run with the newest root timestamp, or nil.

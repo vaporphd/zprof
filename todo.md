@@ -27,13 +27,15 @@
 - [x] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34
 - [x] chore: переразвернуть .claude/zprof-collect.py после #36 (#45)
 - [x] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
+- [ ] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет
+- [ ] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 
 ## Plan 2: guard
 - [x] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)
 - [x] feat(base): guard — контекстные правила (head_on_remote, linked_worktree, запись вне репо) (#24) — depends: #23
 - [x] feat(base): guard — merge-гейт и PR-гейт (Closes #N + ## Gate) (#25) — depends: #23
 - [x] feat(base): guard — валидатор return_format на SubagentStop (#26) — depends: #23
-- [ ] feat: guard-события в zprof score (P7) и zprof stats (#27) — depends: #23
+- [x] feat: guard-события в zprof score (P7) и zprof stats (#27) — depends: #23 — PR #55
 - [ ] feat(cli): zprof apply деплоит guard — guard.json, хуки с matcher, permissions.deny (#28) — depends: #23; supersedes #18
 - [ ] feat(cli): zprof doctor — проверки guard (хуки, guard.json, deny, роли) (#29) — depends: #28
 - [ ] feat(base): guard — строка доктрины, контракты pr-shepherd/task-runner, overlay guard.yaml (#30) — depends: #28

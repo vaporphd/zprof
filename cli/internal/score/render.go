@@ -28,6 +28,14 @@ func RenderCard(c Card) string {
 	if len(findings) > 3 {
 		findings = findings[:3]
 	}
+	// A penalty with guard-events.jsonl deny/block rows is always shown, even
+	// when it didn't make top-3 by points (ADR-0008 H5) — spec §7 requires
+	// the guard suffix to be visible, not just present in --json.
+	for _, p := range c.Penalties {
+		if p.GuardDenies > 0 && !hasPenaltyID(findings, p.ID) {
+			findings = append(findings, p)
+		}
+	}
 	if len(findings) == 0 {
 		b.WriteString("no penalties\n")
 	}
@@ -60,6 +68,16 @@ func RenderCard(c Card) string {
 		b.WriteString("run log: missing\n")
 	}
 	return b.String()
+}
+
+// hasPenaltyID reports whether findings already contains a penalty with id.
+func hasPenaltyID(findings []Penalty, id string) bool {
+	for _, p := range findings {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func slug(c Card) string {

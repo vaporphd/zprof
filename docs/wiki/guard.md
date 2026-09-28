@@ -5,7 +5,7 @@ Path: `profiles/base/zprof-guard.py` (rules: `profiles/base/guard.yaml`; tests:
   `profiles/base/tests/test_guard*.py`)
 Status: in-progress
 Depends: [profiles-base]
-Dependants: []
+Dependants: [score, stats]
 Exports: [pre_tool, subagent_stop, evaluate_rules, resolve_role, dispatch_id,
   normalize_command, working_dir, project_root, load_config, deny_output,
   write_event, main, TOOLS_GUARDED, CONTEXTS]
@@ -93,6 +93,14 @@ Key invariants:
     True`) logs `event: "format_unfixed", decision: null` instead and returns `None` —
     never blocks a second time, bounding the cost to one extra subagent turn
     (ADR-0007 G1/G8; `zprof-guard.py:1504-1519`).
+  - `dispatch_id()` writes the **raw** `toolUseId`, never the collector's composite
+    `claude-code:<session_id>:<toolUseId>` — `zprof score`'s `AttachGuardEvents`
+    matches guard events to runs on the last `:`-separated segment specifically
+    because of this asymmetry (#27, ADR-0008 H2.1; `zprof-guard.py:96-102`).
+  - `zprof score`'s P7 counts a guard `deny`/`block` row as a contract violation
+    **regardless of `verdict_exempt_roles`** — the guard-events loop in `computeP7`
+    is separate from the contract-fields loop above it and never checks
+    `cfg.ExemptRoles` (#27, ADR-0008 H3; `cli/internal/score/metrics.go:261-268`).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
   §8.1, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
@@ -128,11 +136,13 @@ replaces prompt-only policy ("don't force-push", "only pr-shepherd merges") with
 deterministic check that runs before the tool executes. In `subagent-stop` mode it
 reads one `SubagentStop` payload and decides `block` or silence, checking that a
 subagent's final reply opens with the `verdict:`/`completion:` line its own
-`return_format` contract promises. Issues #23–#26 are the first four of a
+`return_format` contract promises. Issues #23–#27 are the first five of a
 six-issue milestone (#23–#28); this doc describes what's shipped so far — §5.1
 stop-list, read-only roles, and the merge gate from #23; §5.2/§5.3 context rules
 from #24; §5.5 merge preflight and §5.6 PR-create gate from #25; §6 the
-subagent-stop `return_format` validator from #26 — not the full design in the spec.
+subagent-stop `return_format` validator from #26; §7 the `zprof score`/`zprof
+stats` guard-events integration from #27 (Go-side only — the guard script
+itself is unchanged) — not the full design in the spec.
 
 **Not yet deployed anywhere.** No project's `.claude/` directory runs this hook today —
 that wiring (`zprof apply` writing `.claude/zprof-guard.py`, rendering
@@ -163,9 +173,12 @@ remains outside both is the *deployment* of the hook itself, #28:
 | §5.5 merge preflight | `merge_preflight` | **active** (#25) — `context: merge_preflight` now registered (ADR-0006) |
 | §5.6 PR-create gate | `pr_create_gate` | **active** (#25) — `context: pr_create_gate` now registered, no `roles`/`not_roles` (applies to every role) (ADR-0006) |
 
-Integrating guard events into `zprof score` is [#27](../../plan-2.md); actually
-deploying the hook into `.claude/` is [#28](../../plan-2.md) — until #28 lands,
-everything in this file is inert in every real project, including this one.
+Reading guard events into `zprof score`/`zprof stats` shipped in
+[#27](../../plan-2.md) (ADR-0008; see "Score and stats integration" below);
+actually deploying the hook into `.claude/` is [#28](../../plan-2.md) — until
+#28 lands, `.agentlog/guard-events.jsonl` is never written in a real project
+(only by tests/fixtures), so #27's reading code has nothing to read and
+`zprof score`/`zprof stats` are still silent on guard everywhere but here.
 
 ### Role resolution
 
@@ -443,15 +456,99 @@ reuse the same file/lock/`_safe_write_event` path too, but are written by
 `input_hash: null` — there is no tool call to describe (see previous section,
 ADR-0007 G1).
 
+### Score and stats integration (#27, ADR-0008)
+
+`.agentlog/guard-events.jsonl` (this file, written by `write_event`) is a data
+contract, not a Go import: the readers live in `cli/internal/score/`, `guard`
+itself never calls into Go. `score.GuardEvent`
+(`cli/internal/score/reader.go:75-86`) mirrors the ten §7 keys as plain
+strings; `score.ReadGuardEvents` (`reader.go:96-120`) parses the file —
+missing file → `(nil, nil)`, a malformed line is skipped, **no** dedup (rows
+carry no `seq` and the guard never rewrites the file, unlike the collector's
+`tool-events.jsonl`). Unlike `ReadToolEvents`, a row with `dispatch_id: null`
+(JSON `null` → Go `""`) is kept, not skipped — it's the legitimate shape for
+`role: "main"`/`"unknown"` events and the only entry point into the temporal
+fallback below. `run_id` (always `null`) and `detail` are read from the JSON
+but dropped — neither P7 nor `zprof stats` uses them.
+
+**Matching events to runs — `score.AttachGuardEvents`**
+(`reader.go:247-282`), called from `cmd/score.go:82-87` right after
+`score.BuildRuns`, without changing `BuildRuns`'s signature:
+
+- `dispatch_id != ""` — matched by `rawID()` (`reader.go:221-226`, the
+  substring after the last `:`) against every dispatch in every run. Guard
+  writes the **raw** `toolUseId` (see invariant above); `dispatches.jsonl`/
+  `tool-events.jsonl` carry the collector's composite
+  `claude-code:<session_id>:<toolUseId>` — `rawID` strips both down to the
+  same key. No match (dispatch outside any complete run) drops the event,
+  same as `ToolEvent` handling in `BuildRuns`; there is no temporal fallback
+  for these rows.
+- `dispatch_id == ""` (`main`/`unknown`) — the only temporal fallback: `ts` is
+  parsed as RFC3339Nano (unparsable → dropped), then matched against the
+  first run (runs are already time-sorted) whose window
+  `[Root.Timestamp − DurationMs, Root.Timestamp]` contains it (inclusive) and
+  whose `session_id` agrees when both the event and the run's root have one
+  set. A run with a zero `Root.Timestamp` or `DurationMs <= 0` is never a
+  candidate.
+
+**P7 — `computeP7`** (`cli/internal/score/metrics.go:261-268`) adds a
+**second, independent loop** over `run.GuardEvents` after the existing
+contract-fields loop: each row with `Decision` `"deny"` or `"block"` adds one
+violation (`allow_unverified`/`error`/`""` — i.e. `format_unfixed`/
+`role_unresolved`/`context_error` — do not count), attributed to the event's
+own `Role`. As the invariant above states, `cfg.ExemptRoles` does not reach
+this loop. When `m.guard > 0`, `computeP7`'s `Detail` string gets a
+`" (guard: %d deny)"` suffix (label is literally `deny` even for `block`
+rows, per spec §7) and the count is copied into a new field,
+`Penalty.GuardDenies` (`metrics.go:28-31`, `json:"guard_denies,omitempty"`) —
+zero on every other penalty, omitted from `scores.jsonl` when zero, so old
+rows and runs with no guard deny are byte-for-byte unchanged.
+`Config.WeightsHash()` doesn't change (P7's weight/saturation are untouched),
+so `--all-missing` does **not** retroactively re-score already-scored runs
+just because guard events later appear for them.
+
+**Card rendering — `RenderCard`** (`cli/internal/score/render.go:31-38`): a
+penalty with `GuardDenies > 0` is always appended to the printed findings even
+when it didn't make the top-3-by-points cut — otherwise the `(guard: N deny)`
+suffix could be computed but never shown on a card. `GuardDenies == 0` leaves
+the card identical to pre-#27 output.
+
+**`zprof stats`** (`cli/internal/cmd/stats.go:91-97, 114-153`) reads the same
+`guard-events.jsonl` per `<agentlog-dir>` argument after writing
+`report.html`/`report.json` (neither of which changes — this is stderr-only),
+applies the same `--session`/`--role` filters already applied to dispatches,
+counts `deny`/`block` rows by `Rule` (same filter as P7), and — if any rows
+matched — prints one line to stderr: `guard: top rules: <rule>×<n> ...` (top
+5, count desc then rule name asc). Zero matches (including a missing file)
+prints nothing.
+
+Both integrations are exercised by
+`cli/internal/score/{reader,metrics,render}_test.go` and
+`cli/internal/cmd/{score,stats}_test.go` — table-driven cases for the raw/
+composite `dispatch_id` match, the temporal-fallback window edges,
+`ExemptRoles` non-exemption, and the stats filter/format — plus the
+`--session`/`--role` combinations; `go test ./...` → 373 passed (verified
+2026-09-28, `feat/guard-events-score-27`).
+
+See [ADR-0008: guard-события в `zprof score` (P7) и `zprof stats`](../adr/0008-guard-events-score-integration.md)
+for the full H1–H8 decision record (why the match key is the raw `toolUseId`
+and not a `runOf`-style index, why the temporal window is
+`[end − duration, end]` rather than "largest timestamp ≤ ts", and the exact
+golden-fixture numbers) — not duplicated here.
+
 ### See also
 
 - [Collector](collector.md) — sibling hook in `profiles/base/`; `guard`'s `_input_hash`
   mirrors (does not import) `collector`'s, since the two scripts deploy independently
 - [Apply](apply.md) — does **not** deploy guard yet; deployment, `guard.yaml` →
   `guard.json` rendering, and the `PreToolUse` hook entry are #28
+- `cli/internal/score/` — reads `guard-events.jsonl` (§7 format), no wiki file
+  yet (P1 in `PLAN.md`); see "Score and stats integration" above
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
 - [ADR-0005: guard — context-evaluators `head_on_remote`, `linked_worktree`, `write_outside_repo`, `branch_pr_merged`](../adr/0005-guard-context-evaluators.md)
 - [ADR-0006: guard — merge-гейт (`merge_preflight`) и PR-гейт (`pr_create_gate`), событие `allow_unverified`](../adr/0006-guard-merge-pr-gate.md)
 - [ADR-0007: guard — валидатор `return_format` на `SubagentStop`](../adr/0007-guard-subagent-stop-validator.md)
+- [ADR-0008: guard-события в `zprof score` (P7) и `zprof stats`](../adr/0008-guard-events-score-integration.md)
 - `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` — full guard design (§2
-  decisions, §5 rule tables, §6 subagent-stop validator, §12 phase-2 deferred work)
+  decisions, §5 rule tables, §6 subagent-stop validator, §7 telemetry/score
+  integration, §12 phase-2 deferred work)

@@ -79,7 +79,12 @@ session's finished dispatches are visible immediately.`,
 			if err != nil {
 				return err
 			}
+			guardEvs, err := score.ReadGuardEvents(filepath.Join(agentlog, "guard-events.jsonl"))
+			if err != nil {
+				return err
+			}
 			runs := score.BuildRuns(ds, evs)
+			runs = score.AttachGuardEvents(runs, guardEvs)
 
 			if runKey != "" && allMissing {
 				return fmt.Errorf("--run and --all-missing are mutually exclusive")

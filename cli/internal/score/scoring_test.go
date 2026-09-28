@@ -28,8 +28,8 @@ func TestCompute_Run1Golden(t *testing.T) {
 	require.InDelta(t, 10, pts["P4"], 0.01, "1 extra tester→implementer round / 2")
 	require.InDelta(t, 0, pts["P5"], 0.01)
 	require.InDelta(t, 5, pts["P6"], 0.01, "40k wasted / 400k = 0.10 → third of 15")
-	require.InDelta(t, 5, pts["P7"], 0.01, "preamble + unparsed = 2 / 4")
-	require.Equal(t, 45, c.Score)
+	require.InDelta(t, 10, pts["P7"], 0.01, "preamble + unparsed = 2, guard-events.jsonl adds 2 more = 4/4 → saturated")
+	require.Equal(t, 40, c.Score)
 	require.Equal(t, "Lucky", c.Tier)
 	require.Equal(t, "done", c.Verdict)
 
@@ -54,13 +54,15 @@ func TestCompute_Run1Golden(t *testing.T) {
 	for _, r := range c.Roles {
 		byRole[r.Role] = r.Penalty
 	}
-	require.InDelta(t, 50, byRole["implementer"], 0.01)
+	require.InDelta(t, 52.5, byRole["implementer"], 0.01, "P7 now splits 3:1 implementer:main (2 contract + 1 guard vs. 1 guard)")
 	require.InDelta(t, 5, byRole["tester"], 0.01)
 	require.InDelta(t, 0, byRole["planner"], 0.01)
 	require.Equal(t, "implementer", c.Roles[0].Role, "roles sorted by penalty desc")
 	require.Equal(t, 1, c.ScoreSchema)
 	require.Equal(t, Defaults().WeightsHash(), c.WeightsHash)
 	require.Equal(t, ".zprof/runs/2026-09-26-fixture.md", c.RunLog)
+
+	require.Equal(t, 2, c.Penalties[6].GuardDenies, "P7 carries the guard-events.jsonl deny/block count")
 }
 
 func TestPenaltyAttributionSumsToPoints(t *testing.T) {
