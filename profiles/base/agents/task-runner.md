@@ -98,12 +98,33 @@ decision: <ответ пользователя, если resume_from задан>
 | Тип | Цепочка |
 |---|---|
 | Новая фича | `planner → architect → implementer → tester → wiki-keeper → reviewer → pr-shepherd` |
-| Багфикс | `bug-hunter → tester → wiki-keeper → reviewer → pr-shepherd` |
+| Багфикс | `bug-hunter → implementer → tester → wiki-keeper → reviewer → pr-shepherd` |
 | Рефактор без новой функциональности | `refactor-agent → tester → wiki-keeper → reviewer → pr-shepherd` |
 | Только тесты | `tester` |
 | Только ревью | `reviewer` |
 | RE / анализ бинаря | `intake → unpacker → explorer → hypothesizer → verifier → report-writer` |
 | Документация (README, CLAUDE.md кастомные секции, docs/wiki) | `docs-writer` |
+
+Эта таблица — единственный источник маршрутов задач: `workflows/*.md` на
+неё ссылаются, а не дублируют.
+
+Багфикс-маршрут ветвится по тому, что вернул `bug-hunter`:
+
+1. `done` (или `awaiting-approval` — диагноз без фикса) — `next` в
+   багфикс-маршруте это `implementer`, вход implementer'а — diagnosis +
+   repro artifact из отчёта bug-hunter'а.
+2. Для оверлеев, где bug-hunter сам чинит и возвращает `fixed` (например
+   `backend-kotlin-jvm`) — маппинг `verdicts.yaml` (`bug-hunter.fixed:
+   {action: next}`) уже существует; раннер трактует `next` как переход
+   сразу к `tester`, `implementer`-шаг в цепочке пропускается (код уже
+   исправлен).
+
+### Условные агенты маршрутов
+
+Эти агенты существуют только при определённом overlay; их отсутствие в
+`.claude/agents/` — не ошибка конфигурации, а сигнал, что overlay не
+активен: `intake`, `unpacker`, `hypothesizer`, `verifier`, `report-writer`
+(только `re-macho`, маршрут RE / анализ бинаря).
 
 Имена агентов бери из таблицы `## Consilium` в `CLAUDE.md` — при
 нескольких overlay'ях они namespace-нуты (`implementer-ios`,
@@ -139,7 +160,10 @@ decision: <ответ пользователя, если resume_from задан>
 
 ## Правила диспатча
 
-- Один агент за раз, дожидайся результата.
+- Один агент за раз, дожидайся результата. Единственное исключение —
+  Fan-out из `workflows/dev-pipeline.md` (≥5 независимых проверок →
+  Workflow tool; параллельные `implementer` только с `isolation:
+  "worktree"`).
 - Читай **только** поля схемы: `verdict`, `artifact`, `next`, `one_line`.
   Не втягивай содержимое артефактов в свой контекст без необходимости —
   оно нужно следующему агенту, а не тебе.
@@ -183,7 +207,7 @@ decision: <ответ пользователя, если resume_from задан>
 | tester, *-runner с `passed` | `passed`/`done` → next · `failed` → loop:implementer |
 | чекеры | `clean`/`pass` → next · `violations`/`errors`/`warnings`/`smells`/`drift`/`diagnostics`/`ub` → loop:implementer · `error` → abort · `not-installed`/`missing-tool`/`blocked-<tool>` → escalate |
 | reviewer | `approve`/`done` → next · `approve-with-fixes` → insert:implementer · `block`/`changes-requested`/`awaiting-approval`/`failed` → loop:implementer |
-| bug-hunter | `awaiting-approval` → insert:implementer |
+| bug-hunter | `awaiting-approval`/`done` → next (implementer уже в маршруте) · `fixed` → next (implementer-шаг пропускается, см. «Роутинг») |
 | pr-shepherd | `merged-stamped`/`verified-stamped` → next · `preflight-failed`/`delivery-failed`/`local-tests-failed` → loop:@next · `squash-incomplete` → abort · `blocked-external` → escalate · `blocked-*` → triage |
 | alembic-manager, testflight-shipper | `awaiting-approval` → escalate (стоп-лист: БД вне репо / публикация) |
 | auditor, auditor-deep | см. «Аудит шагов» |
@@ -194,9 +218,10 @@ decision: <ответ пользователя, если resume_from задан>
 решение владельца: auto-merge везде. Для `reviewer` раннер сам становится
 approver'ом: в задание `implementer` идут все Critical и Important из
 `artifact`, после чего следует повторное ревью (`loop`). Для `bug-hunter`
-отчёт из `artifact` сразу становится заданием `implementer`. `escalate` для
-`alembic-manager` и `testflight-shipper` — не новый гейт, это существующий
-`## Stop list` (БД вне репо, публикация).
+это не гейт вовсе — `next` ведёт на обычный следующий шаг маршрута, чей
+вход (diagnosis + repro artifact) описан в «Багфикс-маршрут ветвится...»
+выше. `escalate` для `alembic-manager` и `testflight-shipper` — не новый
+гейт, это существующий `## Stop list` (БД вне репо, публикация).
 
 Ответ **не схема**, если первая содержательная строка — не `verdict:
 <token>` **или** `<token>` не входит в допустимые токены роли (реестр +

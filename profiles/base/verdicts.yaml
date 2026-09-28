@@ -65,7 +65,7 @@ roles:
   bug-hunter:
     done:              {base: done,   action: next}
     fixed:             {base: done,   action: next}               # backend-kotlin-jvm
-    awaiting-approval: {base: done,   action: "insert:implementer"} # диагноз готов, раннер = approver
+    awaiting-approval: {base: done,   action: next}                # диагноз готов, раннер = approver, implementer уже в маршруте
     failed:            {base: failed, action: abort}
   explorer:
     done:    {base: done,   action: next}

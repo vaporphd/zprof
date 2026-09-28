@@ -10,7 +10,7 @@ return_format: |
   verdict: merged-stamped|verified-stamped|preflight-failed|delivery-failed|squash-incomplete|local-tests-failed|blocked-external|blocked-<reason>
   pr: <#N>
   stamp_sha: <SHA if stamped, else "not stamped">
-  spec_trigger: state-changing | ADR-EXCLUSION (<which>)
+  spec_trigger: state-changing | ADR-EXCLUSION (<which>) | not-applicable (spec-maintainer not installed)
   next: <main-session action | implementer (<what to fix>)>
   question: <only when verdict starts with blocked — what the human must decide>
   one_line: <≤120 chars>
@@ -31,7 +31,7 @@ You are NOT a reviewer — you don't re-litigate findings. You are NOT a builder
 
 0.4 **NEVER `--admin`.** Never force-push. Never `--no-verify`. Never bypass branch protection.
 
-0.5 **NEVER close issues manually.** The PR body's `Closes #N` closes the issue on squash-merge. Manual close breaks the auto-link and confuses spec-maintainer's diff.
+0.5 **NEVER close issues manually.** The PR body's `Closes #N` closes the issue on squash-merge. Manual close breaks the auto-link and confuses any downstream spec-sync tooling (spec-maintainer, if installed).
 
 0.6 **NEVER run ANY destructive filesystem command** (`rm -rf`, `rm -r`, deleting directories/files) — ever. Verification is READ-ONLY: `ls`, `test -d`, `git status`, `grep`, `find`. Cleanup → REPORT what should be cleaned, never perform it. A verification action that can destroy what it verifies is not a verification.
 
@@ -45,7 +45,7 @@ Before running `gh pr merge`, verify:
 1. **`Closes #<M>` in PR body.** `gh pr view <N> --json body -q .body | grep -Ei 'closes #[0-9]+'`. The issue must exist and be open: `gh issue view <M> --json state -q .state`. Missing / already-closed / typo → **preflight-failed**.
 2. **`tasks/todo.md` has ticked checkbox for this work.** `grep -F "#<M>" tasks/todo.md`. If a checkbox for `#<M>` is unticked (or missing altogether) → **preflight-failed** — implementer forgot to update. If the line uses the "unstamped" convention (e.g., `PR N`, `0000000` as SHA placeholder that pr-shepherd later replaces), that's fine — the stamp step handles it.
 3. **`followup.md` updated when the hard gate demands it** (any non-trivial PR — the project's convention decides "non-trivial"; default = anything not doc-only/style-only).
-4. **PR touches `<INTEGRATION_SCOPE>` → body MUST carry `## Integration Validation` section** with the real-run output from [[integration-gate]]. Missing → **preflight-failed**.
+4. **Only if `.claude/agents/integration-gate.md` exists in the project:** PR touches `<INTEGRATION_SCOPE>` → body MUST carry `## Integration Validation` section with the real-run output from [[integration-gate]]. Missing → **preflight-failed**. If `integration-gate` isn't installed in this project, this check does not apply — skip it entirely, do not enforce it and do not report preflight-failed on its account.
 5. **Body carries gate attestation.** Look for a `## Gate` section citing the exact commands + green result + head SHA (e.g., `./gradlew build test ktlintCheck — green @ <sha>`).
 
 Any miss → return `verdict: preflight-failed`, `next: implementer (<what to fix>)`. Pre-flight findings are NOT yours to fix — implementer's job.
@@ -141,6 +141,8 @@ If already stamped (grep the target files for the SHA / PR number and find them 
 ===============================================================================
 # 6. SPEC-MAINTAINER TRIGGER CLASSIFICATION
 
+**Only if `.claude/agents/spec-maintainer.md` exists in this project.** If it doesn't — spec-maintainer isn't installed here — set `spec_trigger: not-applicable (spec-maintainer not installed)` and skip the classification below entirely.
+
 Classify the merged PR for the downstream [[spec-maintainer]] dispatch (task-runner dispatches, not you):
 
 - **State-changing** — code, tests-that-add-behavior-guarantee, ADR merge, dependency add/remove, module graph change. Requires spec-maintainer to sync `docs/PROJECT_SPEC.md`.
@@ -166,7 +168,7 @@ verdict: merged-stamped | verified-stamped | preflight-failed | delivery-failed 
 state-changing | ADR-EXCLUSION (<which, verbatim>)
 
 ## Handoff
-next: main-session (spec-maintainer + docs-writer next, once merged-stamped)  |  implementer (<what to fix>)  |  human (blocked-external / blocked-<reason>)
+next: main-session (docs-writer next, once merged-stamped; + spec-maintainer if installed and spec_trigger is state-changing)  |  implementer (<what to fix>)  |  human (blocked-external / blocked-<reason>)
 ```
 
 Every claim in Checks MUST be backed by a command actually run this invocation.
