@@ -21,7 +21,7 @@ func TestAppendScoreAndReadScoredKeys(t *testing.T) {
 	data, err := os.ReadFile(p)
 	require.NoError(t, err)
 	require.Len(t, strings.Split(strings.TrimRight(string(data), "\n"), "\n"), 2)
-	require.Contains(t, string(data), `"score":45`)
+	require.Contains(t, string(data), `"score":40`)
 
 	keys, err = ReadScoredKeys(p)
 	require.NoError(t, err)

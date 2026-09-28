@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -16,7 +17,9 @@ func loadRun1(t *testing.T) []Run {
 	require.NoError(t, err)
 	evs, err := ReadToolEvents(filepath.Join(fixtureDir(), "tool-events.jsonl"))
 	require.NoError(t, err)
-	return BuildRuns(ds, evs)
+	guardEvs, err := ReadGuardEvents(filepath.Join(fixtureDir(), "guard-events.jsonl"))
+	require.NoError(t, err)
+	return AttachGuardEvents(BuildRuns(ds, evs), guardEvs)
 }
 
 func TestReadToolEvents_MissingFileIsEmpty(t *testing.T) {
@@ -102,4 +105,116 @@ func TestBuildRuns_EventsForUnknownDispatchAreDropped(t *testing.T) {
 	got := runs[0].Events["claude-code:s:x"]
 	require.Len(t, got, 2)
 	require.Equal(t, 1, got[0].Seq, "events sorted by seq")
+}
+
+func TestReadGuardEvents_MissingFileIsEmpty(t *testing.T) {
+	evs, err := ReadGuardEvents(filepath.Join(t.TempDir(), "nope.jsonl"))
+	require.NoError(t, err)
+	require.Empty(t, evs)
+}
+
+// TestReadGuardEvents_MalformedLineSkippedNullDispatchIDKept regression-tests
+// the most dangerous copy-paste mistake from ReadToolEvents (ADR-0008 H1):
+// dispatch_id: null is the legitimate main/unknown case and must survive.
+func TestReadGuardEvents_MalformedLineSkippedNullDispatchIDKept(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "guard-events.jsonl")
+	require.NoError(t, writeFile(p, `{"ts":"2026-09-26T09:00:00Z","session_id":"s1","event":"pre-tool","role":"implementer","dispatch_id":"t1","tool":"Bash","rule":"force_push","decision":"deny","target":"git push","input_hash":"h1"}
+not json
+{"ts":"2026-09-26T09:05:00Z","session_id":"s1","event":"pre-tool","role":"main","dispatch_id":null,"tool":"Bash","rule":"force_push","decision":"deny","target":"git push","input_hash":"h2"}
+`))
+	evs, err := ReadGuardEvents(p)
+	require.NoError(t, err)
+	require.Len(t, evs, 2, "malformed line dropped, the two valid rows around it kept")
+	require.Equal(t, "t1", evs[0].DispatchID)
+	require.Equal(t, "", evs[1].DispatchID, "null dispatch_id must NOT be dropped — it is the main/unknown fallback entry point")
+	require.Equal(t, "main", evs[1].Role)
+}
+
+// guardDispatch builds a stats.Dispatch with explicit SessionID/DurationMs
+// control, for AttachGuardEvents tests that mkDispatch's shortcuts don't cover.
+func guardDispatch(id, role, parent, session, ts string, durationMs int64) stats.Dispatch {
+	d := stats.Dispatch{
+		DispatchID: "claude-code:" + session + ":" + id, Role: role, Status: "completed",
+		SessionID: session, DispatchComplete: true, TsUTC: ts, DurationMs: durationMs,
+	}
+	if role == "task-runner" {
+		d.Verdict = "done"
+	}
+	if parent != "" {
+		d.ParentDispatchID = "claude-code:" + session + ":" + parent
+	}
+	d.Timestamp, _ = time.Parse(time.RFC3339, ts)
+	return d
+}
+
+func TestAttachGuardEvents_DispatchIDMatchesRawAndComposite(t *testing.T) {
+	root := guardDispatch("r", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 1800000)
+	x := guardDispatch("x", "implementer", "r", "s1", "2026-09-26T10:05:00Z", 60000)
+	runs := BuildRuns([]stats.Dispatch{root, x}, nil)
+
+	raw := GuardEvent{Ts: "2026-09-26T10:05:30Z", DispatchID: "x", Decision: "deny", Rule: "force_push"}
+	composite := GuardEvent{Ts: "2026-09-26T10:05:40Z", DispatchID: "claude-code:s1:x", Decision: "block", Rule: "return_format"}
+	runs = AttachGuardEvents(runs, []GuardEvent{raw, composite})
+
+	require.Len(t, runs, 1)
+	require.Len(t, runs[0].GuardEvents, 2, "both the raw toolUseId and the composite id resolve to the same run")
+}
+
+func TestAttachGuardEvents_DispatchIDOutsideAnyRunDropped(t *testing.T) {
+	root := guardDispatch("r", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 1800000)
+	runs := BuildRuns([]stats.Dispatch{root}, nil)
+	runs = AttachGuardEvents(runs, []GuardEvent{
+		{Ts: "2026-09-26T10:05:00Z", DispatchID: "no-such-dispatch", Decision: "deny"},
+	})
+	require.Empty(t, runs[0].GuardEvents, "no temporal fallback for events that carry a dispatch_id")
+}
+
+func TestAttachGuardEvents_TemporalFallbackPicksEnclosingRunAmongTwo(t *testing.T) {
+	root1 := guardDispatch("r1", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 1800000) // window [09:30, 10:00]
+	root2 := guardDispatch("r2", "task-runner", "", "s1", "2026-09-26T11:00:00Z", 1800000) // window [10:30, 11:00]
+	runs := BuildRuns([]stats.Dispatch{root1, root2}, nil)
+	require.Len(t, runs, 2)
+
+	mainEvent := GuardEvent{Ts: "2026-09-26T10:45:00Z", SessionID: "s1", Role: "main", Decision: "deny", Rule: "force_push"}
+	runs = AttachGuardEvents(runs, []GuardEvent{mainEvent})
+	require.Empty(t, runs[0].GuardEvents, "10:45 is outside run1's [09:30,10:00] window")
+	require.Len(t, runs[1].GuardEvents, 1, "10:45 falls inside run2's [10:30,11:00] window")
+
+	// Regression on "≤ largest preceding root" from the plan's rejected
+	// fallback: ts between end1 and start2 belongs to neither window.
+	runs2 := BuildRuns([]stats.Dispatch{root1, root2}, nil)
+	between := GuardEvent{Ts: "2026-09-26T10:15:00Z", SessionID: "s1", Decision: "deny"}
+	runs2 = AttachGuardEvents(runs2, []GuardEvent{between})
+	require.Empty(t, runs2[0].GuardEvents)
+	require.Empty(t, runs2[1].GuardEvents, "gap between the two runs' windows is not covered by either")
+}
+
+func TestAttachGuardEvents_TemporalFallbackDropsUnparsableOrOutOfRangeTs(t *testing.T) {
+	root := guardDispatch("r", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 1800000) // window [09:30, 10:00]
+	runs := BuildRuns([]stats.Dispatch{root}, nil)
+	events := []GuardEvent{
+		{Ts: "not-a-timestamp", Decision: "deny"},
+		{Ts: "", Decision: "deny"},
+		{Ts: "2026-09-26T09:00:00Z", Decision: "deny"}, // before the window
+	}
+	runs = AttachGuardEvents(runs, events)
+	require.Empty(t, runs[0].GuardEvents)
+}
+
+func TestAttachGuardEvents_TemporalFallbackSessionMismatchDropped(t *testing.T) {
+	root := guardDispatch("r", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 1800000) // window [09:30, 10:00]
+	runs := BuildRuns([]stats.Dispatch{root}, nil)
+	runs = AttachGuardEvents(runs, []GuardEvent{
+		{Ts: "2026-09-26T09:45:00Z", SessionID: "s2", Decision: "deny"},
+	})
+	require.Empty(t, runs[0].GuardEvents, "event's session_id differs from the root's — different session, not the same runner")
+}
+
+func TestAttachGuardEvents_ZeroDurationRootNotACandidate(t *testing.T) {
+	root := guardDispatch("r", "task-runner", "", "s1", "2026-09-26T10:00:00Z", 0)
+	runs := BuildRuns([]stats.Dispatch{root}, nil)
+	runs = AttachGuardEvents(runs, []GuardEvent{
+		{Ts: "2026-09-26T10:00:00Z", SessionID: "s1", Decision: "deny"},
+	})
+	require.Empty(t, runs[0].GuardEvents, "DurationMs <= 0 means \"active\" is undefined — the run is not a candidate")
 }

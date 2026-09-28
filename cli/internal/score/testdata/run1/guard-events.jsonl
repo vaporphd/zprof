@@ -1,0 +1,2 @@
+{"ts":"2026-09-26T10:20:00Z","session_id":"s1","event":"subagent-stop","role":"implementer","dispatch_id":"t2","tool":null,"rule":"return_format","decision":"block","target":null,"input_hash":null,"run_id":null}
+{"ts":"2026-09-26T09:45:00Z","session_id":"s1","event":"pre-tool","role":"main","dispatch_id":null,"tool":"Bash","rule":"force_push","decision":"deny","target":"git push","input_hash":"a1b2c3d4e5f6","run_id":null}

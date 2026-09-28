@@ -202,6 +202,54 @@ func TestP5_ConfigurableVerdicts(t *testing.T) {
 	require.Equal(t, 1.0, computeP5(run, cfg).value)
 }
 
+func TestP7_GuardEventsDenyAndBlockCountAllowUnverifiedAndErrorDoNot(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
+	run := BuildRuns([]stats.Dispatch{root}, nil)[0]
+	run.GuardEvents = []GuardEvent{
+		{Role: "implementer", Decision: "deny"},
+		{Role: "implementer", Decision: "block"},
+		{Role: "implementer", Decision: "allow_unverified"},
+		{Role: "implementer", Decision: "error"},
+		{Role: "implementer", Decision: ""},
+	}
+	p := computeP7(run, Defaults())
+	require.Equal(t, 2.0, p.value, "only deny and block count as violations")
+	require.Equal(t, 2.0, p.byRole["implementer"])
+	require.Equal(t, 2, p.guard)
+	require.Contains(t, p.detail, "(guard: 2 deny)")
+}
+
+// TestP7_GuardSlagaemoeNotExemptedByExemptRoles is the inverse of the P7
+// contract-violation loop: ExemptRoles skips a role's has_preamble/
+// artifact_exists/etc. checks entirely, but the guard-events.jsonl loop
+// never consults cfg.ExemptRoles at all (ADR-0008 H3) — a deny on an exempt
+// role's mutation still counts.
+func TestP7_GuardSlagaemoeNotExemptedByExemptRoles(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
+	aud := mkDispatch("a", "auditor", "r", "done", "completed", "2026-09-26T10:01:00Z")
+	aud.HasPreamble = bptr(true) // would be a contract violation if not exempt
+	run := BuildRuns([]stats.Dispatch{root, aud}, nil)[0]
+	run.GuardEvents = []GuardEvent{{Role: "auditor", Decision: "deny"}}
+
+	cfg := Defaults()
+	cfg.ExemptRoles = map[string]bool{"auditor": true}
+	p := computeP7(run, cfg)
+	require.Equal(t, 1.0, p.value, "auditor's contract check is exempted, but the guard deny still counts")
+	require.Equal(t, 1.0, p.byRole["auditor"])
+	require.Equal(t, 1, p.guard)
+}
+
+func TestP7_NoGuardDeniesLeavesDetailAndGuardDeniesUnset(t *testing.T) {
+	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
+	run := BuildRuns([]stats.Dispatch{root}, nil)[0]
+	p := computeP7(run, Defaults())
+	require.Equal(t, 0.0, p.value)
+	require.Equal(t, "", p.detail)
+	pen := penaltyFrom("P7", p, Defaults())
+	require.Equal(t, 0, pen.GuardDenies)
+	require.NotContains(t, pen.Detail, "guard")
+}
+
 func TestTruncate_RunesNotBytes(t *testing.T) {
 	s := "проверить длинную команду"
 	got := truncate(s, 10)

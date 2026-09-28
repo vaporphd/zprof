@@ -13,6 +13,7 @@ type metric struct {
 	value  float64            // compared against Saturation[id]
 	byRole map[string]float64 // numerator share per role (errors, retries, tokens, …)
 	detail string             // human text for the card (RU)
+	guard  int                // P7 only: guard-events.jsonl deny/block rows counted (ADR-0008 H3)
 }
 
 func newMetric() metric { return metric{byRole: map[string]float64{}} }
@@ -24,12 +25,16 @@ type Penalty struct {
 	Points float64            `json:"points"`
 	ByRole map[string]float64 `json:"by_role"`
 	Detail string             `json:"detail,omitempty"`
+	// GuardDenies is the count of guard-events.jsonl deny/block rows folded
+	// into this penalty (P7 only, ADR-0008 H5). Zero on every other penalty
+	// and omitted from scores.jsonl when zero.
+	GuardDenies int `json:"guard_denies,omitempty"`
 }
 
 // penaltyFrom applies weight × min(1, value/saturation) and splits the points
 // across roles proportionally to their numerator share.
 func penaltyFrom(id string, m metric, cfg Config) Penalty {
-	p := Penalty{ID: id, Value: m.value, ByRole: map[string]float64{}, Detail: m.detail}
+	p := Penalty{ID: id, Value: m.value, ByRole: map[string]float64{}, Detail: m.detail, GuardDenies: m.guard}
 	sat := cfg.Saturation[id]
 	if sat <= 0 || m.value <= 0 {
 		return p
@@ -224,7 +229,11 @@ func computeP6(run Run, cfg Config) metric {
 }
 
 // P7 — Class-A contract violations, exempt roles excluded; a missing artifact
-// on a `blocked` verdict is not a violation.
+// on a `blocked` verdict is not a violation. Guard-events.jsonl deny/block
+// rows (guard spec §7) add one violation each in a separate loop, attributed
+// by the event's own Role — cfg.ExemptRoles does not apply to this
+// slagaemое at all (ADR-0008 H3): a deny on an exempt role's mutation still
+// counts.
 func computeP7(run Run, cfg Config) metric {
 	m := newMetric()
 	for _, d := range run.Dispatches {
@@ -249,8 +258,19 @@ func computeP7(run Run, cfg Config) metric {
 			m.byRole[d.Role] += float64(n)
 		}
 	}
+	for _, e := range run.GuardEvents {
+		if e.Decision != "deny" && e.Decision != "block" {
+			continue
+		}
+		m.value++
+		m.byRole[e.Role]++
+		m.guard++
+	}
 	if m.value > 0 {
 		m.detail = fmt.Sprintf("%d нарушений контракта (%s)", int(m.value), joinRoles(m.byRole))
+		if m.guard > 0 {
+			m.detail += fmt.Sprintf(" (guard: %d deny)", m.guard)
+		}
 	}
 	return m
 }

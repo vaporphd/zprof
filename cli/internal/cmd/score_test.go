@@ -21,7 +21,7 @@ func setupScoreProject(t *testing.T) (proj, agentlog string) {
 	proj = t.TempDir()
 	agentlog = filepath.Join(proj, ".agentlog")
 	require.NoError(t, os.MkdirAll(agentlog, 0o755))
-	for _, name := range []string{"dispatches.jsonl", "tool-events.jsonl", "schema.json"} {
+	for _, name := range []string{"dispatches.jsonl", "tool-events.jsonl", "guard-events.jsonl", "schema.json"} {
 		data, err := os.ReadFile(filepath.Join(scoreFixtureDir(), name))
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(filepath.Join(agentlog, name), data, 0o644))
@@ -47,7 +47,7 @@ func TestScoreCmd_LatestPrintsCardAndPersists(t *testing.T) {
 	proj, agentlog := setupScoreProject(t)
 	out, err := runScore(t, "--project", proj, "--no-collect")
 	require.NoError(t, err)
-	require.Contains(t, out, "Score 45/100 · Lucky · done · 2026-09-26-fixture")
+	require.Contains(t, out, "Score 40/100 · Lucky · done · 2026-09-26-fixture")
 
 	scores, err := os.ReadFile(filepath.Join(agentlog, "scores.jsonl"))
 	require.NoError(t, err)
@@ -56,7 +56,7 @@ func TestScoreCmd_LatestPrintsCardAndPersists(t *testing.T) {
 	runLog, err := os.ReadFile(filepath.Join(proj, ".zprof", "runs", "2026-09-26-fixture.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(runLog), "<!-- zprof:score:begin -->")
-	require.Contains(t, string(runLog), "Score 45/100")
+	require.Contains(t, string(runLog), "Score 40/100")
 }
 
 func TestScoreCmd_JSON(t *testing.T) {
@@ -156,7 +156,7 @@ func TestScoreCmd_RunLogOutsideRunsDirIsIgnored(t *testing.T) {
 
 		out, err := runScore(t, "--project", proj, "--no-collect")
 		require.NoError(t, err, runLog)
-		require.Contains(t, out, "Score 45/100")
+		require.Contains(t, out, "Score 40/100")
 		got, err := os.ReadFile(target)
 		require.NoError(t, err)
 		require.Equal(t, "# notes\n", string(got), "run_log %q outside .zprof/runs must not be written", runLog)
