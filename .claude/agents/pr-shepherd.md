@@ -123,23 +123,26 @@ Runs right after §3 in the same invocation, or on a re-invocation where the PR 
 
 1. `gh pr view <N> --json mergeCommit -q .mergeCommit.oid` — the squash SHA GitHub recorded.
 2. `WT=$(mktemp -d)`; `git fetch origin <DEFAULT_BRANCH>`; `git worktree add --detach "$WT" origin/<DEFAULT_BRANCH>` — NEVER checkout branch `main` directly in the main working tree, and never create a worktree ON branch `main` (`--detach` only, always into your own `mktemp -d`, never into a scratchpad shared with the main session).
-3. `git -C "$WT" rev-parse HEAD` — the tip SHA of the detached worktree. Compare to the squash SHA from step 1 — must match.
-4. `git -C "$WT" diff-tree --no-commit-id --name-only -r <squash-sha>` — MUST list every path the PR's `gh pr view <N> --json files -q '.files[].path'` claimed. Missing paths → **squash-incomplete**, immediate report — this is a github-merge-machinery bug, escalate.
-5. `git worktree remove "$WT"` — clean up the detached worktree you created in step 2 before continuing to §5. This is the one narrow exception carved out of §0.6 (see there).
+3. `git -C "$WT" rev-parse HEAD` — the tip SHA of the detached worktree. Compare to the squash SHA from step 1 — must match. Mismatch → `git worktree remove "$WT"` immediately, then report — this is an early-return error path, `$WT` is not needed past it.
+4. `git -C "$WT" diff-tree --no-commit-id --name-only -r <squash-sha>` — MUST list every path the PR's `gh pr view <N> --json files -q '.files[].path'` claimed. Missing paths → `git worktree remove "$WT"` immediately, then **squash-incomplete**, immediate report — this is a github-merge-machinery bug, escalate.
+5. All checks passed → do **NOT** remove `$WT` yet. Continue straight into §5 in this same invocation — STAMP runs against this same detached worktree (the main working tree may still sit on the feature branch from §2/§3, so it can't be the STAMP target), and `git worktree remove "$WT"` becomes the FINAL action of §5 (whichever of its three outcomes applies), not of §4.
+
+On any path out of §4 (steps 3/4 above, or the success path into §5) `$WT` is removed exactly once: immediately on an early-return error, or at the end of §5 on the success path — never left behind either way.
 
 ===============================================================================
 # 5. STAMP (IF PROJECT CONVENTION USES SHA/PR PLACEHOLDERS)
 
-Many projects using this pipeline write `PR N` / `0000000` placeholders into `tasks/todo.md` + `followup.md` at implementer-commit time, replaced at merge-time by pr-shepherd. If the project has this convention (check for a `scripts/stamp-merge.sh` — if it exists, use it):
+Many projects using this pipeline write `PR N` / `0000000` placeholders into `tasks/todo.md` + `followup.md` at implementer-commit time, replaced at merge-time by pr-shepherd. Runs against the SAME detached worktree `$WT` created in §4 step 2 — never against the main working tree, which may still sit on the feature branch. If the project has this convention (check for a `scripts/stamp-merge.sh` inside `$WT` — if it exists, use it):
 
-1. `./scripts/stamp-merge.sh <N> <squash-sha>` — replaces placeholders in the docs. Reads the SHA + PR number without loading file contents into your context (the script is the seam).
-2. `git status --short` — should show only `tasks/todo.md` + `followup.md` modified. If more → `blocked-<unexpected-stamp-diff>`.
-3. `git add -u && git commit -m "docs: stamp PR <N> + sha <short-sha>"`.
-4. **Standalone `git push`** — read the output visibly. Verify: `git rev-parse HEAD origin/<DEFAULT_BRANCH>` — must be equal.
+1. `./scripts/stamp-merge.sh <N> <squash-sha>` invoked against `$WT` (e.g. run from inside `$WT`, or via an equivalent `-C "$WT"` wrapper if the script supports it) — replaces placeholders in the docs INSIDE `$WT`. Reads the SHA + PR number without loading file contents into your context (the script is the seam).
+2. `git -C "$WT" status --short` — should show only `tasks/todo.md` + `followup.md` modified. If more → `git worktree remove "$WT"`, then `blocked-<unexpected-stamp-diff>`.
+3. `git -C "$WT" add -u && git -C "$WT" commit -m "docs: stamp PR <N> + sha <short-sha>"`.
+4. **Standalone `git -C "$WT" push origin HEAD:<DEFAULT_BRANCH>`** — read the output visibly, line by line (never `&&`-chained, never tail-truncated). Verify: `git -C "$WT" rev-parse HEAD` vs `git rev-parse origin/<DEFAULT_BRANCH>` — must be equal.
+5. `git worktree remove "$WT"` — clean up the detached worktree now; this is the last action of this successful path.
 
-If no `stamp-merge.sh` exists → skip stamping; note in return `notes: "no stamp convention in this project"`.
+If no `stamp-merge.sh` exists inside `$WT` → skip stamping, `git worktree remove "$WT"` immediately (nothing further to do against it), note in return `notes: "no stamp convention in this project"`.
 
-If already stamped (grep the target files for the SHA / PR number and find them already present) → skip and say so.
+If already stamped (grep the target files inside `$WT` for the SHA / PR number and find them already present) → skip stamping, `git worktree remove "$WT"`, and say so.
 
 ===============================================================================
 # 6. SPEC-MAINTAINER TRIGGER CLASSIFICATION
