@@ -53,6 +53,18 @@ type Inputs struct {
 	Legacy bool `json:"legacy"`
 }
 
+// Signal is a non-scored informational finding: unlike a Penalty (P1-P7),
+// it has no weight/saturation, does not affect Score, and is not folded
+// into any role's penalty column. Card.Signals currently holds only the
+// busy-poll signal (issue #53 AC5) — the shape leaves room for more
+// without another scores.jsonl schema bump.
+type Signal struct {
+	ID     string             `json:"id"`
+	Value  float64            `json:"value"`
+	Detail string             `json:"detail,omitempty"`
+	ByRole map[string]float64 `json:"by_role,omitempty"`
+}
+
 // Card is one row of .agentlog/scores.jsonl.
 type Card struct {
 	ScoreSchema  int       `json:"score_schema"`
@@ -66,6 +78,7 @@ type Card struct {
 	Tier         string    `json:"tier"`
 	Score        int       `json:"score"`
 	Penalties    []Penalty `json:"penalties"`
+	Signals      []Signal  `json:"signals,omitempty"`
 	Roles        []RoleRow `json:"roles"`
 	Facts        Facts     `json:"facts"`
 	Inputs       Inputs    `json:"inputs"`
@@ -138,6 +151,9 @@ func Compute(run Run, cfg Config, zprofVersion string) Card {
 		Tier:         TierFor(run.Root.Verdict, score, cfg.Thresholds),
 		Penalties:    penalties,
 		WeightsHash:  cfg.WeightsHash(),
+	}
+	if bp := computeBusyPoll(run, cfg); bp.value > 0 {
+		card.Signals = []Signal{{ID: "busy-poll", Value: bp.value, Detail: bp.detail, ByRole: bp.byRole}}
 	}
 	card.Facts, card.Roles = facts(run, rolePenalty)
 	card.Inputs = inputs(run)

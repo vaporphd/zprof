@@ -42,6 +42,11 @@ func RenderCard(c Card) string {
 	for _, p := range findings {
 		fmt.Fprintf(&b, "−%d %s %s\n", roundInt(p.Points), p.ID, p.Detail)
 	}
+	// Signals (issue #53 AC5): informational, unscored — no −N prefix,
+	// does not affect c.Score, printed after the scored findings.
+	for _, s := range c.Signals {
+		fmt.Fprintf(&b, "· %s %s\n", s.ID, s.Detail)
+	}
 	b.WriteString("\n")
 
 	if len(c.Roles) > 0 {

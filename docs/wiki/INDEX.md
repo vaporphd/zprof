@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-29 · Head: `3fb75f6a6735edb3bbc23305c6cfc6486290c6bc`
+Generated: 2026-09-29 · Head: `71f14efd2c218fdaa28388b1936990bd28583865`
 
 ## Components
 
@@ -12,7 +12,7 @@ Generated: 2026-09-29 · Head: `3fb75f6a6735edb3bbc23305c6cfc6486290c6bc`
 | overlay | `cli/internal/overlay/` | implemented | manifest | — |
 | manifest | `cli/internal/manifest/` | implemented | fsutil, models | — |
 | managed | `cli/internal/managed/` | implemented | — | — |
-| score | `cli/internal/score/` | implemented | fsutil, manifest, stats | — |
+| score | `cli/internal/score/` | implemented | fsutil, manifest, stats | [score.md](score.md) |
 | stats | `cli/internal/stats/` | implemented | — | — |
 | eval | `cli/internal/eval/` | implemented | — | — |
 | agents | `cli/internal/agents/` | implemented | — | — |
@@ -59,7 +59,12 @@ fsutil
 │        deployed on disk, instead of erroring — #64, ADR-0001)
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
-│                                        guard-events.jsonl as data, not Go imports)
+│                                        guard-events.jsonl as data, not Go imports;
+│                                        + reads profiles-base's telemetry.yaml
+│                                        (deployed as .agentlog/schema.json) for
+│                                        mutating_bash_patterns/p2_exempt_patterns/
+│                                        score_defaults, also data not a Go
+│                                        import — #53, see score.md)
 └── apply → [overlay, manifest, managed, models, agents, fsutil, verdicts]  (deploys collector + guard as artifacts, not Go imports — #28, ADR-0009)
     └── wizard → [apply, detect, managed, manifest, overlay]
         └── cmd → [apply, doctor, eval, managed, manifest, models, overlay, score, stats, sync, wizard]
@@ -91,10 +96,12 @@ verdicts  (leaf; loads/validates profiles/base/verdicts.yaml — ADR-0003)
   `.agentlog/guard-events.jsonl`, so #27's readers have something to read)
 - In progress: 0
 - Planned: 0
-- Undocumented (has code, no wiki): 18 (overlay, manifest, managed, score, stats, eval,
+- Undocumented (has code, no wiki): 17 (overlay, manifest, managed, stats, eval,
   agents, models, detect, doctor, verdicts, wizard, sync, fsutil, cmd, profiles-base,
   overlays, shakedown — see `PLAN.md` for the P1/P2/P3 write order; `verdicts`
-  (`cli/internal/verdicts/`) is new on `feat/verdicts-registry` / #20, ADR-0003)
+  (`cli/internal/verdicts/`) is new on `feat/verdicts-registry` / #20, ADR-0003;
+  `score` moved out of this list on `fix/async-wait-p2-exempt-53` / #53 —
+  `score.md` written, see `PLAN.md` § Notes)
 
 ## Known drift (flagged, not fixed)
 

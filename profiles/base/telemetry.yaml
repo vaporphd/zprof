@@ -92,6 +92,16 @@ mutating_bash_patterns:
   - "\\b(cargo|go|swift)\\s+fmt\\b"
   - "\\b(gofmt\\s+-w|swiftformat|rustfmt)\\b"
 
+# Bash commands excluded from P2 (blind-retry) scoring, matched after
+# stripping one leading `rtk proxy `/`rtk ` wrapper prefix (mirrors
+# zprof-guard.py `_RTK_PREFIXES`, ADR D7 §4). A `sleep`/`wait` used to poll
+# an async-dispatched child (task-runner.md "Ожидание async-ребёнка") times
+# out on the Bash tool's own 120s default when its duration exceeds that —
+# that is timeout hygiene, not a blind retry of a failed command, and must
+# not be scored as one (issue #53).
+p2_exempt_patterns:
+  - "^\\s*(sleep|wait)\\b"
+
 # Roles whose contract does not start with `verdict:`. Empty since #20 (ADR
 # 0003, docs/adr/0003-verdicts-registry.md): doctor now guarantees every
 # role's return_format starts with `verdict:` (auditor/auditor-deep migrated

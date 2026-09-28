@@ -113,3 +113,33 @@
   `INDEX.md`: `doctor`'s own graph line gained a `(...; falls back to a
   manifest-independent check subset ... — #64, ADR-0001)` clause, refreshed
   Head SHA — no Status Summary change.
+- MAINTAIN run on `fix/async-wait-p2-exempt-53` / #53 wrote `score.md` (P1 in
+  the table above) for the first time — the component itself is not new
+  (`cli/internal/score/` predates this issue), but #53 is its first
+  guard-unrelated substantial change since bootstrap (every prior change to
+  this package was folded into `guard.md`'s "Score and stats integration"
+  per #27/ADR-0008, since it was only ever a `guard-events.jsonl` reader
+  before now), and the new P2-exemption/`busy-poll`-signal behavior is
+  exactly the kind of "how does scoring work and why doesn't it penalize
+  this" question this wiki exists to answer without sending a reader to the
+  Go source — same judgment call as the collector.md/apply.md bootstrap
+  writes and guard.md's retroactive add for #23. `score.md` documents the
+  full P1-P7 model (not just the #53 delta) since no prior version existed
+  to update surgically. It does **not** document `task-runner.md`'s agent
+  contract as its own wiki file — task-runner is one agent among many
+  covered in bulk by `profiles-base.md` (still P1, not yet written); #53's
+  task-runner.md change (the "Ожидание async-ребёнка" section) is quoted
+  and cross-referenced from `score.md`'s new "P2 exemption and the
+  busy-poll signal" section instead, since that section is what actually
+  enforces/detects the contract and is where a reader asking "why doesn't
+  P2 penalize `sleep`?" lands first — same precedent as guard.md folding in
+  `task-runner.md`/`pr-shepherd.md` prompt-diff descriptions for #30 rather
+  than waiting for `profiles-base.md`. No `apply.md` change: `p2_exempt_patterns`
+  rides through the existing `renderSchema`/`DeployTelemetry` path unchanged
+  (no new render code), the same way `mutating_bash_patterns` and
+  `verdict_exempt_roles` already do without a mention in `apply.md`; it is
+  documented in `score.md` instead, which is the actual consumer of the key.
+  `INDEX.md`: `score` row got its `score.md` Doc link, dependency-graph
+  annotation gained the `p2_exempt_patterns`/schema.json clause, moved out
+  of "Undocumented", refreshed Head SHA — no Status Summary count change
+  otherwise (score was already `implemented`).

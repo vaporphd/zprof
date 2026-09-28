@@ -107,7 +107,17 @@ func computeP1(run Run, cfg Config) metric {
 }
 
 // P2 — blind retries: same (tool, input_hash) repeated after an error with no
-// mutating event in between. Order per event: check, then reset-if-mutating, then record.
+// mutating event in between. Order per event: exempt-skip, then check, then
+// reset-if-mutating, then record.
+//
+// sleep/wait Bash commands (cfg.IsP2Exempt) are skipped entirely — they
+// never enter the lastErr/targets bookkeeping at all, in either direction:
+// a timed-out `sleep 180` neither counts as a repeat of a prior one nor
+// primes lastErr for a later, unrelated command sharing its key. These are
+// async-child wait loops (task-runner.md "Ожидание async-ребёнка"), not
+// blind retries of a failed action — a `sleep` erroring out on the Bash
+// tool's own 120s default timeout is timeout hygiene, not a bug (issue
+// #53).
 func computeP2(run Run, cfg Config) metric {
 	m := newMetric()
 	roles := roleIndex(run)
@@ -115,6 +125,9 @@ func computeP2(run Run, cfg Config) metric {
 	for id, evs := range run.Events {
 		lastErr := map[string]bool{}
 		for _, e := range evs {
+			if cfg.IsP2Exempt(e.Tool, e.Target) {
+				continue
+			}
 			key := e.Tool + "|" + e.InputHash
 			if lastErr[key] {
 				m.value++
@@ -128,7 +141,14 @@ func computeP2(run Run, cfg Config) metric {
 		}
 	}
 	if m.value > 0 {
-		m.detail = fmt.Sprintf("%s: %d× `%s` без правок между", topRole(m.byRole), int(m.value), truncate(topKey(targets), 40))
+		top := topKey(targets)
+		// Count of the *specific* top target, not the run-wide m.value —
+		// with several distinct repeated targets the two diverge (e.g. a
+		// card previously read "15× `sleep 180`" when only 12 of the 15
+		// total repeats were that exact command; the other 3 were `sleep
+		// 120`). Fixed alongside the #53 exemption while this function was
+		// already open.
+		m.detail = fmt.Sprintf("%s: %d× `%s` без правок между", topRole(m.byRole), targets[top], truncate(top, 40))
 	}
 	return m
 }
@@ -271,6 +291,72 @@ func computeP7(run Run, cfg Config) metric {
 		if m.guard > 0 {
 			m.detail += fmt.Sprintf(" (guard: %d deny)", m.guard)
 		}
+	}
+	return m
+}
+
+// busyPollThreshold: a streak of this many consecutive read-only Bash calls
+// (no sleep/wait, no mutation between them — cfg.IsP2Exempt / isMutating)
+// is still "one combined status check" territory (task-runner.md "Ожидание
+// async-ребёнка" explicitly allows one command like `git log -1 --oneline
+// && git status --porcelain`, i.e. one Bash call, but a human occasionally
+// splits that into 2-3 quick calls without it being a real busy-loop). The
+// 4th call onward in the same unbroken streak is scored.
+const busyPollThreshold = 3
+
+// computeBusyPoll — signal (not a P1-P7 penalty, no weight/saturation, does
+// not affect Score): consecutive read-only Bash calls issued back-to-back
+// with no `sleep`/`wait` (cfg.IsP2Exempt) and no mutating command between
+// them. This is the busy-poll pattern task-runner.md now forbids in
+// "Ожидание async-ребёнка" — checking an async child's status by spamming
+// `date`/`git log`/`git diff` instead of sleeping between checks (issue
+// #53 AC5). None of P1-P7 catch it: these calls are not errors (P1), not
+// retries of a failed command (P2 — is_error need not be true here at
+// all), and not Reads (P3).
+//
+// Deliberately not gated on is_error like P2 — the whole point of this
+// signal is successful, well-formed status checks fired too rapidly, which
+// P1/P2 have no way to see at all.
+func computeBusyPoll(run Run, cfg Config) metric {
+	m := newMetric()
+	roles := roleIndex(run)
+	maxStreak := 0
+	var maxStreakRole, maxStreakTarget string
+	for id, evs := range run.Events {
+		streak := 0
+		for _, e := range evs {
+			// isMutating first and unconditionally: an Edit/Write between
+			// two Bash checks is real work and must reset the streak even
+			// though it isn't itself a Bash event (the opposite ordering
+			// let Edit slide past silently and inflated the streak across
+			// it — caught by testdata/run1's build-fix-retest loop, which
+			// must NOT read as busy-poll).
+			if isMutating(e, cfg) {
+				streak = 0
+				continue
+			}
+			if e.Tool != "Bash" {
+				continue // non-mutating, non-Bash (Read, Grep, ...) neither extends nor breaks the Bash streak
+			}
+			if cfg.IsP2Exempt(e.Tool, e.Target) {
+				streak = 0
+				continue
+			}
+			streak++
+			if streak > busyPollThreshold {
+				m.value++
+				m.byRole[roles[id]]++
+			}
+			if streak > maxStreak {
+				maxStreak = streak
+				maxStreakRole = roles[id]
+				maxStreakTarget = e.Target
+			}
+		}
+	}
+	if m.value > 0 {
+		m.detail = fmt.Sprintf("%s: %d Bash подряд без sleep/правок между (посл. `%s`)",
+			maxStreakRole, maxStreak, truncate(maxStreakTarget, 40))
 	}
 	return m
 }

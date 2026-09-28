@@ -28,7 +28,7 @@
 - [x] chore: переразвернуть .claude/zprof-collect.py после #36 (#45)
 - [x] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
 - [x] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет — PR #61
-- [ ] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
+- [x] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 - [ ] fix(base): north-star-auditor при отсутствии NORTH_STAR.md — детерминированный skip, гейт условный (#60)
 - [ ] fix(base): раннер/pr-shepherd оставляют worktree main в scratchpad; checkout не на main после run (#62)
 
@@ -45,3 +45,4 @@
 - [x] fix(cli): zprof doctor без .zprof.yaml — режим telemetry-only (#64) — перед #31
 - [x] test(base): shakedown — ноль ложных deny guard на штатном маршруте (#31) — depends: #24, #25, #26, #27, #28, #29, #30
 - [ ] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23
+- [ ] fix(base): guard — readonly_mutation не учитывает allow_write_prefixes для мутирующих Bash (#67) — follow-up к #31
