@@ -182,6 +182,70 @@ def test_merge_preflight_api_pulls_merge_placeholder_repo(tmp_path, monkeypatch)
     assert fake.calls[0][0] == ["gh", "pr", "view", "12", "--json", _MERGE_JSON_FIELDS]
 
 
+def test_merge_preflight_api_pulls_merge_without_repos_prefix(tmp_path, monkeypatch):
+    """`_merge_target_from_api_args`'s third branch (ADR-0006 F3): a token that
+    matches `/pulls/<N>/merge` but not the full `repos/<owner>/<repo>/...`
+    shape falls back to `(number, None)` -- gh resolves the default repo of
+    `wd`, same as no `-R` at all."""
+    _write_config(tmp_path, build_guard_config())
+    fake = _run_recorder((0, _pr_json(number=12, body="Closes #1\n\n## Gate\nx")))
+    monkeypatch.setattr(zprof_guard, "_run", fake)
+    payload = _payload("Bash", _bash("gh api /pulls/12/merge"), role="pr-shepherd", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None
+    assert fake.calls[0][0] == ["gh", "pr", "view", "12", "--json", _MERGE_JSON_FIELDS]
+
+
+def test_merge_preflight_no_invocation_inside_quoted_text(tmp_path, monkeypatch):
+    """`echo "gh pr merge 7"` -- the coarse rule regex fires on the literal
+    text (it's just `re.search` on the whole command), but `_invocations`
+    finds zero real `gh pr merge` invocations (it's one quoted token) ->
+    `targets == []` -> the evaluator returns `False` without calling `gh` or
+    writing any event (ADR-0006 F2/F3, mirrors the analogous
+    `pr_create_gate` case)."""
+    _write_config(tmp_path, build_guard_config())
+    monkeypatch.setattr(zprof_guard, "_run", _fail_if_called)
+    payload = _payload("Bash", _bash('echo "gh pr merge 7"'), role="pr-shepherd", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None
+    assert _read_events(tmp_path) == []
+
+
+def test_merge_preflight_parse_error_selector_starts_with_dash(tmp_path, monkeypatch):
+    """`gh pr merge -- -7` -- after `--` every token is positional, so the
+    first one becomes `selector` even though it starts with `-`; the
+    injection guard in `_parse_merge_args` then marks `ok=False` and the
+    target is skipped via `_note_unverified` (parse_error), never reaching
+    `_run` (ADR-0006 F3 docstring: "injection guard")."""
+    _write_config(tmp_path, build_guard_config())
+    monkeypatch.setattr(zprof_guard, "_run", _fail_if_called)
+    payload = _payload("Bash", _bash("gh pr merge -- -7"), role="pr-shepherd", cwd=tmp_path,
+                        session_id="sess-merge-dash-selector")
+    assert zprof_guard.pre_tool(payload) is None
+
+    events = _read_events(tmp_path)
+    matching = [e for e in events if e["decision"] == "allow_unverified"]
+    assert len(matching) == 1
+    assert matching[0]["rule"] == "merge_preflight"
+    assert matching[0]["detail"] == "parse_error: selector"
+
+
+def test_merge_preflight_parse_error_repo_starts_with_dash(tmp_path, monkeypatch):
+    """`gh pr merge 7 -R -x` -- `-R`'s value is blindly the next token, so a
+    caller could smuggle `-x` in as `repo`; the same injection guard catches
+    it via `repo.startswith("-")` and skips the target without calling
+    `_run` (ADR-0006 F3)."""
+    _write_config(tmp_path, build_guard_config())
+    monkeypatch.setattr(zprof_guard, "_run", _fail_if_called)
+    payload = _payload("Bash", _bash("gh pr merge 7 -R -x"), role="pr-shepherd", cwd=tmp_path,
+                        session_id="sess-merge-dash-repo")
+    assert zprof_guard.pre_tool(payload) is None
+
+    events = _read_events(tmp_path)
+    matching = [e for e in events if e["decision"] == "allow_unverified"]
+    assert len(matching) == 1
+    assert matching[0]["rule"] == "merge_preflight"
+    assert matching[0]["detail"] == "parse_error: selector"
+
+
 def test_merge_preflight_repo_flag_forms(tmp_path, monkeypatch):
     _write_config(tmp_path, build_guard_config())
     for command in ("gh pr merge 7 -R o/r", "gh pr merge 7 -Ro/r"):
