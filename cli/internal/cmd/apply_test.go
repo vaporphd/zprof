@@ -85,6 +85,89 @@ func TestApplyTelemetryOnlyDeploysWithoutOverlay(t *testing.T) {
 	require.True(t, os.IsNotExist(err), "CLAUDE.md must not be touched by --telemetry-only")
 }
 
+// TestApplyTelemetryOnlyZprofYamlHandling is table-driven over how
+// --telemetry-only's guard layer resolution reacts to the project's
+// .zprof.yaml (ADR 0009 I7): a missing file falls back to base-only
+// guard-enabled defaults, a valid file honors guard.enabled, and any other
+// manifest.LoadProject error (e.g. a YAML syntax error) must fail the
+// command rather than silently falling back to guard-enabled (issue #28
+// review P1-1).
+func TestApplyTelemetryOnlyZprofYamlHandling(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err)
+	profilesDir := filepath.Join(root, "profiles")
+
+	cases := []struct {
+		name        string
+		zprofYaml   string // "" = no file written
+		wantErr     bool
+		wantGuardOn bool
+	}{
+		{
+			name:        "no .zprof.yaml falls back to base-only guard-enabled",
+			zprofYaml:   "",
+			wantErr:     false,
+			wantGuardOn: true,
+		},
+		{
+			name:        "valid .zprof.yaml with guard.enabled: false disables guard",
+			zprofYaml:   "overlays: []\nlanguage: ru\nguard:\n  enabled: false\n",
+			wantErr:     false,
+			wantGuardOn: false,
+		},
+		{
+			name:      "malformed .zprof.yaml fails the command instead of defaulting guard on",
+			zprofYaml: "overlays: [ios-swift\nlanguage: ru\n",
+			wantErr:   true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proj := t.TempDir()
+			origCwd, err := os.Getwd()
+			require.NoError(t, err)
+			require.NoError(t, os.Chdir(proj))
+			t.Cleanup(func() { require.NoError(t, os.Chdir(origCwd)) })
+
+			t.Setenv("ZPROF_REPO", profilesDir)
+
+			if tc.zprofYaml != "" {
+				require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte(tc.zprofYaml), 0o644))
+			}
+
+			c := NewApplyCmd()
+			c.SilenceUsage = true
+			c.SilenceErrors = true
+			c.SetArgs([]string{"--telemetry-only"})
+			err = c.Execute()
+
+			if tc.wantErr {
+				require.Error(t, err)
+				_, statErr := os.Stat(filepath.Join(proj, ".claude", "guard.json"))
+				require.True(t, os.IsNotExist(statErr), "guard.json must not be written when .zprof.yaml fails to parse")
+				return
+			}
+			require.NoError(t, err)
+
+			_, guardJSONErr := os.Stat(filepath.Join(proj, ".claude", "guard.json"))
+			_, guardScriptErr := os.Stat(filepath.Join(proj, ".claude", "zprof-guard.py"))
+			settingsData, settingsErr := os.ReadFile(filepath.Join(proj, ".claude", "settings.local.json"))
+			require.NoError(t, settingsErr)
+
+			if tc.wantGuardOn {
+				require.NoError(t, guardJSONErr, "guard.json must be written when guard is enabled")
+				require.NoError(t, guardScriptErr, "zprof-guard.py must be written when guard is enabled")
+				require.Contains(t, string(settingsData), "zprof-guard.py", "guard hooks must be present when guard is enabled")
+			} else {
+				require.True(t, os.IsNotExist(guardJSONErr), "guard.json must not be written when guard is disabled")
+				require.True(t, os.IsNotExist(guardScriptErr), "zprof-guard.py must not be written when guard is disabled")
+				require.NotContains(t, string(settingsData), "zprof-guard.py", "guard hooks must not be present when guard is disabled")
+			}
+		})
+	}
+}
+
 func TestApplyTelemetryOnlyDryRunWritesNothing(t *testing.T) {
 	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
 	require.NoError(t, err)

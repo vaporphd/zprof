@@ -1,13 +1,13 @@
 # Component Index
 
-Generated: 2026-09-28 · Head: `b3b00abd8891a504af8afdc6966f62f0b4b43bb4`
+Generated: 2026-09-28 · Head: `4f8b32ae3153c9ec436f962da78bb5b31dd17ca0`
 
 ## Components
 
 | Component | Path | Status | Depends | Doc |
 |-----------|------|--------|---------|-----|
 | collector | `profiles/base/zprof-collect.py` | implemented | profiles-base | [collector.md](collector.md) |
-| guard | `profiles/base/zprof-guard.py`, `profiles/base/guard.yaml` | in-progress | profiles-base | [guard.md](guard.md) |
+| guard | `profiles/base/zprof-guard.py`, `profiles/base/guard.yaml` | implemented | profiles-base | [guard.md](guard.md) |
 | apply | `cli/internal/apply/`, `cli/internal/cmd/apply.go` | implemented | overlay, manifest, managed, models, agents, fsutil, verdicts | [apply.md](apply.md) |
 | overlay | `cli/internal/overlay/` | implemented | manifest | — |
 | manifest | `cli/internal/manifest/` | implemented | fsutil, models | — |
@@ -38,9 +38,11 @@ written yet; treat them as provisional until `PLAN.md`'s P1/P2/P3 docs land.
 ```
 profiles-base
 ├── collector → [profiles-base]
-├── guard → [profiles-base]   (not yet an apply dependant — deploy is #28;
-│                              score/stats read its .agentlog/guard-events.jsonl
-│                              output as a data contract, not a Go import — #27, ADR-0008)
+├── guard → [profiles-base]   (apply dependant since #28 — deployGuard reads
+│                              GuardScript/GuardSchema as artifacts, not a Go
+│                              import, ADR-0009; score/stats read its
+│                              .agentlog/guard-events.jsonl output as a data
+│                              contract, not a Go import — #27, ADR-0008)
 └── overlays → [profiles-base]
 
 fsutil
@@ -51,7 +53,7 @@ fsutil
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
 │                                        guard-events.jsonl as data, not Go imports)
-└── apply → [overlay, manifest, managed, models, agents, fsutil, verdicts]  (deploys collector as an artifact, not a Go import)
+└── apply → [overlay, manifest, managed, models, agents, fsutil, verdicts]  (deploys collector + guard as artifacts, not Go imports — #28, ADR-0009)
     └── wizard → [apply, detect, managed, manifest, overlay]
         └── cmd → [apply, doctor, eval, managed, manifest, models, overlay, score, stats, sync, wizard]
             (cmd/stats.go also reads guard-events.jsonl directly via internal/score — #27)
@@ -63,21 +65,24 @@ verdicts  (leaf; loads/validates profiles/base/verdicts.yaml — ADR-0003)
 
 ## Status Summary
 
-- Implemented: 20
-- In progress: 1 (guard — #23 lands the frame + stop-list/read-only rules; #24
-  lands the four §5.2/§5.3 context evaluators (`head_on_remote`,
-  `linked_worktree`, `write_outside_repo`, `branch_pr_merged`) and the
-  `context_error` journal event; #25 (ADR-0006) lands `merge_preflight`/
-  `pr_create_gate` and the `allow_unverified` journal event — every
-  `guard.yaml` rule is now active; #26 (ADR-0007) lands the `subagent-stop`
+- Implemented: 21 (as of `feat/guard-apply-deploy-28` / #28, ADR-0009: `guard`
+  moved from in-progress to implemented — #23 landed the frame +
+  stop-list/read-only rules; #24 the four §5.2/§5.3 context evaluators
+  (`head_on_remote`, `linked_worktree`, `write_outside_repo`,
+  `branch_pr_merged`) and the `context_error` journal event; #25 (ADR-0006)
+  `merge_preflight`/`pr_create_gate` and the `allow_unverified` journal
+  event — every `guard.yaml` rule active; #26 (ADR-0007) the `subagent-stop`
   mode — a `return_format` validator on `SubagentStop`, independent of
   `guard.yaml`/`CONTEXTS` — plus the `subagent-stop`/`format_unfixed` journal
-  events; #27 (ADR-0008) lands the Go-side read of `guard-events.jsonl` in
+  events; #27 (ADR-0008) the Go-side read of `guard-events.jsonl` in
   `zprof score` (P7 counts guard `deny`/`block` rows, card shows `(guard: N
-  deny)`) and `zprof stats` (`guard: top rules` stderr line) — the guard
-  script itself is unchanged; #28 remains: `zprof apply` deployment of the
-  hook into `.claude/`, still blocking both guard modes — and therefore #27's
-  readers — from seeing any data in a real project)
+  deny)`) and `zprof stats` (`guard: top rules` stderr line); #28 (ADR-0009)
+  `zprof apply`/`zprof sync`/`--telemetry-only` deploying `.claude/zprof-guard.py`,
+  rendering `.claude/guard.json` from the three-layer merge, and upserting the
+  `PreToolUse`/`SubagentStop` hooks + `permissions.deny` — the six-issue
+  milestone #23–#28 is now complete and a real project's `zprof apply` writes
+  `.agentlog/guard-events.jsonl`, so #27's readers have something to read)
+- In progress: 0
 - Planned: 0
 - Undocumented (has code, no wiki): 18 (overlay, manifest, managed, score, stats, eval,
   agents, models, detect, doctor, verdicts, wizard, sync, fsutil, cmd, profiles-base,

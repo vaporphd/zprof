@@ -145,11 +145,15 @@ func Apply(opts ApplyOpts) (*ApplyResult, error) {
 	res.StateFiles = state
 
 	// 5.5/5.6. Deploy telemetry: zprof-collect.py + .agentlog/schema.json,
-	// then upsert the telemetry hooks into .claude/settings.local.json so
-	// the collector actually fires (SubagentStop/Stop/SessionStart).
-	// Idempotent JSON upsert: never clobbers hooks or keys the user added
-	// by hand. Shared with `zprof apply --telemetry-only` (DeployTelemetry).
-	telemetryFiles, err := DeployTelemetry(opts.ProjectDir, opts.Base)
+	// then guard (zprof-guard.py + guard.json, ADR 0009), then upsert the
+	// telemetry + guard hooks into .claude/settings.local.json so the
+	// collector and guard actually fire. Idempotent JSON upsert: never
+	// clobbers hooks or keys the user added by hand. Shared with
+	// `zprof apply --telemetry-only` (DeployTelemetry).
+	telemetryFiles, err := DeployTelemetry(opts.ProjectDir, opts.Base, GuardLayers{
+		Overlays: opts.Overlays,
+		Project:  opts.Project.Guard,
+	})
 	if err != nil {
 		return nil, err
 	}

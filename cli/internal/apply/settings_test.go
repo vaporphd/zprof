@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,4 +160,259 @@ func TestEnsureHooksUpgradesOldStopCommand(t *testing.T) {
 
 	require.NoError(t, EnsureHooks(dir)) // and it stays stable
 	require.Len(t, stopCommands(t, dir), 1)
+}
+
+// --- guard hooks (ADR 0009 I8) --------------------------------------------
+
+func readHooks(t *testing.T, dir string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	hooks, _ := settings["hooks"].(map[string]any)
+	require.NotNil(t, hooks)
+	return hooks
+}
+
+func TestEnsureGuardSettings_UpsertsBothHooksWithMatcher(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+
+	hooks := readHooks(t, dir)
+	require.Contains(t, hooks, "PreToolUse")
+	require.Contains(t, hooks, "SubagentStop")
+
+	preEntries := hooks["PreToolUse"].([]any)
+	require.Len(t, preEntries, 1)
+	pre := preEntries[0].(map[string]any)
+	require.Equal(t, "Bash|Edit|Write|MultiEdit|NotebookEdit", pre["matcher"])
+	require.Contains(t, hookCommand(pre), "zprof-guard.py")
+	require.Contains(t, hookCommand(pre), "pre-tool")
+
+	subEntries := hooks["SubagentStop"].([]any)
+	require.Len(t, subEntries, 1)
+	sub := subEntries[0].(map[string]any)
+	require.NotContains(t, sub, "matcher", "SubagentStop guard hook has no matcher")
+	require.Contains(t, hookCommand(sub), "subagent-stop")
+}
+
+func TestEnsureGuardSettings_SubagentStopCoexistsWithCollector(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, EnsureHooks(dir))                    // writes the collector SubagentStop entry
+	require.NoError(t, ensureGuardSettings(dir, true, nil)) // adds the guard one alongside it
+
+	hooks := readHooks(t, dir)
+	entries := hooks["SubagentStop"].([]any)
+	require.Len(t, entries, 2, "collector and guard SubagentStop entries coexist, not merged")
+
+	var sawCollector, sawGuard bool
+	for _, e := range entries {
+		cmd := hookCommand(e)
+		if strings.Contains(cmd, "zprof-collect.py") {
+			sawCollector = true
+		}
+		if strings.Contains(cmd, "zprof-guard.py") {
+			sawGuard = true
+		}
+	}
+	require.True(t, sawCollector)
+	require.True(t, sawGuard)
+
+	// Re-running both is idempotent: still exactly 2 entries, not 4.
+	require.NoError(t, EnsureHooks(dir))
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+	hooks = readHooks(t, dir)
+	require.Len(t, hooks["SubagentStop"].([]any), 2)
+}
+
+func TestEnsureGuardSettings_UpgradesStaleMatcherInPlace(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+
+	// Simulate an older matcher shape on disk.
+	settingsFile := filepath.Join(dir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsFile)
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	hooks := settings["hooks"].(map[string]any)
+	pre := hooks["PreToolUse"].([]any)
+	pre[0].(map[string]any)["matcher"] = "Bash"
+	out, err := json.MarshalIndent(settings, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(settingsFile, out, 0o644))
+
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+	hooks = readHooks(t, dir)
+	entries := hooks["PreToolUse"].([]any)
+	require.Len(t, entries, 1, "upgraded in place, not duplicated")
+	require.Equal(t, "Bash|Edit|Write|MultiEdit|NotebookEdit", entries[0].(map[string]any)["matcher"])
+}
+
+func TestEnsureGuardSettings_DisabledRemovesGuardHooksOnly(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, EnsureHooks(dir))
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+
+	require.NoError(t, ensureGuardSettings(dir, false, nil))
+	hooks := readHooks(t, dir)
+	require.NotContains(t, hooks, "PreToolUse", "empty event removed entirely")
+	subEntries := hooks["SubagentStop"].([]any)
+	require.Len(t, subEntries, 1, "only the guard entry removed, collector's stays")
+	require.Contains(t, hookCommand(subEntries[0]), "zprof-collect.py")
+}
+
+func TestEnsureGuardSettings_PermissionsDenyUpsertNoDupsForeignPreserved(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+	existing := map[string]any{
+		"permissions": map[string]any{
+			"allow": []any{"Read"},
+			"deny":  []any{"Bash(rm -rf /)"},
+		},
+	}
+	data, err := json.MarshalIndent(existing, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), data, 0o644))
+
+	deny := []string{"Bash(git push --force*)", "Bash(git push --force*)"} // dup on purpose
+	require.NoError(t, ensureGuardSettings(dir, true, deny))
+	require.NoError(t, ensureGuardSettings(dir, true, deny)) // idempotent
+
+	out, err := os.ReadFile(filepath.Join(claudeDir, "settings.local.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(out, &settings))
+	perms := settings["permissions"].(map[string]any)
+	require.ElementsMatch(t, []string{"Read"}, toStringSlice(perms["allow"]))
+	require.ElementsMatch(t, []string{"Bash(rm -rf /)", "Bash(git push --force*)"}, toStringSlice(perms["deny"]))
+}
+
+func TestEnsureGuardSettings_PermissionsDenyRemovalKeepsForeign(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, ensureGuardSettings(dir, true, []string{"Bash(git push --force*)", "Bash(gh pr merge --admin*)"}))
+
+	// A user (or another tool) adds a foreign deny entry by hand.
+	settingsFile := filepath.Join(dir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(settingsFile)
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	perms := settings["permissions"].(map[string]any)
+	perms["deny"] = append(perms["deny"].([]any), "Bash(curl evil.sh)")
+	out, err := json.MarshalIndent(settings, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(settingsFile, out, 0o644))
+
+	require.NoError(t, ensureGuardSettings(dir, false, []string{"Bash(git push --force*)", "Bash(gh pr merge --admin*)"}))
+
+	data, err = os.ReadFile(settingsFile)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &settings))
+	permsRaw, ok := settings["permissions"]
+	require.True(t, ok, "permissions key itself is never deleted")
+	perms = permsRaw.(map[string]any)
+	require.Equal(t, []string{"Bash(curl evil.sh)"}, toStringSlice(perms["deny"]))
+}
+
+func TestEnsureGuardSettings_EnabledEmptyDenyCreatesNoKeys(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+	require.NoError(t, err)
+	var settings map[string]any
+	require.NoError(t, json.Unmarshal(data, &settings))
+	require.NotContains(t, settings, "permissions")
+}
+
+// TestSubagentStopHooks_CollectorAndGuardUpgradeIndependently pins ADR 0009
+// I8's zprofHookIndex substring-match claim directly: on the SubagentStop
+// event, where both the collector and guard hooks land, a stale command (not
+// just a stale matcher) must be upgraded in place by its own owner
+// (EnsureHooks for zprof-collect.py, ensureGuardSettings for zprof-guard.py)
+// without the other owner's call touching it.
+func TestSubagentStopHooks_CollectorAndGuardUpgradeIndependently(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+
+	staleCollector := map[string]any{
+		"hooks": []any{map[string]any{"type": "command", "command": "OLD zprof-collect.py subagent-stop"}},
+	}
+	// A guard SubagentStop entry should never carry a matcher; this
+	// simulates a stale/corrupt one alongside a stale command, so upgrade
+	// must fix both.
+	staleGuard := map[string]any{
+		"hooks":   []any{map[string]any{"type": "command", "command": "OLD zprof-guard.py subagent-stop"}},
+		"matcher": "SHOULD_NOT_BE_HERE",
+	}
+	initial := map[string]any{
+		"hooks": map[string]any{"SubagentStop": []any{staleCollector, staleGuard}},
+	}
+	data, err := json.MarshalIndent(initial, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), data, 0o644))
+
+	// EnsureHooks must upgrade only the collector entry.
+	require.NoError(t, EnsureHooks(dir))
+	hooks := readHooks(t, dir)
+	entries := hooks["SubagentStop"].([]any)
+	require.Len(t, entries, 2, "no duplication, no entry dropped")
+
+	var collectorEntry, guardEntry map[string]any
+	for _, e := range entries {
+		m := e.(map[string]any)
+		if strings.Contains(hookCommand(m), "zprof-collect.py") {
+			collectorEntry = m
+		}
+		if strings.Contains(hookCommand(m), "zprof-guard.py") {
+			guardEntry = m
+		}
+	}
+	require.NotNil(t, collectorEntry)
+	require.NotNil(t, guardEntry)
+	require.Equal(t, fmt.Sprintf(collectorHookTemplate, "subagent-stop"), hookCommand(collectorEntry),
+		"stale collector command upgraded in place")
+	require.Equal(t, "OLD zprof-guard.py subagent-stop", hookCommand(guardEntry),
+		"guard entry untouched by EnsureHooks")
+	require.Equal(t, "SHOULD_NOT_BE_HERE", guardEntry["matcher"],
+		"guard entry's stale matcher untouched by EnsureHooks")
+
+	// ensureGuardSettings must now upgrade only the guard entry, leaving the
+	// already-fresh collector entry exactly as EnsureHooks left it.
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+	hooks = readHooks(t, dir)
+	entries = hooks["SubagentStop"].([]any)
+	require.Len(t, entries, 2, "still no duplication")
+
+	collectorEntry, guardEntry = nil, nil
+	for _, e := range entries {
+		m := e.(map[string]any)
+		if strings.Contains(hookCommand(m), "zprof-collect.py") {
+			collectorEntry = m
+		}
+		if strings.Contains(hookCommand(m), "zprof-guard.py") {
+			guardEntry = m
+		}
+	}
+	require.NotNil(t, collectorEntry)
+	require.NotNil(t, guardEntry)
+	require.Equal(t, fmt.Sprintf(collectorHookTemplate, "subagent-stop"), hookCommand(collectorEntry),
+		"collector entry untouched by ensureGuardSettings")
+	require.Equal(t, fmt.Sprintf(guardHookTemplate, "subagent-stop"), hookCommand(guardEntry),
+		"stale guard command upgraded in place")
+	require.NotContains(t, guardEntry, "matcher", "stale guard matcher cleared on upgrade")
+}
+
+func toStringSlice(v any) []string {
+	list, _ := v.([]any)
+	out := make([]string, 0, len(list))
+	for _, item := range list {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out
 }

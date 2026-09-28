@@ -1,0 +1,17 @@
+# Test-fixture stub for guard.yaml. The real config lives at
+# profiles/base/guard.yaml; this stub only needs enough shape for
+# overlay.LoadBase() and apply.deployGuard() tests to exercise the merge and
+# render path, not to mirror the real rule catalog.
+version: 1
+readonly_roles: [auditor]
+merge_roles: [pr-shepherd]
+allow_write_prefixes: ["$CLAUDE_PROJECT_DIR"]
+permissions_deny:
+  - "Bash(git push --force*)"
+exempt_roles: {}
+rules:
+  - id: force_push
+    tools: [Bash]
+    match:
+      - '\bgit\s+push\b.*(\s-f\b|\s--force\b)'
+    reason: "force-push запрещён стоп-листом"

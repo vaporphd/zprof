@@ -46,6 +46,11 @@ type ProjectManifest struct {
 	// from telemetry.yaml / the compiled-in table; enabled unless
 	// `enabled: false` is set explicitly.
 	Score *ScoreConfig `yaml:"score,omitempty"`
+
+	// Guard configures the project layer of the three-layer guard.yaml
+	// merge (ADR 0009): base -> overlay -> this. Nil = defaults; enabled
+	// unless `enabled: false` is set explicitly (GuardConfig.IsEnabled).
+	Guard *GuardConfig `yaml:"guard,omitempty"`
 }
 
 // AuditConfig controls the blocking auditor in task-runner's dispatch loop.
@@ -82,6 +87,44 @@ type ScoreConfig struct {
 type ScoreThresholds struct {
 	Ideal int `yaml:"ideal,omitempty"`
 	Solid int `yaml:"solid,omitempty"`
+}
+
+// GuardConfig is the project layer of the three-layer guard.yaml merge
+// (base -> overlay -> project, ADR 0009). Only the fields set here override
+// or extend what base/overlay ship; the rest fall back to defaults.
+type GuardConfig struct {
+	// Enabled gates only deployment (writing zprof-guard.py/guard.json,
+	// upserting hooks and permissions.deny) — the merge itself always
+	// runs, so a broken overlay guard.yaml still fails apply even when
+	// Enabled is false (ADR 0009 I4). Nil means "on" — see IsEnabled.
+	Enabled *bool `yaml:"enabled,omitempty"`
+
+	// ExtraDenyBash, when non-empty, adds a synthetic `extra_deny` rule
+	// (tools: [Bash], match: this list) — a project-specific Bash
+	// stop-list on top of the base/overlay catalog.
+	ExtraDenyBash []string `yaml:"extra_deny_bash,omitempty"`
+
+	// MergeRoles replaces the merged merge_roles list wholesale when
+	// non-empty; empty/nil leaves the base+overlay concatenation
+	// untouched — an empty list here must never mean "nobody merges"
+	// (ADR 0009 I2).
+	MergeRoles []string `yaml:"merge_roles,omitempty"`
+
+	// ReadonlyRoles and AllowWriteOutside are appended (deduped) to the
+	// merged readonly_roles / allow_write_prefixes lists.
+	ReadonlyRoles     []string `yaml:"readonly_roles,omitempty"`
+	AllowWriteOutside []string `yaml:"allow_write_outside,omitempty"`
+
+	// ExemptRoles is unioned (per rule id, deduped) into the merged
+	// exempt_roles map.
+	ExemptRoles map[string][]string `yaml:"exempt_roles,omitempty"`
+}
+
+// IsEnabled reports whether guard deployment (files + hooks + deny) is
+// active for this project. A nil GuardConfig or a nil Enabled field means
+// "on" — the project has not opted out (ADR 0009 I4).
+func (g *GuardConfig) IsEnabled() bool {
+	return g == nil || g.Enabled == nil || *g.Enabled
 }
 
 // LoadProject reads and parses a project manifest (.zprof.yaml) at path.
@@ -143,6 +186,9 @@ func (m *ProjectManifest) CarryOverFrom(prev *ProjectManifest) {
 	}
 	if m.Score == nil {
 		m.Score = prev.Score
+	}
+	if m.Guard == nil {
+		m.Guard = prev.Guard
 	}
 }
 

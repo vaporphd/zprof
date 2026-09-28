@@ -90,7 +90,7 @@ func TestDeployTelemetry_SchemaJSONHasVerdictsKeyWhenBaseProvidesRegistry(t *tes
 	base.Verdicts = []byte(minimalVerdictsYAML)
 	projectDir := t.TempDir()
 
-	_, err := DeployTelemetry(projectDir, base)
+	_, err := DeployTelemetry(projectDir, base, GuardLayers{})
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filepath.Join(projectDir, ".agentlog", "schema.json"))
@@ -102,7 +102,7 @@ func TestDeployTelemetry_SchemaJSONHasVerdictsKeyWhenBaseProvidesRegistry(t *tes
 
 func TestDeployTelemetry_NoVerdictsYAMLMeansNoVerdictsKey(t *testing.T) {
 	projectDir := t.TempDir()
-	_, err := DeployTelemetry(projectDir, fullTelemetryBase())
+	_, err := DeployTelemetry(projectDir, fullTelemetryBase(), GuardLayers{})
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filepath.Join(projectDir, ".agentlog", "schema.json"))
@@ -199,7 +199,7 @@ func TestDeployTelemetry(t *testing.T) {
 			if tc.setup != nil {
 				tc.setup(t, projectDir)
 			}
-			written, err := DeployTelemetry(projectDir, tc.base)
+			written, err := DeployTelemetry(projectDir, tc.base, GuardLayers{})
 			if tc.wantErr {
 				require.Error(t, err)
 				return
@@ -218,9 +218,9 @@ func TestDeployTelemetryIdempotent(t *testing.T) {
 	projectDir := t.TempDir()
 	base := fullTelemetryBase()
 
-	_, err := DeployTelemetry(projectDir, base)
+	_, err := DeployTelemetry(projectDir, base, GuardLayers{})
 	require.NoError(t, err)
-	_, err = DeployTelemetry(projectDir, base)
+	_, err = DeployTelemetry(projectDir, base, GuardLayers{})
 	require.NoError(t, err)
 
 	data, err := os.ReadFile(filepath.Join(projectDir, ".claude", "settings.local.json"))
