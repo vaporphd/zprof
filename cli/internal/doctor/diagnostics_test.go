@@ -362,6 +362,65 @@ func TestCheckRouteAgentsExistSilentWithoutTaskRunner(t *testing.T) {
 	require.Empty(t, checkRouteAgentsExist(dir))
 }
 
+// `## Роутинг` is the last section in the file — no `## ` heading follows it
+// at all. sectionUntilNextH2's "no next heading found" fallback (return the
+// rest of the file verbatim) must still surface a missing, unwhitelisted
+// route agent instead of silently truncating to nothing.
+func TestCheckRouteAgentsExistRoutingSectionIsLastInFile(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	trContent := "---\nname: task-runner\n---\n\n" +
+		"## Роутинг\n\n" +
+		"| Тип | Цепочка |\n" +
+		"|---|---|\n" +
+		"| Новая фича | `ghost-agent → tester` |\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"), []byte(trContent), 0o644))
+
+	issues := checkRouteAgentsExist(dir)
+	require.Len(t, issues, 1)
+	require.Contains(t, issues[0].Message, `"ghost-agent"`)
+}
+
+// The `### Условные агенты маршрутов` whitelist paragraph is the very last
+// content in the file — no trailing blank line follows it. sectionParagraph's
+// "no next blank line found" fallback (return the rest of the file verbatim)
+// must still capture the whitelisted name instead of dropping it, which
+// would otherwise turn a legitimate conditional agent into a false warning.
+func TestCheckRouteAgentsExistWhitelistIsLastContentNoTrailingBlankLine(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	trContent := "---\nname: task-runner\n---\n\n" +
+		"## Роутинг\n\n" +
+		"| Тип | Цепочка |\n" +
+		"|---|---|\n" +
+		"| Новая фича | `ghost-agent → tester` |\n\n" +
+		"### Условные агенты маршрутов\n\n" +
+		"Эти агенты существуют только при определённом overlay: `ghost-agent`."
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"), []byte(trContent), 0o644))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
+// `## Роутинг` exists but its body is prose with no markdown table at all
+// (no line starts with `|`). There are no chain cells to parse, so the check
+// must stay silent rather than mis-parsing prose as a route or crashing.
+func TestCheckRouteAgentsExistSilentWhenRoutingSectionHasNoTable(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	trContent := "---\nname: task-runner\n---\n\n" +
+		"## Роутинг\n\n" +
+		"Маршрутизация описана в prose, таблицы нет — смотри AGENT_LOOP.md.\n\n" +
+		"## Правила диспатча\n\n- Один агент за раз.\n"
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"), []byte(trContent), 0o644))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
 func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {
 	dir := t.TempDir()
 	runs := filepath.Join(dir, ".zprof", "runs")
