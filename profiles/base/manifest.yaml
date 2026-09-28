@@ -8,6 +8,7 @@ tool_agents:
   - evaluator
   - evaluator-telemetry
   - expert-panel
+guard_doctrine: "Guard: стоп-лист, merge и формат ответа проверяет хук; на deny не ищи обход — верни `verdict: blocked` с reason"
 stop_list:
   - "force-push, rebase или amend опубликованной ветки"
   - "удаление несмерженных веток и тегов (удаление merged-ветки после squash-merge — штатное действие pr-shepherd)"

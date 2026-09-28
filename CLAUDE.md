@@ -22,6 +22,10 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 Прогресс задачи живёт в `.zprof/runs/<id>.md` — читай хвост по запросу, не
 весь файл.
 
+### Guard
+
+Guard: стоп-лист, merge и формат ответа проверяет хук; на deny не ищи обход — верни `verdict: blocked` с reason
+
 ### Свои правила
 Пиши ниже managed-блока — этот раздел не трогается при `zprof sync`.
 <!-- zprof:end doctrine -->
