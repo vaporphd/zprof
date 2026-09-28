@@ -5,7 +5,7 @@ Path: `profiles/base/zprof-guard.py` (rules: `profiles/base/guard.yaml`; tests:
   `profiles/base/tests/test_guard*.py`; deploy: `cli/internal/apply/guard.go`)
 Status: implemented
 Depends: [profiles-base]
-Dependants: [apply, score, stats]
+Dependants: [apply, score, stats, doctor]
 Exports: [pre_tool, subagent_stop, evaluate_rules, resolve_role, dispatch_id,
   normalize_command, working_dir, project_root, load_config, deny_output,
   write_event, main, TOOLS_GUARDED, CONTEXTS]
@@ -113,8 +113,20 @@ Key invariants:
     subtracts today's `permissions_deny`, not whatever was deployed
     historically; foreign `deny` entries and the rest of `permissions.*` are
     never touched (#28, ADR-0009 I4; `cli/internal/apply/settings.go:257-320`).
+  - `zprof doctor` (#29, design §10) diagnoses guard's deployed state entirely
+    read-only, off the same artifacts `deployGuard` writes — it never imports
+    `zprof-guard.py` or `guard.yaml`. `checkGuardDeployment` is the single
+    gate on `.zprof.yaml`'s `guard.enabled: false`: when set, it returns one
+    `info` Issue and skips `checkGuardHooks`/`checkGuardConfig`/
+    `checkPermissionsDeny` entirely, so a project that opted out isn't nagged
+    about a deployment it declined (`cli/internal/doctor/diagnostics.go:1131-1146`).
+    `checkRoleResolution` is the one guard-adjacent check that ignores that
+    gate — it inspects `~/.claude/projects/<slug>/*/subagents/*.meta.json` for
+    an `agentType` key regardless of `guard.enabled`, since role resolution
+    also feeds `resolve_role`'s non-guard callers
+    (`cli/internal/doctor/diagnostics.go:1247-1273`).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
-  §8.1–§8.4, §9, §11, §13
+  §8.1–§8.4, §9, §10, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
   read-only roles, merge gate, D5 `remote_ref_delete`/`remote_ref_delete_unmerged`
   role split) plus 30 tests in `test_guard_context.py` (the four #24 context
@@ -140,7 +152,17 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   separately in `cli/internal/apply/guard_test.go` (parse/merge/`$ref`-resolve/
   render, 30+ cases) and `guard_e2e_test.go` (a real `zprof-guard.py` subprocess
   denying `git push --force` after `deployGuard` writes it) — see `apply.md`'s
-  Test coverage entry for the full count.
+  Test coverage entry for the full count. #29's doctor checks are covered by
+  24 unit tests in `cli/internal/doctor/diagnostics_test.go` (5 for
+  `checkGuardHooks` — missing/partial/malformed-JSON, 4 for `checkGuardConfig`
+  — missing/malformed/empty-`rules`/populated, 5 for `checkPermissionsDeny`
+  — diffing incl. superset, 3 for `checkGuardDeployment` — the
+  `guard.enabled: false` gate, 7 for `checkRoleResolution` — incl.
+  unreadable/malformed `meta.json`) plus
+  `TestDiagnoseIncludesGuardAndRoleResolutionChecks` — `go test
+  ./internal/doctor/...` → 108 passed, 95.5% coverage (verified 2026-09-28,
+  `feat/doctor-guard-checks-29`@`d60e4a3`; `go test ./...` → 458 passed for the
+  Go module as a whole).
 
 ---
 
@@ -658,6 +680,40 @@ for the full decision record (why rules stay raw maps, why `$ref` resolution
 is a single post-merge pass, the exact `extra_deny` reason text, and why
 `enabled: false` leaves prior files on disk) — not duplicated here.
 
+### Doctor checks (`zprof doctor`, #29)
+
+`zprof doctor` (`cli/internal/doctor/diagnostics.go`) diagnoses guard's
+*deployed* state — the same artifacts `deployGuard` writes above — entirely
+read-only, five checks past design §10, appended at the end of `Diagnose()`'s
+existing 18-check list (`diagnostics.go:122-123`):
+
+| Check | Gate | Level | Reports |
+|---|---|---|---|
+| `checkGuardHooks` (`:985-1021`) | `.claude/zprof-guard.py` exists | warn | `settings.local.json` is missing either the `PreToolUse` or `SubagentStop` hook entry running `zprof-guard.py` (one unified message for "file missing" and "hooks incomplete" — unlike `checkTelemetryHooks`'s two separate messages, per AC1) |
+| `checkGuardConfig` (`:1036-1062`) | none — always runs | warn | `.claude/guard.json` missing, unparseable, or its `rules` list is empty |
+| `checkPermissionsDeny` (`:1083-1129`) | self-gates on a readable, non-empty `guard.json.permissions_deny` | warn | `settings.local.json`'s `permissions.deny` is missing one or more of those values, lists them by name |
+| `checkGuardDeployment` (`:1137-1146`) | `proj.Guard != nil && !proj.Guard.IsEnabled()` | info (gate) / aggregates the three above | when guard is disabled: `"guard disabled by project config"`, and the three checks above never run at all — a project that opted out isn't nagged about a deployment it declined |
+| `checkRoleResolution` (`:1247-1273`) | none — ignores `guard.enabled` | info | no `*/subagents/*.meta.json` with an `agentType` key found yet under `~/.claude/projects/<slug>/`, `slug` = project path with `/`→`-` |
+
+**`checkGuardConfig` deliberately has no `.claude/zprof-guard.py` gate**,
+unlike `checkGuardHooks` — an asymmetry from design §10's table, not an
+oversight: `deployGuard` only ever writes the script and `guard.json`
+together (`apply/guard.go:498-501`), so "script absent, `guard.json` present"
+doesn't happen via a normal `apply`. **`checkPermissionsDeny` self-gates
+instead of taking a gate parameter** — an unreadable/malformed `guard.json`
+is already reported by `checkGuardConfig`, so it stays silent (`nil`) rather
+than duplicate that warning; an empty `permissions_deny` list also yields
+`nil` (nothing to compare against). **`checkRoleResolution`'s `HOME` lookup
+uses `os.Getenv("HOME")`, not `os.UserHomeDir()`** — the deliberate deviation
+from `internal/eval.LocateSession`'s otherwise-identical slug algorithm, so
+tests can override it with `t.Setenv` (design §10, `plan-issue-29.md` item 8).
+
+`checkGuardHooks` reuses `hookArrayHasScript` (renamed from
+`hookArrayHasCollector` for this issue, `diagnostics.go:954-969`) — the same
+helper `checkTelemetryHooks` uses for `zprof-collect.py` — parameterized on
+the script substring instead of hardcoding it, a pure signature refactor that
+doesn't change `checkTelemetryHooks`'s own behavior.
+
 ### See also
 
 - [Collector](collector.md) — sibling hook in `profiles/base/`; `guard`'s `_input_hash`
@@ -667,6 +723,8 @@ is a single post-merge pass, the exact `extra_deny` reason text, and why
   "Deployment" above
 - `cli/internal/score/` — reads `guard-events.jsonl` (§7 format), no wiki file
   yet (P1 in `PLAN.md`); see "Score and stats integration" above
+- `cli/internal/doctor/` — diagnoses guard's deployed state read-only (§10),
+  no wiki file yet (P2 in `PLAN.md`); see "Doctor checks" above
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
 - [ADR-0005: guard — context-evaluators `head_on_remote`, `linked_worktree`, `write_outside_repo`, `branch_pr_merged`](../adr/0005-guard-context-evaluators.md)
 - [ADR-0006: guard — merge-гейт (`merge_preflight`) и PR-гейт (`pr_create_gate`), событие `allow_unverified`](../adr/0006-guard-merge-pr-gate.md)

@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-28 · Head: `4f8b32ae3153c9ec436f962da78bb5b31dd17ca0`
+Generated: 2026-09-28 · Head: `d60e4a3d714f11fe6ab1cea7c4e0eebdbacabbf2`
 
 ## Components
 
@@ -42,7 +42,10 @@ profiles-base
 │                              GuardScript/GuardSchema as artifacts, not a Go
 │                              import, ADR-0009; score/stats read its
 │                              .agentlog/guard-events.jsonl output as a data
-│                              contract, not a Go import — #27, ADR-0008)
+│                              contract, not a Go import — #27, ADR-0008;
+│                              doctor reads its deployed .claude/guard.json +
+│                              settings.local.json hook entries as data, not a
+│                              Go import — #29, design §10)
 └── overlays → [profiles-base]
 
 fsutil
@@ -50,6 +53,8 @@ fsutil
 │   ├── overlay → [manifest]
 │   ├── detect → [manifest]
 │   └── doctor → [agents, managed, manifest, models, overlay, verdicts]
+│       (+ reads guard's deployed .claude/guard.json/settings.local.json as
+│        data, not a Go import — #29)
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
 │                                        guard-events.jsonl as data, not Go imports)
