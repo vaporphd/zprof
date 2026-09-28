@@ -166,7 +166,7 @@ verdict: merged-stamped | verified-stamped | preflight-failed | delivery-failed 
 state-changing | ADR-EXCLUSION (<which, verbatim>)
 
 ## Handoff
-next: main-session (spec-maintainer + docs-writer next, once merged-stamped / verified-stamped)  |  implementer (<what to fix>)  |  docs-writer (no-test-command)  |  human (blocked-external / blocked-<reason>)
+next: main-session (spec-maintainer + docs-writer next, once merged-stamped / verified-stamped)  |  implementer (<what to fix>)  |  human (blocked-external / blocked-<reason>)
 ```
 
 Every claim in Checks MUST be backed by a command actually run this invocation.
