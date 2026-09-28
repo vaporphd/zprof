@@ -997,6 +997,89 @@ func TestCheckAgentlogNotTrackedSilentWithoutGitRepo(t *testing.T) {
 	require.Empty(t, checkAgentlogNotTracked(dir))
 }
 
+// --- git checkout hygiene (issue #62) -------------------------------------
+
+// runGitCheckoutHygieneCmd runs a git subcommand against dir and fails the
+// test immediately on error — a thin wrapper to keep the fixtures below
+// readable; mirrors the exec.Command("git", "-C", dir, ...) calls used
+// throughout this file for .agentlog/ fixtures.
+func runGitCheckoutHygieneCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	out, err := exec.Command("git", full...).CombinedOutput()
+	require.NoErrorf(t, err, "git %v: %s", args, out)
+}
+
+// initGitCheckoutHygieneRepo creates a git repo at dir on branch "main" with
+// one commit, so a feature branch and worktrees can be created against a
+// real ref. gitDefaultBranch falls back to "main" for a repo with no origin
+// remote, which is exactly this fixture's shape.
+func initGitCheckoutHygieneRepo(t *testing.T, dir string) {
+	t.Helper()
+	runGitCheckoutHygieneCmd(t, dir, "init", "-q", "-b", "main")
+	runGitCheckoutHygieneCmd(t, dir, "-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "-q", "-m", "init", "--allow-empty")
+}
+
+func TestCheckGitCheckoutHygieneCleanRepoOnDefaultBranchIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+
+	require.Empty(t, checkGitCheckoutHygiene(dir))
+}
+
+func TestCheckGitCheckoutHygieneWarnsOnNonDetachedWorktreeOnDefaultBranch(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGitCheckoutHygieneCmd(t, dir, "worktree", "add", wt, "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "non-detached"))
+	require.True(t, findIssue(issues, LevelWarn, wt))
+}
+
+func TestCheckGitCheckoutHygieneSilentOnDetachedWorktreeOnDefaultBranch(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGitCheckoutHygieneCmd(t, dir, "worktree", "add", "--detach", wt, "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.False(t, findIssue(issues, LevelWarn, "non-detached"))
+}
+
+func TestCheckGitCheckoutHygieneWarnsWhenMainNotOnDefaultBranchNoActiveRun(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+func TestCheckGitCheckoutHygieneSilentWhenMainNotOnDefaultBranchButRunActive(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".zprof", "runs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".zprof", "runs", "2026-09-29-x.md"),
+		[]byte("# task\nstarted: now\n\n| время | агент | verdict | artifact |\n"), 0o644))
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.False(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+func TestCheckGitCheckoutHygieneSilentWithoutGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	require.Empty(t, checkGitCheckoutHygiene(dir))
+}
+
 // --- telemetry hooks in settings.local.json (telemetry stage 1) ----------
 
 func telemetryHookJSON(events ...string) string {
