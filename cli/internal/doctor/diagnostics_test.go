@@ -1652,6 +1652,51 @@ func TestCheckRoleResolutionSilentWhenOneOfManyMetaHasAgentType(t *testing.T) {
 	require.Empty(t, checkRoleResolution(dir))
 }
 
+// HOME unset (empty string) short-circuits before any glob — there's
+// nothing to resolve against, and this must not be reported as a defect.
+func TestCheckRoleResolutionSilentWhenHomeUnset(t *testing.T) {
+	t.Setenv("HOME", "")
+	require.Empty(t, checkRoleResolution(t.TempDir()))
+}
+
+// A *.meta.json glob match that can't be read (e.g. a permissions quirk,
+// simulated here with a directory sharing the glob-matched name) is
+// skipped via continue rather than treated as a fatal error — the
+// function still falls through to the "unverified" info once every match
+// has failed to yield an agentType.
+func TestCheckRoleResolutionSkipsUnreadableMetaFile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents")
+	// A directory named *.meta.json matches the glob but fails os.ReadFile,
+	// exercising the read-error continue branch.
+	require.NoError(t, os.MkdirAll(filepath.Join(metaDir, "agent-1.meta.json"), 0o755))
+
+	issues := checkRoleResolution(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelInfo, issues[0].Level)
+	require.Equal(t, "role resolution unverified: no subagent meta found yet", issues[0].Message)
+}
+
+// A *.meta.json file that isn't valid JSON is skipped via continue rather
+// than failing the whole check — exercising the json.Unmarshal error
+// branch — and a later, valid file with agentType is still found.
+func TestCheckRoleResolutionSkipsMalformedMetaJSONThenFindsLaterMatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"), []byte("{not valid json"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-2.meta.json"),
+		[]byte(`{"agentType": "implementer"}`), 0o644))
+
+	require.Empty(t, checkRoleResolution(dir))
+}
+
 // --- Diagnose(): guard checks are wired in ---------------------------------
 
 // A project with no guard.yaml section and no zprof-guard.py/guard.json
