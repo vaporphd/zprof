@@ -168,12 +168,62 @@ def test_fallback_launch_map_split_stops(tmp_path):
 
 # --- AC1 negative: nothing resolves -> stays async_launched, loss recorded --
 
+UNKNOWN_TASK_ID = "a0unknown00000000"
+
+
 def test_unresolvable_notification_records_loss(tmp_path):
-    agentlog = _split_stops(tmp_path, with_meta=False, notif_task_id="a0unknown00000000")
+    """#34 AC1 + #36 P2-1: one logical notification (queue-operation + user
+    duplicate pair, ~15ms apart) is one loss, not two. Claude Code writes
+    every notification twice; the dedup for unresolved notifications must
+    happen before the loss counter is incremented.
+    """
+    agentlog = _split_stops(tmp_path, with_meta=False, notif_task_id=UNKNOWN_TASK_ID)
     rows = [r for r in _rows(agentlog) if r["dispatch_id"].endswith(":" + TUID)]
     assert [r["status"] for r in rows] == ["async_launched"]
     state = json.loads((agentlog / "state.json").read_text())
-    assert state.get("losses", 0) >= 1, "#34 AC1: unresolved notification must be counted as loss"
+    assert state.get("losses", 0) == 1, "#36 P2-1: duplicate notification pair must count as one loss"
+
+
+# --- #36 P2-1: two distinct unknown task_ids are independent losses --------
+
+def test_two_different_unresolvable_task_ids_count_separately(tmp_path):
+    """Dedup must be keyed by task_id (not a blanket skip) — two genuinely
+    different unresolved notifications still count as two losses."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    agentlog = proj / ".agentlog"
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    main = logs / f"{SESSION}.jsonl"
+    main.write_text("\n".join(_launch_lines()) + "\n")
+    _stop(main, agentlog, proj)
+    lines = _notification_lines("a0unknown00000001") + _notification_lines("a0unknown00000002")
+    with open(main, "a") as f:
+        f.write("\n".join(lines) + "\n")
+    _stop(main, agentlog, proj)
+    state = json.loads((agentlog / "state.json").read_text())
+    assert state.get("losses", 0) == 2, "#36: two distinct unresolved task_ids must not be deduped together"
+
+
+# --- #36 P2-1 in-process: repro straight from bug-hunter's report ----------
+
+def test_extract_dispatches_dedups_unresolved_notification_pair():
+    """In-process equivalent of the end-to-end split-Stop test above: the
+    (queue-operation, user) duplicate pair for the same unknown task_id must
+    only bump `unresolved_notifications` once."""
+    raw = "\n".join(_notification_lines(UNKNOWN_TASK_ID))
+    out = zprof_collect._extract_dispatches_from_text(SESSION, raw, {}, set(), agent_index={})
+    assert out["unresolved_notifications"] == 1
+    assert out["unresolved_task_ids"] == [UNKNOWN_TASK_ID]
+
+
+# --- #36 P2-2: unresolved task_id must be traceable in collect.log ---------
+
+def test_unresolvable_notification_logs_task_id(tmp_path):
+    agentlog = _split_stops(tmp_path, with_meta=False, notif_task_id=UNKNOWN_TASK_ID)
+    log = agentlog / "collect.log"
+    assert log.exists(), "#36 P2-2: unresolved notification must be logged to collect.log"
+    assert UNKNOWN_TASK_ID in log.read_text()
 
 
 # --- AC1 priority: source (a) meta.json wins over source (b) launch map ----
