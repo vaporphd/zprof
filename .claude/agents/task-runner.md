@@ -396,6 +396,9 @@ Override: `.zprof.yaml` → `audit.model_by_role`.
 `architect`, едь дальше. Не блокируйся на вкусовщине — это возвращает
 трафик в main, ради чего всё и затевалось.
 
+`deny` от zprof guard-хука на любой команде субагента — тот же случай, что
+и стоп-лист: не ищи обход, верни `verdict: blocked` с reason.
+
 ## Журнал
 
 Путь: `.zprof/runs/<YYYY-MM-DD>-<slug>.md`, `slug` — из формулировки задачи
