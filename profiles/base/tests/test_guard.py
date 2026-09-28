@@ -324,7 +324,9 @@ def test_merge_role_denies_implementer_and_main(tmp_path):
                             role=role, cwd=tmp_path, session_id=f"sess-{role}")
         out = zprof_guard.pre_tool(payload)
         assert out is not None
-        assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [merge_role]:")
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("zprof guard [merge_role]:")
+        assert "zprof doctor" not in reason
 
 
 def test_merge_role_denies_unknown(tmp_path):
@@ -333,7 +335,9 @@ def test_merge_role_denies_unknown(tmp_path):
                "tool_input": _bash("gh pr merge 7")}  # no agent_type, no transcript_path -> unknown
     out = zprof_guard.pre_tool(payload)
     assert out is not None
-    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [merge_role]:")
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("zprof guard [merge_role]:")
+    assert "zprof doctor" in reason
 
 
 def test_pr_shepherd_d6_checkout_and_commit_allow(tmp_path):
@@ -367,13 +371,13 @@ def test_pr_shepherd_remote_ref_delete_deny(tmp_path):
 
 # ---------------------------------------------------------------------------
 # Unregistered context: rule never fires (ADR D4). Since #24 registered
-# `head_on_remote`/`linked_worktree` (ADR-0005), the first two cases below
-# return None for a different reason than before: the context now runs for
-# real, but `tmp_path` isn't a git repo, so the evaluator's own fail-open
-# path (`context_error` + False) applies -- net effect unchanged. `gh pr
-# create`/`gh pr merge` still hit a genuinely unregistered context
-# (`pr_create_gate`/`merge_preflight`, #25). A `Write` outside the repo case
-# used to live here too; #24's `write_outside_repo` is no longer
+# `head_on_remote`/`linked_worktree` (ADR-0005), the two cases below return
+# None for a different reason than before: the context now runs for real,
+# but `tmp_path` isn't a git repo, so the evaluator's own fail-open path
+# (`context_error` + False) applies -- net effect unchanged. #25 registered
+# `merge_preflight`/`pr_create_gate` (ADR-0006) — those cases moved to
+# `test_guard_merge.py` with a monkeypatched `_run`. A `Write` outside the
+# repo case used to live here too; #24's `write_outside_repo` is no longer
 # unregistered and does deny it for real -- see
 # `test_guard_context.py::test_write_outside_repo_deny_etc`.
 # ---------------------------------------------------------------------------
@@ -381,8 +385,6 @@ def test_pr_shepherd_remote_ref_delete_deny(tmp_path):
 UNKNOWN_CONTEXT_CASES = [
     ("Bash", {"command": "git rebase main"}, "implementer"),
     ("Bash", {"command": "git stash"}, "implementer"),
-    ("Bash", {"command": "gh pr create -t x -b y"}, "implementer"),
-    ("Bash", {"command": "gh pr merge 7"}, "pr-shepherd"),
 ]
 
 
@@ -654,12 +656,15 @@ def test_load_config_raises_on_malformed_json(tmp_path):
 # True end-to-end via subprocess (D10): main(), exit code, exact stdout
 # ---------------------------------------------------------------------------
 
-def _run_guard(root: pathlib.Path, stdin_text: str, mode: str | None = "pre-tool"):
+def _run_guard(root: pathlib.Path, stdin_text: str, mode: str | None = "pre-tool",
+                env_extra: dict | None = None):
     env = dict(os.environ)
     env.pop("CLAUDE_PROJECT_DIR", None)
     home = root / "home"
     home.mkdir(exist_ok=True)
     env["HOME"] = str(home)
+    if env_extra:
+        env.update(env_extra)
     argv = [sys.executable, str(GUARD_PY)]
     if mode is not None:
         argv.append(mode)

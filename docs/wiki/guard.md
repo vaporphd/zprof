@@ -21,12 +21,12 @@ Key invariants:
   - Rule evaluation order is fixed and cheap-first: `tools` → `roles` → `not_roles` →
     `exempt_roles` → `match` → `context`; first firing rule in list order wins, no rule
     ever produces `allow` (`zprof-guard.py:207-265`).
-  - `CONTEXTS` is populated with four evaluators as of #24 — `head_on_remote`,
-    `linked_worktree`, `write_outside_repo`, `branch_pr_merged` — covering §5.2/§5.3.
-    A `context` name still not registered (`merge_preflight`/`pr_create_gate`,
-    §5.5/§5.6, #25) makes the rule never fire (not deny, not skip-with-warning)
-    (ADR-0004 D4, ADR-0005; `zprof-guard.py:29-35, 583-588`).
-  - Three of the four evaluators (`head_on_remote`, `linked_worktree`,
+  - `CONTEXTS` is populated with six evaluators as of #25 — `head_on_remote`,
+    `linked_worktree`, `write_outside_repo`, `branch_pr_merged` (#24) plus
+    `merge_preflight`, `pr_create_gate` (#25) — covering §5.2/§5.3/§5.5/§5.6. A
+    `context` name still not registered makes the rule never fire (not deny, not
+    skip-with-warning) (ADR-0004 D4, ADR-0005; `zprof-guard.py:29-35, 1012-1019`).
+  - Three of the four #24 evaluators (`head_on_remote`, `linked_worktree`,
     `write_outside_repo`) are fail-open: a `git` call that errors or times out is
     recorded as a `context_error` journal event (`decision: null`) and the evaluator
     returns `False` (does not fire). `branch_pr_merged` is the one fail-closed
@@ -34,6 +34,27 @@ Key invariants:
     never emits `context_error`, because an uncaught exception here would otherwise
     escape into `main()`'s outer fail-open handler and *allow* an irreversible remote
     branch deletion (ADR-0005 E2/E6; `zprof-guard.py:330-338, 515, 579-581`).
+  - `merge_preflight` (#25) is also fail-open, but through a third mechanism,
+    distinct from both #24 patterns: any `gh` failure (non-zero exit, timeout,
+    bad JSON, unexpected shape) calls `_note_unverified`, not
+    `_note_context_error` — it logs `event: "pre-tool", decision:
+    "allow_unverified"` (a conscious gate decision), not `decision: null` (a
+    silent diagnostic). There is no outer `try/except Exception` around
+    `_merge_preflight`'s body (unlike `branch_pr_merged`); an unexpected bug
+    reaches `main()`'s fail-open handler and logs `decision: "error"` instead
+    (ADR-0006 F1, Consequences; `zprof-guard.py:347-360, 787-855`).
+  - `pr_create_gate` (#25) has no `roles`/`not_roles` — it applies to every role
+    including `main`, `unknown`, `pr-shepherd`, unlike every other rule in
+    `guard.yaml`; it never calls `_run` (no network), so it cannot produce
+    `allow_unverified` for network reasons — only for an unreadable
+    `--body-file` (`guard.yaml:135-139`; `zprof-guard.py:947-1009`).
+  - Role `unknown` on a rule whose deny depends on role (`roles`/`not_roles`
+    non-empty — currently `merge_role`, `remote_ref_delete`) gets an appended
+    hint in the deny reason: `"; роль не разрешена (роль вызывающего не
+    определена — unknown), проверь `zprof doctor`"`. `_is_role_gated` decides
+    generically off the rule's `roles`/`not_roles`, not a hardcoded rule id —
+    role-independent rules like `force_push` never get the hint (ADR-0006 F5;
+    `zprof-guard.py:1152-1167, 1261-1263`).
   - `remote_ref_delete` carries `not_roles: [pr-shepherd]`; for pr-shepherd the
     decision moves to `remote_ref_delete_unmerged` (`roles: [pr-shepherd]`, `context:
     branch_pr_merged`) instead — a drift test asserts the two role lists stay
@@ -52,18 +73,23 @@ Key invariants:
     `input_hash` is a 12-char sha1, mirroring (not importing) `zprof-collect.py`'s
     `_input_hash` byte-for-byte since the two scripts deploy separately
     (`zprof-guard.py:602-635`, ADR-0004 D9).
-Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §7, §8.1
+Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §7, §8.1,
+  §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
   read-only roles, merge gate, D5 `remote_ref_delete`/`remote_ref_delete_unmerged`
   role split) plus 30 tests in `test_guard_context.py` (the four #24 context
-  evaluators, the `context_error` journal event, the D5 drift invariant), incl.
-  fail-open fault-injection (malformed `guard.json`, malformed stdin, bad regex,
-  unrendered `$ref`, missing argv mode, missing subagent `meta.json`, `_run`
-  timeout/`OSError` via `monkeypatch`) and a drift check against `guard.yaml` (rule
-  `id` set + `match` regex lists) — `python3 -m pytest profiles/base/tests/test_guard.py
-  profiles/base/tests/test_guard_context.py -q` → 142 passed (371 passed for
-  `profiles/base/tests/` as a whole; verified 2026-09-28,
-  `feat/guard-context-evaluators-24`@`7b2c5de`).
+  evaluators, the `context_error` journal event, the D5 drift invariant) plus 56
+  tests in `test_guard_merge.py` (#25 — `merge_preflight`/`pr_create_gate` table
+  cases via `monkeypatch(zprof_guard, "_run", ...)`, two real-subprocess PATH-stub
+  e2e cases for AC6, the `unknown`-role `zprof doctor` hint, the two regressed
+  `UNKNOWN_CONTEXT_CASES` entries), incl. fail-open fault-injection (malformed
+  `guard.json`, malformed stdin, bad regex, unrendered `$ref`, missing argv mode,
+  missing subagent `meta.json`, `_run` timeout/`OSError` via `monkeypatch`) and a
+  drift check against `guard.yaml` (rule `id` set + `match` regex lists) —
+  `python3 -m pytest profiles/base/tests/test_guard.py
+  profiles/base/tests/test_guard_context.py profiles/base/tests/test_guard_merge.py
+  -q` → 196 passed (425 passed for `profiles/base/tests/` as a whole; verified
+  2026-09-28, `feat/guard-merge-pr-gate-25`@`c905ff9`).
 
 ---
 
@@ -73,9 +99,10 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
 reads one tool-call payload from stdin, decides `deny` or silence (never `allow`,
 never `ask`), and logs the decision. It replaces prompt-only policy ("don't force-push",
 "only pr-shepherd merges") with a deterministic check that runs before the tool
-executes. Issues #23–#24 are the first two of a six-issue milestone (#23–#28); this
+executes. Issues #23–#25 are the first three of a six-issue milestone (#23–#28); this
 doc describes what's shipped so far — §5.1 stop-list, read-only roles, and the merge
-gate from #23; §5.2/§5.3 context rules from #24 — not the full design in the spec.
+gate from #23; §5.2/§5.3 context rules from #24; §5.5 merge preflight and §5.6
+PR-create gate from #25 — not the full design in the spec.
 
 **Not yet deployed anywhere.** No project's `.claude/` directory runs this hook today —
 that wiring (`zprof apply` writing `.claude/zprof-guard.py`, rendering
@@ -83,11 +110,14 @@ that wiring (`zprof apply` writing `.claude/zprof-guard.py`, rendering
 `settings.local.json`) is issue #28. Until then `guard.md` describes source-only
 behavior, exercised by `test_guard.py` invoking the script directly.
 
-### What's active in #23/#24 vs. what's data-only
+### What's active as of #23–#25
 
 `guard.yaml` (`profiles/base/guard.yaml:1-139`) is the **full** catalog of rules
-the eventual design calls for, but the rule engine only *acts* on rules whose
-conditions it can evaluate today:
+the eventual design calls for. As of #25 every rule in it is active — the last two
+data-only placeholders (`merge_preflight`, `pr_create_gate`) got their evaluators
+registered by ADR-0006. What remains outside this table is the *deployment* of the
+hook itself (#28) and the subagent-stop validator (#26), neither of which is a
+`guard.yaml` rule:
 
 | Group (spec §) | Rules | Status |
 |---|---|---|
@@ -96,8 +126,8 @@ conditions it can evaluate today:
 | §5.5 merge gate | `merge_role` | **active** (#23) — `not_roles: $merge_roles`, no `context` needed (the rule engine is generic; see ADR-0004 D3 "conscious deviation") |
 | §5.2 contextual stop-list | `rebase_published`, `amend_published`, `stash_in_worktree`, `remote_ref_delete_unmerged` | **active** (#24) — `context: head_on_remote`/`linked_worktree`/`branch_pr_merged` now registered ([#24](../../plan-2.md), ADR-0005) |
 | §5.3 write outside repo | `write_outside_repo` | **active** (#24) — `context: write_outside_repo` now registered ([#24](../../plan-2.md), ADR-0005) |
-| §5.5 merge preflight | `merge_preflight` | data only — [#25](../../plan-2.md) |
-| §5.6 PR-create gate | `pr_create_gate` | data only — [#25](../../plan-2.md) |
+| §5.5 merge preflight | `merge_preflight` | **active** (#25) — `context: merge_preflight` now registered (ADR-0006) |
+| §5.6 PR-create gate | `pr_create_gate` | **active** (#25) — `context: pr_create_gate` now registered, no `roles`/`not_roles` (applies to every role) (ADR-0006) |
 
 `subagent-stop` mode (`zprof-guard.py:825`) is a recognized no-op placeholder for
 the subagent-stop validator, [#26](../../plan-2.md). Integrating guard events into
@@ -120,6 +150,17 @@ last 200 sessions kept) rather than on every call (`zprof-guard.py:670-712, 740-
 `unknown` has no special-cased branch in the rule engine — it falls out of ordinary
 set membership: `unknown` is not in `readonly_roles`, so `readonly_mutation` doesn't
 apply to it, but it's also not in `merge_roles`, so `merge_role` does (ADR-0004 D2).
+
+Since #25, when a role-gated rule (`roles`/`not_roles` non-empty) denies an `unknown`
+call, `pre_tool()` appends a hint to the deny reason — `"; роль не разрешена (роль
+вызывающего не определена — unknown), проверь `zprof doctor`"` — so an agent whose
+role failed to resolve gets pointed at the diagnosis command instead of a bare
+"merge выполняет только pr-shepherd". `_is_role_gated(config, rule_id)` looks up the
+rule by id in `config["rules"]` and checks `roles`/`not_roles` generically — no rule
+id is hardcoded, so the hint also fires for `remote_ref_delete`
+(`not_roles: [pr-shepherd]`) and stays silent for role-independent rules like
+`force_push`, where it would be misleading (ADR-0006 F5; `zprof-guard.py:1152-1167,
+1261-1263`).
 
 ### Rule format (`guard.yaml` / `.claude/guard.json`)
 
@@ -146,11 +187,11 @@ condition, not a supported input (see invariant above).
 `pr-shepherd` is deliberately excluded (ADR-0004 D6) — it stamps merge commits, so it
 cannot be purely read-only; `merge_roles` is `[pr-shepherd]` alone.
 
-### Context evaluators (`CONTEXTS`, #24)
+### Context evaluators (`CONTEXTS`, #24/#25)
 
-`CONTEXTS` (`zprof-guard.py:29-35`) is populated at the bottom of the module
-(`zprof-guard.py:583-588`) with four evaluators, each backing one or more
-`guard.yaml` rules (ADR-0005):
+`CONTEXTS` (`zprof-guard.py:29-35`) is populated near the bottom of the module
+(`zprof-guard.py:1012-1019`) with six evaluators, each backing one or more
+`guard.yaml` rules (ADR-0005, ADR-0006):
 
 | Evaluator | Rule(s) | Fires when |
 |---|---|---|
@@ -183,6 +224,79 @@ rule's id), `detail` (`"<argv[0]> <argv[1]>: exit <rc>"` or `"...: <ExceptionNam
 never paths, stdout or stderr), all other keys as in the D9 deny event
 (`zprof-guard.py:767-786`).
 
+### Merge gate (`merge_preflight`) and PR-create gate (`pr_create_gate`), #25
+
+ADR-0006 registers the two evaluators that §5.5/§5.6 rules had been pointing at
+since #23/#24 without effect (data-only, D4). Both parse the **raw**
+`call["tool_input"]["command"]`, not the whitespace-normalized `call["command"]`
+that `normalize_command` produces for `match` regexes — normalization collapses
+`\s+` to a single space, including newlines *inside quotes*, which would destroy
+a PR body's `## Gate` line before it could ever be found (ADR-0006 Context §3).
+Both share two helpers (`zprof-guard.py:613-678`):
+
+- `_shell_tokens(raw)` — `shlex.shlex(..., posix=True, punctuation_chars=True)`
+  with `commenters = ""` (so `#` in `-t "a#b"` isn't treated as a comment,
+  ADR-0006 Context §7); raises `ValueError` on an unbalanced quote/trailing
+  backslash, which both evaluators turn into `_note_unverified(..., _PARSE_ERROR,
+  "shlex")` + `return False` (allow, not deny — F3/F4).
+- `_invocations(tokens, words)` — finds every occurrence of an argv prefix like
+  `("gh", "pr", "merge")` by `os.path.basename` (so `rtk gh pr create`,
+  `/opt/homebrew/bin/gh pr create` match without special-casing), returning the
+  argument list up to the next shell-operator token; a bare occurrence only
+  inside a quoted string (`grep -r "gh pr create" docs/`) yields zero
+  invocations, silently — no event, by design (ADR-0006 F2).
+
+**`merge_preflight`** (rule `merge_preflight`, `roles: $merge_roles`;
+`zprof-guard.py:787-855`) fires on `gh pr merge ...` and `gh api .../pulls/N/merge`
+invocations by the merge role(s). For each parsed target `(selector, repo)` it
+runs one `gh pr view [selector] [-R repo] --json number,body,closingIssuesReferences,state`
+(`_GH_TIMEOUT` 10s) and derives the deny/allow from the JSON: `state != "OPEN"`
+skips the target silently (nothing left to protect); otherwise the PR must have
+either a `Closes #N` in the body or a non-empty `closingIssuesReferences`, **and**
+a `## Gate` section (`_CLOSES_RE`/`_GATE_RE`, `zprof-guard.py:668-669`) — missing
+either (or both) returns a PR-specific deny reason, e.g. `` PR #7 без раздела
+`## Gate` ``. Any `gh` failure for a target (non-zero exit, timeout, invalid JSON,
+unexpected shape) is fail-open: `_note_unverified(call, rule, _PREFLIGHT_UNVERIFIED,
+...)`, that target is skipped, not denied (§5.5 decision 1 — a network/`gh` hiccup
+must not block a routine, revertible merge). Unlike `branch_pr_merged`, there is no
+outer `try/except Exception` — an unexpected bug is not caught here and falls
+through to `main()`'s fail-open handler, logging `decision: "error"` instead of
+`allow_unverified` (ADR-0006 F3, Consequences).
+
+**`pr_create_gate`** (rule `pr_create_gate`, no `roles`/`not_roles` —
+`zprof-guard.py:947-1009`) fires on every `gh pr create ...` invocation by
+**any** role (§5.6: "anyone creating a PR in a zprof project gives `Closes #N`
+and `## Gate`"); the only opt-out is `exempt_roles.pr_create_gate` in
+`.zprof.yaml`. It never calls `_run` — no network, only local `shlex` and (for
+`--body-file`) a local file read. Per invocation: any `--fill`/`--fill-first`/
+`--fill-verbose`/`-f` flag denies outright (fill bypasses the body check, so it's
+checked before body sources, even if `-b` is also present); no `-b`/`--body`/
+`-F`/`--body-file` source denies "нет тела PR"; otherwise each body source is
+checked for both markers via `_missing_markers`. A `--body-file` pointing at
+stdin (`-`, `/dev/stdin`, `/dev/fd/0`) or an unreadable/missing file is
+**fail-open**, not deny — `_note_unverified(..., _PREFLIGHT_UNVERIFIED, ...)` and
+the invocation is skipped: `working_dir()` is a heuristic that can't see `cd`/
+`pushd`/`git -C` mid-chain, so a false mismatch would wrongly deny a valid PR,
+while a genuinely missing file makes `gh` itself fail with no PR created — allow
+costs nothing there (ADR-0006 F4).
+
+**`allow_unverified` journal event.** Both evaluators share `_note_unverified`
+(`zprof-guard.py:347-360`), a `_note_context_error`-shaped accumulator on
+`call["unverified"]` but a distinct *decision*, not a diagnostic: `context_error`
+means "the evaluator couldn't answer, the rule stays silent" (`decision: null`);
+`allow_unverified` means "a gate rule made a conscious fail-open call"
+(`decision: "allow_unverified"`). `pre_tool()`'s `finally` block flushes it right
+after the `context_errors` loop (`zprof-guard.py:1170-1285`), one line per
+skipped target/source: `event: "pre-tool"`, `decision: "allow_unverified"`, `rule`
+(the id of `merge_preflight`/`pr_create_gate` — never the reason code, so
+`zprof stats` "top rules" still attributes correctly), `detail` =
+`"<code>: <specifics>"` where `<code>` is `preflight_unverified` or `parse_error`
+(a closed set — `_PREFLIGHT_UNVERIFIED`/`_PARSE_ERROR`,
+`zprof-guard.py:342-344`) and `<specifics>` is a fixed string or exception class
+name only (never a path, command text, stdout, or stderr). It's written even when
+a later rule in the same call ultimately denies — it records that *this* rule
+passed the call through unverified, not the call's final outcome (ADR-0006 F1).
+
 ### Deny output and telemetry
 
 A firing rule produces the exact §5.7 payload via `deny_output`
@@ -202,7 +316,9 @@ event is appended as one JSON line to `.agentlog/guard-events.jsonl` under `floc
 `.agentlog/tool-events.jsonl`, because guard runs on every guarded tool call while the
 collector holds its lock for whole-session operations (ADR-0004 D9). `context_error`
 (#24) reuses the same file/lock/`_safe_write_event` path, with `decision: null`
-instead of `"deny"`/`"error"`.
+instead of `"deny"`/`"error"`; `allow_unverified` (#25) reuses it too, with
+`decision: "allow_unverified"` and `event: "pre-tool"` (it's a gate *decision*,
+not a diagnostic — see previous section).
 
 ### See also
 
@@ -212,5 +328,6 @@ instead of `"deny"`/`"error"`.
   `guard.json` rendering, and the `PreToolUse` hook entry are #28
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
 - [ADR-0005: guard — context-evaluators `head_on_remote`, `linked_worktree`, `write_outside_repo`, `branch_pr_merged`](../adr/0005-guard-context-evaluators.md)
+- [ADR-0006: guard — merge-гейт (`merge_preflight`) и PR-гейт (`pr_create_gate`), событие `allow_unverified`](../adr/0006-guard-merge-pr-gate.md)
 - `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` — full guard design (§2
   decisions, §5 rule tables, §6 subagent-stop validator, §12 phase-2 deferred work)

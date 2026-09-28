@@ -114,7 +114,8 @@ rules:
     roles: $readonly_roles
     match: $mutating_bash_patterns   # подставляет apply из telemetry.yaml
     reason: "роль read-only: мутирующая команда запрещена контрактом"
-  # --- §5.5 merge-гейт — merge_role активен в #23 (движок общий, у правила нет context; ADR D3) ---
+  # --- §5.5 merge-гейт — merge_role активен в #23 (движок общий, у правила нет context; ADR D3);
+  # merge_preflight активно с #25 (ADR-0006) ---
   - id: merge_role
     tools: [Bash]
     match:
@@ -130,7 +131,7 @@ rules:
       - '\bgh\s+api\b.*/pulls/\d+/merge\b'
     context: merge_preflight
     reason: "PR не прошёл pre-flight: нужны Closes #N и раздел ## Gate"
-  # --- §5.6 PR-гейт (данные; evaluator — #25) ---
+  # --- §5.6 PR-гейт — активно с #25 (ADR-0006) ---
   - id: pr_create_gate
     tools: [Bash]
     match:

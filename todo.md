@@ -31,7 +31,7 @@
 ## Plan 2: guard
 - [x] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)
 - [x] feat(base): guard — контекстные правила (head_on_remote, linked_worktree, запись вне репо) (#24) — depends: #23
-- [ ] feat(base): guard — merge-гейт и PR-гейт (Closes #N + ## Gate) (#25) — depends: #23
+- [x] feat(base): guard — merge-гейт и PR-гейт (Closes #N + ## Gate) (#25) — depends: #23
 - [ ] feat(base): guard — валидатор return_format на SubagentStop (#26) — depends: #23
 - [ ] feat: guard-события в zprof score (P7) и zprof stats (#27) — depends: #23
 - [ ] feat(cli): zprof apply деплоит guard — guard.json, хуки с matcher, permissions.deny (#28) — depends: #23; supersedes #18
