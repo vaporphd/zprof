@@ -31,6 +31,7 @@
 - [ ] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 
 ## Plan 2: guard
+- [x] fix(ci): ruff RUF059 ломает CI на main; запинить версию ruff (#56) — вне очереди, блокирует #28
 - [x] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)
 - [x] feat(base): guard — контекстные правила (head_on_remote, linked_worktree, запись вне репо) (#24) — depends: #23
 - [x] feat(base): guard — merge-гейт и PR-гейт (Closes #N + ## Gate) (#25) — depends: #23

@@ -19,6 +19,6 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - uses: actions/setup-python@v5
         with: { python-version: '3.10' }
-      - run: pip install pytest ruff
+      - run: pip install pytest ruff==0.16.9
       - run: python3 -m pytest profiles/base/tests/ -v
       - run: ruff check profiles/base/

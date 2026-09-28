@@ -219,7 +219,7 @@ def test_return_format_contract_recognizes_completion_key():
 def test_return_format_contract_raw_is_unnormalized():
     """`raw` (group 2) is kept exactly as written, spaces and all -- not the parsed `values`."""
     text = "---\nname: x\nreturn_format: |\n  verdict: approved | changes-required\n---\nbody\n"
-    key, raw, values = zprof_guard._return_format_contract(text)
+    _key, raw, values = zprof_guard._return_format_contract(text)
     assert raw == "approved | changes-required"
     assert values == ["approved", "changes-required"]
 

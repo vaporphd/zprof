@@ -1,12 +1,20 @@
 # ruff.toml — lint config for profiles/base/ (Python collector, stdlib-only
-# at runtime). ruff itself is a CI-only tool (pip install ruff in ci.yml),
-# not a runtime dependency of the collector (issue #14 AC4).
+# at runtime). ruff itself is a lint-only tool — CI installs it via pip
+# (ci.yml), the local-green gate runs it ephemerally via `uvx ruff@...`
+# (CLAUDE.md Test: label) — not a runtime dependency of the collector
+# (issue #14 AC4).
 #
 # No custom `select` — default rule set (F, E, B, UP, RUF + more; see
 # https://docs.astral.sh/ruff/rules/). Point exceptions below are scoped to
 # the collector script only and documented, not a blanket relaxation.
 
 target-version = "py310"
+
+# Pinned to match `.github/workflows/ci.yml` (`pip install ... ruff==0.16.9`)
+# exactly. A locally installed ruff at a different version refuses to run
+# instead of silently drifting from CI (issue #56: unpinned CI ruff surfaced
+# a rule not caught by an unrelated/missing local ruff).
+required-version = "0.16.9"
 
 [lint.per-file-ignores]
 # zprof-collect.py runs as a Claude Code hook and must never crash the
