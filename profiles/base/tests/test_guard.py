@@ -10,6 +10,7 @@ references substituted literally, mirroring what `zprof apply` will render in
 #28. A dedicated test (`test_guard_yaml_ids_match_fixture`) greps
 `profiles/base/guard.yaml` for `- id:` lines to catch drift between the two.
 """
+import hashlib
 import importlib.util
 import json
 import os
@@ -724,6 +725,211 @@ def test_e2e_missing_meta_json_fails_open_to_unknown(tmp_path):
     result = _run_guard(tmp_path, json.dumps(payload))
     assert result.returncode == 0
     assert result.stdout == ""
+
+
+# ---------------------------------------------------------------------------
+# project_root: $CLAUDE_PROJECT_DIR precedence and fallbacks
+# (coverage gap: the autouse fixture strips this env var everywhere else)
+# ---------------------------------------------------------------------------
+
+def test_project_root_prefers_env_var_when_valid_dir(tmp_path, monkeypatch):
+    env_root = tmp_path / "env-root"
+    env_root.mkdir()
+    other_cwd = tmp_path / "other-cwd"
+    other_cwd.mkdir()
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(env_root))
+    payload = {"cwd": str(other_cwd)}
+    assert zprof_guard.project_root(payload) == str(env_root)
+
+
+def test_project_root_ignores_env_var_pointing_at_missing_dir(tmp_path, monkeypatch):
+    missing = tmp_path / "does-not-exist"
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(missing))
+    payload = {"cwd": str(tmp_path)}
+    assert zprof_guard.project_root(payload) == str(tmp_path)
+
+
+def test_project_root_falls_back_to_getcwd_without_cwd_or_env(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert zprof_guard.project_root({}) == os.getcwd()
+    assert zprof_guard.project_root({"cwd": ""}) == os.getcwd()
+
+
+# ---------------------------------------------------------------------------
+# _subject_for / _target: Edit/Write/MultiEdit/NotebookEdit + absent-field
+# branches (coverage gap: no test in this file drives a deny for these
+# tools, so their subject/target extraction was never directly exercised)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+def test_subject_for_file_tools_uses_file_path(tool):
+    subject, command = zprof_guard._subject_for(tool, {"file_path": "/a/b/c.py"})
+    assert subject == "/a/b/c.py"
+    assert command is None
+
+
+def test_subject_for_file_tool_missing_file_path_is_none():
+    subject, command = zprof_guard._subject_for("Edit", {})
+    assert subject is None
+    assert command is None
+
+
+def test_subject_for_notebook_edit_uses_notebook_path():
+    subject, command = zprof_guard._subject_for("NotebookEdit", {"notebook_path": "/a/nb.ipynb"})
+    assert subject == "/a/nb.ipynb"
+    assert command is None
+
+
+def test_subject_for_bash_without_command_is_none():
+    subject, command = zprof_guard._subject_for("Bash", {})
+    assert subject is None
+    assert command is None
+
+
+def test_subject_for_unknown_tool_is_none():
+    subject, command = zprof_guard._subject_for("Task", {"foo": "bar"})
+    assert subject is None
+    assert command is None
+
+
+@pytest.mark.parametrize("tool", ["Edit", "Write", "MultiEdit"])
+def test_target_file_tools_uses_basename(tool):
+    assert zprof_guard._target(tool, {"file_path": "/a/b/c.py"}, None) == "c.py"
+
+
+def test_target_file_tool_missing_file_path_is_none():
+    assert zprof_guard._target("Edit", {}, None) is None
+
+
+def test_target_notebook_edit_uses_basename():
+    assert zprof_guard._target("NotebookEdit", {"notebook_path": "/a/nb.ipynb"}, None) == "nb.ipynb"
+
+
+def test_target_bash_without_command_is_none():
+    assert zprof_guard._target("Bash", {}, None) is None
+
+
+def test_target_unknown_tool_is_none():
+    assert zprof_guard._target("Task", {"foo": "bar"}, None) is None
+
+
+# ---------------------------------------------------------------------------
+# load_config: version/shape validation beyond malformed JSON
+# ---------------------------------------------------------------------------
+
+def test_load_config_raises_on_version_mismatch(tmp_path):
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "guard.json").write_text(json.dumps({"version": 2, "rules": []}), encoding="utf-8")
+    with pytest.raises(ValueError):
+        zprof_guard.load_config(str(tmp_path))
+
+
+def test_load_config_raises_when_not_a_dict(tmp_path):
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir(parents=True)
+    (claude_dir / "guard.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    with pytest.raises(ValueError):
+        zprof_guard.load_config(str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# _validated_str_list: type-error branch (only the unrendered-$ref branch
+# and the None branch were covered before)
+# ---------------------------------------------------------------------------
+
+def test_validated_str_list_rejects_non_str_non_list():
+    with pytest.raises(ValueError):
+        zprof_guard._validated_str_list(123, "roles")
+
+
+def test_validated_str_list_rejects_list_with_non_str_element():
+    with pytest.raises(ValueError):
+        zprof_guard._validated_str_list(["ok", 5], "match")
+
+
+def test_validated_str_list_wraps_single_string():
+    assert zprof_guard._validated_str_list("solo", "roles") == ["solo"]
+
+
+# ---------------------------------------------------------------------------
+# evaluate_rules: malformed config shapes (fail-open relies on these not
+# raising — a non-list `rules` or a non-dict rule entry must be skipped,
+# not crash the walk)
+# ---------------------------------------------------------------------------
+
+def test_evaluate_rules_returns_none_when_rules_not_a_list():
+    assert zprof_guard.evaluate_rules({}, {"rules": "not-a-list"}) is None
+
+
+def test_evaluate_rules_returns_none_when_rules_key_missing():
+    assert zprof_guard.evaluate_rules({}, {}) is None
+
+
+def test_evaluate_rules_skips_non_dict_rule_entries():
+    call = {"tool_name": "Bash", "role": "implementer",
+            "subject": "git push --force", "command": "git push --force"}
+    config = {
+        "exempt_roles": {},
+        "rules": [
+            "not-a-rule",
+            {"id": "force_push", "tools": ["Bash"], "match": [r"--force"], "reason": "denied"},
+        ],
+    }
+    hit = zprof_guard.evaluate_rules(call, config)
+    assert hit == {"id": "force_push", "reason": "denied"}
+
+
+# ---------------------------------------------------------------------------
+# _input_hash: non-JSON-serializable input falls back to repr()
+# ---------------------------------------------------------------------------
+
+def test_input_hash_falls_back_to_repr_for_non_serializable():
+    class Weird:
+        def __repr__(self):
+            return "<weird>"
+
+    value = {"x": Weird()}
+    expected = hashlib.sha1(repr(value).encode("utf-8")).hexdigest()[:12]
+    assert zprof_guard._input_hash(value) == expected
+
+
+# ---------------------------------------------------------------------------
+# pre_tool: TOOLS_GUARDED filter + non-dict tool_input
+# ---------------------------------------------------------------------------
+
+def test_pre_tool_ignores_unguarded_tools(tmp_path):
+    """Read/Grep/Glob/Task never reach config load or the journal (spec §13)."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Read", {"file_path": "/etc/passwd"}, role="implementer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None
+    assert not (tmp_path / ".agentlog" / "guard-events.jsonl").exists()
+
+
+def test_pre_tool_treats_non_dict_tool_input_as_empty(tmp_path):
+    _write_config(tmp_path, build_guard_config())
+    payload = {"session_id": "sess-x", "cwd": str(tmp_path), "tool_name": "Bash",
+               "tool_input": "not-a-dict", "agent_type": "implementer"}
+    assert zprof_guard.pre_tool(payload) is None
+
+
+# ---------------------------------------------------------------------------
+# _note_role_unresolved: falsy session_id + corrupt (non-dict) state file
+# ---------------------------------------------------------------------------
+
+def test_note_role_unresolved_true_for_falsy_session_id_without_touching_state(tmp_path):
+    assert zprof_guard._note_role_unresolved(None, str(tmp_path)) is True
+    assert zprof_guard._note_role_unresolved("", str(tmp_path)) is True
+    assert not (tmp_path / ".agentlog" / "guard-state.json").exists()
+
+
+def test_note_role_unresolved_resets_non_dict_state(tmp_path):
+    agentlog = tmp_path / ".agentlog"
+    agentlog.mkdir(parents=True)
+    (agentlog / "guard-state.json").write_text(json.dumps([1, 2, 3]), encoding="utf-8")
+    assert zprof_guard._note_role_unresolved("sess-reset", str(tmp_path)) is True
+    state = json.loads((agentlog / "guard-state.json").read_text(encoding="utf-8"))
+    assert state["role_unresolved_sessions"] == ["sess-reset"]
 
 
 # ---------------------------------------------------------------------------
