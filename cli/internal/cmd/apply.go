@@ -2,7 +2,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -57,9 +59,14 @@ func NewApplyCmd() *cobra.Command {
 				// Guard deploys on --telemetry-only too (ADR 0009 I7): load
 				// the overlay + guard layers from an existing .zprof.yaml if
 				// one is present, otherwise fall back to base-only defaults
-				// (guard enabled, no overlay/project layer — §8.3).
+				// (guard enabled, no overlay/project layer — §8.3). The
+				// fallback is only valid when .zprof.yaml is physically
+				// absent; any other error (parse/validation) must fail the
+				// command rather than silently re-enabling guard defaults.
 				guardLayers := apply.GuardLayers{}
-				if proj, err := manifest.LoadProject(filepath.Join(pwd, ".zprof.yaml")); err == nil {
+				proj, err := manifest.LoadProject(filepath.Join(pwd, ".zprof.yaml"))
+				switch {
+				case err == nil:
 					for _, name := range proj.Overlays {
 						o, err := overlay.LoadOverlay(filepath.Join(repo, "overlays", name))
 						if err != nil {
@@ -68,6 +75,10 @@ func NewApplyCmd() *cobra.Command {
 						guardLayers.Overlays = append(guardLayers.Overlays, o)
 					}
 					guardLayers.Project = proj.Guard
+				case errors.Is(err, fs.ErrNotExist):
+					// no .zprof.yaml — base-only guard defaults (ADR 0009 §8.3).
+				default:
+					return fmt.Errorf("load .zprof.yaml: %w", err)
 				}
 				written, err := apply.DeployTelemetry(pwd, base, guardLayers)
 				if err != nil {
