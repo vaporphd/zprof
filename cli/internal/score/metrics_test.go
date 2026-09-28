@@ -102,6 +102,50 @@ func TestBlindRetries_RtkWrappedSleepIsExempt(t *testing.T) {
 	require.Equal(t, 0.0, computeP2(run, Defaults()).value)
 }
 
+func TestBusyPoll_TriggersOnConsecutiveNonMutatingBash(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "date", false),
+		ev(2, "Bash", "h2", "git log -1 --oneline", false),
+		ev(3, "Bash", "h3", "git diff", false),
+		ev(4, "Bash", "h4", "git status --porcelain", false),
+	)
+	bp := computeBusyPoll(run, Defaults())
+	require.Equal(t, 1.0, bp.value, "4th consecutive read-only Bash call, above busyPollThreshold=3")
+	require.Equal(t, 1.0, bp.byRole["implementer"])
+	require.Contains(t, bp.detail, "4 Bash подряд")
+}
+
+func TestBusyPoll_AtOrBelowThresholdIsSilent(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "date", false),
+		ev(2, "Bash", "h2", "git log -1 --oneline", false),
+		ev(3, "Bash", "h3", "git diff", false),
+	)
+	require.Equal(t, 0.0, computeBusyPoll(run, Defaults()).value)
+}
+
+func TestBusyPoll_SleepBetweenChecksResetsStreak(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "date", false),
+		ev(2, "Bash", "h2", "git log -1 --oneline", false),
+		ev(3, "Bash", "h3", "git diff", false),
+		ev(4, "Bash", "h-sleep", "sleep 150", false),
+		ev(5, "Bash", "h4", "git status --porcelain", false),
+	)
+	require.Equal(t, 0.0, computeBusyPoll(run, Defaults()).value, "sleep is the sanctioned pause between checks")
+}
+
+func TestBusyPoll_EditBetweenChecksResetsStreak(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "swift test", true),
+		ev(2, "Bash", "h2", "swift test", true),
+		ev(3, "Bash", "h3", "swift test", true),
+		ev(4, "Edit", "h-e", "/p/a.swift", false),
+		ev(5, "Bash", "h4", "swift test", false),
+	)
+	require.Equal(t, 0.0, computeBusyPoll(run, Defaults()).value, "an Edit between checks is real work, not a busy-poll loop")
+}
+
 func TestRereads_SkipsDispatchesWithFewerThanFourReads(t *testing.T) {
 	run := oneDispatchRun(
 		ev(1, "Read", "a", "/a", false), ev(2, "Read", "a", "/a", false), ev(3, "Read", "b", "/b", false),
