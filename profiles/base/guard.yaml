@@ -1,0 +1,138 @@
+# zprof guard — каталог правил pre-tool (ADR 0004, spec docs/superpowers/specs/2026-09-27-guard-hooks-design.md §5, §8.1).
+#
+# Источник правды для рендера .claude/guard.json (#28). zprof-guard.py этот
+# файл НЕ читает — только `.claude/guard.json` (чистый JSON). Ссылки `$name`
+# разрешает apply при рендере; здесь они остаются голыми скалярами.
+#
+# Стиль (для дрейф-теста profiles/base/tests/test_guard.py): отступ 2
+# пробела; каждое правило начинается строкой `  - id: <id>`; regex — только в
+# одинарных кавычках, каждый отдельной строкой блочного списка.
+version: 1
+readonly_roles: [auditor, auditor-deep, explorer, architect, reviewer, bug-hunter,
+                 expert-panel, evaluator, evaluator-telemetry, evidence-auditor,
+                 north-star-auditor, plan-reviewer]      # pr-shepherd намеренно нет, §5.4
+merge_roles: [pr-shepherd]
+allow_write_prefixes: ["$CLAUDE_PROJECT_DIR", "~/.claude/projects/*/memory/", "~/.claude/plans/",
+                       "/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*"]
+permissions_deny:                      # страховка на случай отсутствия скрипта
+  - "Bash(git push --force*)"
+  - "Bash(git push -f*)"
+  - "Bash(gh pr merge --admin*)"
+  - "Bash(git commit --no-verify*)"
+  - "Bash(git branch -D*)"
+  - "Bash(git tag -d*)"
+exempt_roles: {}
+rules:
+  # --- §5.1 стоп-лист без контекста (все роли) — активны в #23 ---
+  - id: force_push
+    tools: [Bash]
+    match:
+      - '\bgit\s+push\b.*(\s-f\b|\s--force\b|\s--force-with-lease\b|\s\+\S+)'
+    reason: "force-push запрещён стоп-листом"
+  - id: admin_merge
+    tools: [Bash]
+    match:
+      - '\bgh\s+pr\s+merge\b.*\s--admin\b'
+    reason: "merge в обход защиты ветки (--admin) запрещён стоп-листом"
+  - id: no_verify_commit
+    tools: [Bash]
+    match:
+      - '\bgit\s+commit\b.*\s(-n|--no-verify)\b'
+    reason: "коммит без хуков (-n/--no-verify) запрещён стоп-листом"
+  - id: no_verify_other
+    tools: [Bash]
+    match:
+      - '\bgit\s+(push|merge|rebase|cherry-pick)\b.*\s--no-verify\b'
+    reason: "push/merge/rebase/cherry-pick с --no-verify запрещён стоп-листом"
+  - id: branch_force_delete
+    tools: [Bash]
+    match:
+      - '\bgit\s+branch\b.*\s(-D|-[a-zA-Z]*D[a-zA-Z]*|--delete\s+--force|--force\s+--delete)\b'
+    reason: "удаление несмерженной ветки (-D/--force) запрещено стоп-листом; смерженную удаляй через git branch -d"
+  - id: remote_ref_delete
+    tools: [Bash]      # БЕЗ context, БЕЗ roles — ADR D5: безусловно для всех ролей в #23
+    match:
+      - '\bgit\s+push\b.*(\s--delete\b|\s-d\b|\s:refs/|\s\S+\s+:\S+)'
+    reason: "удаление ветки или тега на remote запрещено стоп-листом"
+  - id: tag_delete
+    tools: [Bash]
+    match:
+      - '\bgit\s+tag\b.*\s(-d|--delete)\b'
+    reason: "удаление тега запрещено стоп-листом"
+  - id: publish
+    tools: [Bash]
+    match:
+      - '\b(npm|pnpm|yarn)\s+publish\b'
+      - '\bcargo\s+publish\b'
+      - '\bgh\s+release\s+(create|upload|edit|delete)\b'
+      - '\bgoreleaser\s+release\b'
+      - '\btwine\s+upload\b'
+      - '\bpoetry\s+publish\b'
+      - '\bxcrun\s+altool\b.*--upload-app'
+      - '\bfastlane\b.*\b(pilot|deliver|upload_to_testflight|upload_to_app_store)\b'
+    reason: "релиз и публикация пакета запрещены стоп-листом"
+  - id: curl_pipe_sh
+    tools: [Bash]
+    match:
+      - '\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b'
+    reason: "исполнение скачанного кода (curl/wget в shell) запрещено стоп-листом"
+  # --- §5.2 стоп-лист с контекстом (данные; evaluator'ы — #24) ---
+  - id: rebase_published
+    tools: [Bash]
+    match:
+      - '\bgit\s+rebase\b(?!.*\s--abort\b)'
+    context: head_on_remote
+    reason: "rebase опубликованной ветки запрещён стоп-листом"
+  - id: amend_published
+    tools: [Bash]
+    match:
+      - '\bgit\s+commit\b.*\s--amend\b'
+    context: head_on_remote
+    reason: "amend опубликованного коммита запрещён стоп-листом"
+  - id: stash_in_worktree
+    tools: [Bash]
+    match:
+      - '\bgit\s+stash\b(?!\s+(list|show))'
+    context: linked_worktree
+    reason: "git stash в linked worktree запрещён: stash общий для всех worktree"
+  - id: remote_ref_delete_unmerged
+    tools: [Bash]
+    roles: [pr-shepherd]
+    match:
+      - '\bgit\s+push\b.*(\s--delete\b|\s-d\b|\s:refs/|\s\S+\s+:\S+)'
+    context: branch_pr_merged
+    reason: "удалять на remote можно только ветку уже смерженного PR"
+  # --- §5.3 запись вне репозитория (данные; evaluator — #24) ---
+  - id: write_outside_repo
+    tools: [Edit, Write, MultiEdit, NotebookEdit]
+    context: write_outside_repo      # match отсутствует — условие целиком в evaluator'е
+    reason: "запись вне репозитория запрещена стоп-листом"
+  # --- §5.4 read-only роли — активно в #23 ---
+  - id: readonly_mutation
+    tools: [Bash]
+    roles: $readonly_roles
+    match: $mutating_bash_patterns   # подставляет apply из telemetry.yaml
+    reason: "роль read-only: мутирующая команда запрещена контрактом"
+  # --- §5.5 merge-гейт — merge_role активен в #23 (движок общий, у правила нет context; ADR D3) ---
+  - id: merge_role
+    tools: [Bash]
+    match:
+      - '\bgh\s+pr\s+merge\b'
+      - '\bgh\s+api\b.*/pulls/\d+/merge\b'
+    not_roles: $merge_roles
+    reason: "merge выполняет только pr-shepherd (CLAUDE.md «Интеграция ветки»)"
+  - id: merge_preflight
+    tools: [Bash]
+    roles: $merge_roles
+    match:
+      - '\bgh\s+pr\s+merge\b'
+      - '\bgh\s+api\b.*/pulls/\d+/merge\b'
+    context: merge_preflight
+    reason: "PR не прошёл pre-flight: нужны Closes #N и раздел ## Gate"
+  # --- §5.6 PR-гейт (данные; evaluator — #25) ---
+  - id: pr_create_gate
+    tools: [Bash]
+    match:
+      - '\bgh\s+pr\s+create\b'
+    context: pr_create_gate
+    reason: "PR создаётся только с телом, где есть Closes #N и раздел ## Gate"

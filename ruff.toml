@@ -19,3 +19,11 @@ target-version = "py310"
     "BLE001", # blind `except Exception` — required by the never-crash hook contract
     "S110",   # `except Exception: pass` — best-effort state load, failure is non-fatal
 ]
+
+# zprof-guard.py has the same never-crash hook contract (ADR 0004 D7/D9: any
+# error inside main() must fail open — exit 0, tool call proceeds, best-effort
+# journal write). Same two exceptions, same rationale as above.
+"profiles/base/zprof-guard.py" = [
+    "BLE001", # blind `except Exception` around main() and the best-effort journal write
+    "S110",   # `except Exception: pass` — journal write itself failing must stay silent
+]
