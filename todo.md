@@ -24,7 +24,7 @@
 - [x] feat(base): один источник маршрутов, implementer в багфиксе, условные spec-maintainer/integration-gate (#21) — depends: #20
 - [x] feat(base): коллектор пишет config_hash и verdict; переразвернуть collector и score-hook в zprof (#22)
 
-- [ ] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34
+- [x] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34
 - [ ] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
 
 ## Plan 2: guard
