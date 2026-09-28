@@ -47,10 +47,10 @@ def _launch_lines(aid=AID, tuid=TUID):
     return [json.dumps(call), json.dumps(result)]
 
 
-def _notification_lines(task_id=AID):
+def _notification_lines(task_id=AID, status="completed"):
     xml = (f"<task-notification>\n<task-id>{task_id}</task-id>\n"
            f"<output-file>/tmp/tasks/{task_id}.output</output-file>\n"
-           "<status>completed</status>\n<summary>Agent \"run\" finished</summary>\n"
+           f"<status>{status}</status>\n<summary>Agent \"run\" finished</summary>\n"
            "<note>A task-notification fires each time this agent stops.</note>\n"
            f"<result>{RESULT}</result>\n</task-notification>")
     q = {"type": "queue-operation", "operation": "enqueue", "timestamp": NOTIF_TS,
@@ -214,6 +214,23 @@ def test_extract_dispatches_dedups_unresolved_notification_pair():
     raw = "\n".join(_notification_lines(UNKNOWN_TASK_ID))
     out = zprof_collect._extract_dispatches_from_text(SESSION, raw, {}, set(), agent_index={})
     assert out["unresolved_notifications"] == 1
+    assert out["unresolved_task_ids"] == [UNKNOWN_TASK_ID]
+
+
+# --- #36 P2-1: dedup key includes status, so a status transition is NOT
+# collapsed into the same loss as its predecessor ---------------------------
+
+def test_same_task_id_different_status_counts_separately():
+    """The dedup key is `("task:" + task_id, status)`, not just task_id.
+    A task_id that shows up unresolved under two different statuses (e.g.
+    the notification fired once mid-flight and again on completion) is two
+    distinct real events, not a duplicate pair, and must count as two
+    losses -- guards against over-eager dedup collapsing by task_id alone.
+    """
+    raw = "\n".join(_notification_lines(UNKNOWN_TASK_ID, status="running")
+                     + _notification_lines(UNKNOWN_TASK_ID, status="completed"))
+    out = zprof_collect._extract_dispatches_from_text(SESSION, raw, {}, set(), agent_index={})
+    assert out["unresolved_notifications"] == 2
     assert out["unresolved_task_ids"] == [UNKNOWN_TASK_ID]
 
 
