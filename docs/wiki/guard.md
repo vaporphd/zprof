@@ -143,6 +143,17 @@ Key invariants:
     install`/`poetry add`) — both #30, both prompt/config-only, no change to
     `zprof-guard.py` or the Go merge/render logic itself (see "Doctrine and
     prompt contracts" below).
+  - `zprof doctor` on a project with **no `.zprof.yaml` at all** (`fs.ErrNotExist`,
+    not a parse error) but a deployed `.claude/zprof-collect.py` or
+    `.claude/zprof-guard.py` — zprof's own repo checkout, `--telemetry-only`,
+    ADR-0001/#22 — runs `checkGuardDeployment` against a zero-value
+    `&manifest.ProjectManifest{}` instead of skipping it: its `proj.Guard !=
+    nil && !proj.Guard.IsEnabled()` gate (`diagnostics.go:1187`) short-circuits
+    on `proj.Guard == nil` without ever calling `IsEnabled()`, so guard is
+    diagnosed as enabled — the same outcome `GuardConfig.IsEnabled()`'s own
+    nil-receiver default gives (ADR-0009 §8.3, `manifest/project.go:126-128`),
+    just reached without calling it (#64; `diagnostics.go:159-174`; see
+    "Telemetry-only diagnostics" below).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
   §8.1–§8.4, §9, §10, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
@@ -192,7 +203,14 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   `TestE2E_GuardDeploysBackendPythonPipInstallRule` (:147-224) that runs a
   real `Apply()` with the `backend-python` overlay and a real
   `zprof-guard.py` subprocess denying `pip install`/`poetry add` while
-  allowing `uv add`.
+  allowing `uv add`. #64's telemetry-only `Diagnose()` branch is covered by
+  `TestDiagnoseTelemetryOnlyMode` (table cases: collector-only, guard-only,
+  neither deployed, and a broken-but-present manifest, which must stay the
+  old single-`LevelError` behavior even with telemetry deployed) and
+  `TestDiagnoseTelemetryOnlySkipsManifestGatedChecks` (asserts
+  `checkTaskRunner` does *not* run against a fixture that would otherwise
+  fail it, and that guard's checks still fire off the zero-value manifest)
+  in `cli/internal/doctor/diagnostics_test.go:113-186`.
 
 ---
 
@@ -747,6 +765,60 @@ helper `checkTelemetryHooks` uses for `zprof-collect.py` — parameterized on
 the script substring instead of hardcoding it, a pure signature refactor that
 doesn't change `checkTelemetryHooks`'s own behavior.
 
+### Telemetry-only diagnostics (no `.zprof.yaml`, #64)
+
+Before #64, `Diagnose()` (`cli/internal/doctor/diagnostics.go:98-135`) had one
+failure mode for any `manifest.LoadProject` error, physically-missing file or
+malformed YAML alike: a single `LevelError` Issue and nothing else. That broke
+`zprof doctor` on zprof's own repo checkout — telemetry/guard are deployed
+here via `zprof apply --telemetry-only` (ADR-0001, #22) but no `.zprof.yaml`
+is ever written by a `--telemetry-only` deployment (unless one already
+existed from a prior full `apply`), so every run reported a false top-level
+error instead of the report below.
+
+`Diagnose` now branches on the load error (`diagnostics.go:98-110`):
+
+- **File physically absent** (`errors.Is(err, fs.ErrNotExist)`) **and**
+  `telemetryDeployed(projectDir)` finds `.claude/zprof-collect.py` or
+  `.claude/zprof-guard.py` on disk (`diagnostics.go:141-148`, a plain
+  `os.Stat`, checked either-or) → `diagnoseTelemetryOnly` runs instead of the
+  error path (`diagnostics.go:159-174`).
+- **File physically absent, nothing deployed** → unchanged: the single
+  `LevelError` "failed to parse .zprof.yaml" Issue.
+- **File present but broken** (a YAML parse error — not `fs.ErrNotExist`) →
+  unchanged regardless of whether telemetry is deployed: still the single
+  `LevelError`. A malformed-but-present manifest is never silently treated as
+  "no manifest" — see `TestDiagnoseTelemetryOnlyMode`'s "broken manifest with
+  telemetry deployed stays an error" case above.
+
+`diagnoseTelemetryOnly` (`diagnostics.go:159-174`) opens with one `LevelInfo`
+Issue — `"no .zprof.yaml — manifest checks skipped (telemetry-only
+project)"` — then runs exactly the 9 of `Diagnose`'s ~21 checks that need no
+manifest at all: `checkRunsGitignored`, `checkRunLogs`,
+`checkAgentlogGitignored`, `checkAgentlogNotTracked`, `checkTelemetryHooks`,
+`checkPython3Available`, `checkAgentlogCleanVulnerability`,
+`checkGuardDeployment`, `checkRoleResolution` — the same nine, in the same
+order, as their position in the full list (`diagnostics.go:113-133`). Every
+check gated on `proj` itself — `checkOverlayCount`, `checkOverlaysExist`,
+`checkAgentFrontmatter`, `checkAgentVerdicts`, `checkAgentModels`,
+`checkManagedMarkers`, `checkTaskRunner`, `checkRouteAgentsExist`,
+`checkStopLists`, `checkOrphanAgents`, `checkAuditConfig`,
+`checkRunnerBudget` — is skipped outright, not fed a synthetic manifest:
+there is no overlay selection or agent roster to validate without one.
+`checkGuardDeployment` is the deliberate exception, not a tenth skip — see
+the matching Key invariant above for why it takes a zero-value
+`&manifest.ProjectManifest{}` instead.
+
+This is doctor's own control-flow change, not a guard-specific one — it
+governs every manifest-dependent check in `Diagnose()`, not only the guard
+checks documented above — but it's recorded here rather than in a
+freestanding `doctor.md` (still P2, not yet written, per `PLAN.md`) because
+`checkGuardDeployment`'s zero-value-manifest handling is the one piece of
+`diagnoseTelemetryOnly` that's genuinely guard-specific, and this file is
+already `zprof doctor`'s documented home (see "Doctor checks" above and
+[Apply](apply.md)'s "DeployTelemetry and `--telemetry-only`" section, which
+this feature diagnoses the deployed shape of).
+
 ### Doctrine and prompt contracts (#30)
 
 Issue #30 is prompt/config-only: it does not touch `zprof-guard.py`,
@@ -823,7 +895,10 @@ and Go E2E cases (`TestE2E_GuardDeploysAndEnforcesForcePush`'s new
 - `cli/internal/score/` — reads `guard-events.jsonl` (§7 format), no wiki file
   yet (P1 in `PLAN.md`); see "Score and stats integration" above
 - `cli/internal/doctor/` — diagnoses guard's deployed state read-only (§10),
-  no wiki file yet (P2 in `PLAN.md`); see "Doctor checks" above
+  no wiki file yet (P2 in `PLAN.md`); see "Doctor checks" above, and
+  "Telemetry-only diagnostics" above for the `.zprof.yaml`-absent branch
+  (#64) that reaches `checkGuardDeployment` with a zero-value manifest
+- [ADR-0001: config_hash resolution and telemetry-only redeploy](../adr/0001-collector-config-hash-and-telemetry-redeploy.md)
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
 - [ADR-0005: guard — context-evaluators `head_on_remote`, `linked_worktree`, `write_outside_repo`, `branch_pr_merged`](../adr/0005-guard-context-evaluators.md)
 - [ADR-0006: guard — merge-гейт (`merge_preflight`) и PR-гейт (`pr_create_gate`), событие `allow_unverified`](../adr/0006-guard-merge-pr-gate.md)

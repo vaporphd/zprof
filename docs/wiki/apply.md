@@ -139,6 +139,12 @@ carrying over `.zprof.yaml` for the agent/managed-block path, but since #28 does
 `apply.DeployTelemetry(pwd, base, guardLayers)`. `--minimal`, `--with-gates`, `--merge`
 have no effect in this mode. `--dry-run` prints all five target paths (collector script,
 schema, the two guard files, and the settings.local.json note) without writing.
+`--telemetry-only` never writes `.zprof.yaml` itself, so a project deployed this way —
+zprof's own repo checkout included — has telemetry/guard on disk with no manifest;
+since #64, `zprof doctor` recognizes exactly this shape (`fs.ErrNotExist` on
+`.zprof.yaml` plus a deployed collector or guard script) and runs a manifest-independent
+check subset instead of erroring — see [Guard](guard.md)'s "Telemetry-only diagnostics"
+section.
 
 ### Hooks
 

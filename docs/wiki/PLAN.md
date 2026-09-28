@@ -92,3 +92,24 @@
   clause; `doctor`'s own graph line gained a `(+ reads guard's ... — #29)`
   annotation) and a refreshed Head SHA — no Status Summary change since
   neither component's `Status`/count moved.
+- MAINTAIN run on `fix/issue-64-doctor-telemetry-only` / #64 updated
+  `guard.md` in place again (new "Telemetry-only diagnostics" section, one
+  new Key invariant on `checkGuardDeployment`'s zero-value-manifest handling,
+  Test coverage entry gained the two new `Diagnose()` telemetry-only tests)
+  rather than writing `doctor.md` — same P2/"not yet written" status as #29's
+  entry above. Unlike #29, this change is doctor's own top-level
+  `Diagnose()` control flow (which checks run at all when `.zprof.yaml` is
+  absent), not a guard-specific diagnostic — flagged explicitly in the new
+  section rather than silently filed as if it were guard-only. It landed in
+  `guard.md` anyway because `checkGuardDeployment`/`checkRoleResolution` are
+  the two guard-related checks among the nine the telemetry-only branch
+  runs (both already documented in this file's "Doctor checks" table per
+  #29) and this file is already `zprof doctor`'s documented home per that
+  precedent; the other seven checks it runs are collector/telemetry-general
+  and were already running unchanged before #64 — no new claim needed in
+  `collector.md`. `apply.md`'s "DeployTelemetry and
+  `--telemetry-only`" section got a one-paragraph cross-reference (that
+  section is what a reader following `--telemetry-only` finds first).
+  `INDEX.md`: `doctor`'s own graph line gained a `(...; falls back to a
+  manifest-independent check subset ... — #64, ADR-0001)` clause, refreshed
+  Head SHA — no Status Summary change.
