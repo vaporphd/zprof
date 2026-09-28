@@ -13,7 +13,7 @@ requires_base: ">= 0.1.0"
 #   backlog empty  → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR, gh issue create)
 #   issue picked   → task-runner dispatches architect (if ADR-trigger=yes) → implementer
 #   PR opened      → integration-gate (if in <INTEGRATION_SCOPE>) → wiki-keeper → reviewer
-#   approved       → pr-shepherd (pre-flight + delivery checks) → blocked: merge approval → human merges
+#   approved       → pr-shepherd (pre-flight + delivery checks → merge per MERGE_GATE → post-merge verify + stamp)
 #   post-merge     → spec-maintainer, docs-writer
 #
 # Base overlay already carries the upstream gates as agents/gates/:
@@ -53,7 +53,6 @@ tool_agents:
   - integration-gate
 
 stop_list:
-  - "merge PR в основную ветку"
   - "закрытие issue"
   - "создание релиза или тега"
   - "изменение настроек репозитория и CI-секретов"
