@@ -1078,3 +1078,123 @@ def test_guard_script_is_executable_with_shebang():
     with open(GUARD_PY, encoding="utf-8") as f:
         first_line = f.readline()
     assert first_line.startswith("#!/usr/bin/env python3")
+
+
+# ---------------------------------------------------------------------------
+# Issue #31 — shakedown false-deny audit: synthetic regression over the
+# implementer → tester → reviewer → pr-shepherd route, plus a regression
+# marker for the confirmed false positive (follow-up: issue #67).
+#
+# See docs/reviews/2026-09-29-guard-shakedown.md for the full methodology
+# (real Plan 2 dogfooding events vs. this synthetic table) and root-cause
+# writeup.
+# ---------------------------------------------------------------------------
+
+# (role, command, expected_rule_id_or_None) — expected_rule_id is None for
+# allow. Mirrors the "штатный маршрут" roles from issue #31 plus a couple of
+# read-only edge cases (git log alone, git stash) to separate confirmed
+# false positives from log entries that are merely undecidable (2-token
+# `_target()` redaction, see report).
+HAPPY_PATH_CASES = [
+    ("task-runner", "git status --porcelain", None),
+    ("task-runner", "git diff HEAD --stat", None),
+    ("task-runner", "git log -1", None),
+    ("task-runner", "date", None),
+    ("task-runner", "shasum somefile.txt", None),
+
+    ("implementer", "go build ./...", None),
+    ("implementer", "go test ./...", None),
+    ("implementer", "git add cli/foo.go", None),
+    ("implementer", 'git commit -m "feat(cli): x"', None),
+    ("implementer", "git push -u origin feature-branch", None),
+
+    ("tester", "go test ./...", None),
+    ("tester", "python3 -m pytest profiles/base/tests/", None),
+    ("tester", "git add profiles/base/tests/test_x.py", None),
+    ("tester", 'git commit -m "test(base): x"', None),
+
+    # reviewer is read-only: pure reads must allow...
+    ("reviewer", "git diff HEAD", None),
+    ("reviewer", "git log -3", None),
+    ("reviewer", "git log", None),
+    ("reviewer", "go vet ./...", None),
+    ("reviewer", "grep -rn foo .", None),
+    # ...but a real worktree mutation must still deny (correct, not a false
+    # positive: git stash mutates state shared across worktrees, and
+    # reviewer's contract is read-only).
+    ("reviewer", "git stash", "readonly_mutation"),
+
+    ("bug-hunter", "grep -rn err .", None),
+    ("bug-hunter", "python3 -m pytest -k repro", None),
+
+    ("wiki-keeper", "git add docs/wiki/x.md", None),
+    ("wiki-keeper", 'git commit -m "docs(wiki): x"', None),
+
+    ("pr-shepherd", "git checkout main", None),
+    ("pr-shepherd", "git pull --ff-only", None),
+    ("pr-shepherd", "git add -u", None),
+    ("pr-shepherd", 'git commit -m "chore: sync"', None),
+]
+
+
+@pytest.mark.parametrize("role,command,expected_rule", HAPPY_PATH_CASES)
+def test_happy_path_route_has_no_false_deny(tmp_path, role, command, expected_rule):
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role=role, cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    if expected_rule is None:
+        assert out is None, f"{command!r} (role={role}) unexpectedly denied: {out}"
+    else:
+        assert out is not None, f"{command!r} (role={role}) was not denied"
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith(f"zprof guard [{expected_rule}]:")
+
+
+def test_happy_path_pr_shepherd_merge_allows_with_clean_preflight(tmp_path, monkeypatch):
+    """pr-shepherd's own `gh pr merge` is only decidable via the `merge_preflight`
+    context (needs `gh pr view` for Closes #N / ## Gate, ADR-0006) — monkeypatch
+    `_run` the same way test_guard_merge.py does rather than duplicating that
+    fixture here.
+    """
+    _write_config(tmp_path, build_guard_config())
+
+    def fake_run(argv, cwd, timeout):
+        if argv[:3] == ["gh", "pr", "view"]:
+            body = "Closes #31\n\n## Summary\n- x\n\n## Gate\n- ok\n"
+            data = {"number": 31, "body": body, "closingIssuesReferences": [], "state": "OPEN"}
+            return 0, json.dumps(data)
+        return 1, ""
+
+    monkeypatch.setattr(zprof_guard, "_run", fake_run)
+    payload = _payload("Bash", _bash("gh pr merge 31 --squash"), role="pr-shepherd", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None
+
+
+# --- confirmed false positive (issue #31 -> follow-up issue #67) ----------
+#
+# `readonly_mutation` (guard.yaml:112-116) matches `$mutating_bash_patterns`
+# (telemetry.yaml:85-93) on the full normalized command with no `context`,
+# so — unlike `write_outside_repo` (guard.yaml:107-110, evaluator
+# `_write_outside_repo` in zprof-guard.py:488-527) — it has no
+# `allow_write_prefixes` awareness. A read-only role creating a scratch
+# directory under an explicitly allowed prefix (`/tmp/claude-*`,
+# guard.yaml:15-16) is denied anyway, because `mkdir` alone trips
+# `\b(mv|cp|rm|touch|mkdir)\b` regardless of target path.
+#
+# This test documents CURRENT (buggy) behavior — it is green because the
+# assertion is "still denies today", not "should be allowed". Fix tracked
+# in issue #67; do not change this test to `assert out is None` without
+# also closing that issue.
+def test_readonly_mutation_mkdir_in_allow_write_prefix_denies_current_behavior(tmp_path):
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash("mkdir -p /tmp/claude-sess123/repro"),
+                        role="bug-hunter", cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None, (
+        "mkdir under an allow_write_prefix scratch path is currently denied "
+        "for read-only roles (false positive, issue #67) -- if this now "
+        "allows, readonly_mutation gained path-awareness: update this test "
+        "and close #67 instead of deleting the assertion"
+    )
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("zprof guard [readonly_mutation]:")
