@@ -99,6 +99,19 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 - Agent files: 200–400 lines executors, 500–800 orchestrators
 <!-- zprof:end executing -->
 
+### Стек — доп. команды вне managed-блока (ADR 0002)
+
+`## Executing` выше — managed-блок (`buildExecutingTable`); pr-shepherd не
+считает его источником тест-команд, T1-сканер ищет метки `` Test: `<cmd>` ``
+по всему файлу независимо от секции (ADR 0002). Метки, которых ещё нет в
+managed-блоке, — здесь:
+
+- Python collector (`profiles/base/`): Test: `ruff check profiles/base/`
+  (lint, дополняет `Test:`-строку с pytest в managed-блоке выше) — версия
+  зафиксирована в `ruff.toml` (`required-version`) и
+  `.github/workflows/ci.yml` (`pip install ... ruff==0.16.9`), должны
+  совпадать.
+
 ## Интеграция ветки
 
 Готовая ветка попадает в `main` **только через PR**, который ведёт `pr-shepherd`:

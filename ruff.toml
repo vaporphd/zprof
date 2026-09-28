@@ -8,6 +8,12 @@
 
 target-version = "py310"
 
+# Pinned to match `.github/workflows/ci.yml` (`pip install ... ruff==0.16.9`)
+# exactly. A locally installed ruff at a different version refuses to run
+# instead of silently drifting from CI (issue #56: unpinned CI ruff surfaced
+# a rule not caught by an unrelated/missing local ruff).
+required-version = "0.16.9"
+
 [lint.per-file-ignores]
 # zprof-collect.py runs as a Claude Code hook and must never crash the
 # session: "Always exits 0. Errors go to collect.log." (module docstring).
