@@ -2,6 +2,7 @@ package apply
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -324,6 +325,85 @@ func TestEnsureGuardSettings_EnabledEmptyDenyCreatesNoKeys(t *testing.T) {
 	var settings map[string]any
 	require.NoError(t, json.Unmarshal(data, &settings))
 	require.NotContains(t, settings, "permissions")
+}
+
+// TestSubagentStopHooks_CollectorAndGuardUpgradeIndependently pins ADR 0009
+// I8's zprofHookIndex substring-match claim directly: on the SubagentStop
+// event, where both the collector and guard hooks land, a stale command (not
+// just a stale matcher) must be upgraded in place by its own owner
+// (EnsureHooks for zprof-collect.py, ensureGuardSettings for zprof-guard.py)
+// without the other owner's call touching it.
+func TestSubagentStopHooks_CollectorAndGuardUpgradeIndependently(t *testing.T) {
+	dir := t.TempDir()
+	claudeDir := filepath.Join(dir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0o755))
+
+	staleCollector := map[string]any{
+		"hooks": []any{map[string]any{"type": "command", "command": "OLD zprof-collect.py subagent-stop"}},
+	}
+	// A guard SubagentStop entry should never carry a matcher; this
+	// simulates a stale/corrupt one alongside a stale command, so upgrade
+	// must fix both.
+	staleGuard := map[string]any{
+		"hooks":   []any{map[string]any{"type": "command", "command": "OLD zprof-guard.py subagent-stop"}},
+		"matcher": "SHOULD_NOT_BE_HERE",
+	}
+	initial := map[string]any{
+		"hooks": map[string]any{"SubagentStop": []any{staleCollector, staleGuard}},
+	}
+	data, err := json.MarshalIndent(initial, "", "  ")
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.local.json"), data, 0o644))
+
+	// EnsureHooks must upgrade only the collector entry.
+	require.NoError(t, EnsureHooks(dir))
+	hooks := readHooks(t, dir)
+	entries := hooks["SubagentStop"].([]any)
+	require.Len(t, entries, 2, "no duplication, no entry dropped")
+
+	var collectorEntry, guardEntry map[string]any
+	for _, e := range entries {
+		m := e.(map[string]any)
+		if strings.Contains(hookCommand(m), "zprof-collect.py") {
+			collectorEntry = m
+		}
+		if strings.Contains(hookCommand(m), "zprof-guard.py") {
+			guardEntry = m
+		}
+	}
+	require.NotNil(t, collectorEntry)
+	require.NotNil(t, guardEntry)
+	require.Equal(t, fmt.Sprintf(collectorHookTemplate, "subagent-stop"), hookCommand(collectorEntry),
+		"stale collector command upgraded in place")
+	require.Equal(t, "OLD zprof-guard.py subagent-stop", hookCommand(guardEntry),
+		"guard entry untouched by EnsureHooks")
+	require.Equal(t, "SHOULD_NOT_BE_HERE", guardEntry["matcher"],
+		"guard entry's stale matcher untouched by EnsureHooks")
+
+	// ensureGuardSettings must now upgrade only the guard entry, leaving the
+	// already-fresh collector entry exactly as EnsureHooks left it.
+	require.NoError(t, ensureGuardSettings(dir, true, nil))
+	hooks = readHooks(t, dir)
+	entries = hooks["SubagentStop"].([]any)
+	require.Len(t, entries, 2, "still no duplication")
+
+	collectorEntry, guardEntry = nil, nil
+	for _, e := range entries {
+		m := e.(map[string]any)
+		if strings.Contains(hookCommand(m), "zprof-collect.py") {
+			collectorEntry = m
+		}
+		if strings.Contains(hookCommand(m), "zprof-guard.py") {
+			guardEntry = m
+		}
+	}
+	require.NotNil(t, collectorEntry)
+	require.NotNil(t, guardEntry)
+	require.Equal(t, fmt.Sprintf(collectorHookTemplate, "subagent-stop"), hookCommand(collectorEntry),
+		"collector entry untouched by ensureGuardSettings")
+	require.Equal(t, fmt.Sprintf(guardHookTemplate, "subagent-stop"), hookCommand(guardEntry),
+		"stale guard command upgraded in place")
+	require.NotContains(t, guardEntry, "matcher", "stale guard matcher cleared on upgrade")
 }
 
 func toStringSlice(v any) []string {

@@ -434,4 +434,116 @@ func TestDeployGuard_DisabledAfterEnabledLeavesExistingFilesUntouched(t *testing
 	}
 }
 
+// TestDeployGuard_RepeatedApplyIsIdempotent fixes the AC10 idempotency
+// requirement at the deployGuard (not just ensureGuardSettings) level:
+// calling deployGuard repeatedly with unchanged inputs must not grow
+// settings.local.json's guard hook entries or permissions.deny, and must
+// re-render byte-identical guard.json/zprof-guard.py each time.
+func TestDeployGuard_RepeatedApplyIsIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	base := testBase()
+	proj := &manifest.GuardConfig{ExtraDenyBash: []string{"rm -rf /"}}
+	layers := GuardLayers{Project: proj}
+
+	var lastJSON, lastScript []byte
+	for i := 0; i < 3; i++ {
+		written, err := deployGuard(dir, base, layers)
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{
+			filepath.Join(dir, ".claude", "zprof-guard.py"),
+			filepath.Join(dir, ".claude", "guard.json"),
+		}, written, "call %d", i)
+
+		jsonData, err := os.ReadFile(filepath.Join(dir, ".claude", "guard.json"))
+		require.NoError(t, err)
+		scriptData, err := os.ReadFile(filepath.Join(dir, ".claude", "zprof-guard.py"))
+		require.NoError(t, err)
+		if i > 0 {
+			require.Equal(t, lastJSON, jsonData, "guard.json must be byte-stable across repeated identical apply (call %d)", i)
+			require.Equal(t, lastScript, scriptData, "zprof-guard.py must be byte-stable across repeated identical apply (call %d)", i)
+		}
+		lastJSON, lastScript = jsonData, scriptData
+
+		settingsData, err := os.ReadFile(filepath.Join(dir, ".claude", "settings.local.json"))
+		require.NoError(t, err)
+		var settings map[string]any
+		require.NoError(t, json.Unmarshal(settingsData, &settings))
+		hooks := settings["hooks"].(map[string]any)
+		require.Len(t, hooks["PreToolUse"].([]any), 1, "call %d: PreToolUse must not grow", i)
+		require.Len(t, hooks["SubagentStop"].([]any), 1, "call %d: SubagentStop must not grow", i)
+
+		perms, _ := settings["permissions"].(map[string]any)
+		require.NotNil(t, perms, "call %d", i)
+		deny := toStringSlice(perms["deny"])
+		require.Equal(t, []string{"Bash(git push --force*)"}, deny, "call %d: permissions.deny must not grow", i)
+	}
+}
+
+// TestDeployGuard_MergeRolesSubstitutionUsesProjectReplacedValue is the
+// deployGuard-level integration check for ADR 0009 I3's "$merge_roles table
+// is built from the already-project-replaced doc.MergeRoles" decision: a
+// rule referencing $merge_roles must resolve to the project's wholesale
+// replacement, never to the base/overlay concatenation that mergeGuard
+// computed before the project layer ran.
+func TestDeployGuard_MergeRolesSubstitutionUsesProjectReplacedValue(t *testing.T) {
+	dir := t.TempDir()
+	proj := &manifest.GuardConfig{MergeRoles: []string{"solo-role"}}
+
+	_, err := deployGuard(dir, testBase(), GuardLayers{Project: proj})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "guard.json"))
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+
+	require.Equal(t, []any{"solo-role"}, doc["merge_roles"])
+
+	rules := doc["rules"].([]any)
+	var found bool
+	for _, r := range rules {
+		rule := r.(map[string]any)
+		if rule["id"] == "merge_role" {
+			found = true
+			require.Equal(t, []any{"solo-role"}, rule["not_roles"],
+				"merge_role's $merge_roles substitution must use the project-replaced value, not base's [pr-shepherd]")
+		}
+	}
+	require.True(t, found, "merge_role rule must be present")
+}
+
+// TestDeployGuard_ReadonlyRolesSubstitutionUsesOverlayMergedValue is the
+// mirror check on the overlay-concatenation side: $readonly_roles must
+// resolve to the base+overlay merged list (not just base's), exercised
+// through the full deployGuard pipeline rather than resolveGuardRefs in
+// isolation.
+func TestDeployGuard_ReadonlyRolesSubstitutionUsesOverlayMergedValue(t *testing.T) {
+	dir := t.TempDir()
+	o := &overlay.Overlay{
+		Manifest:    &manifest.OverlayManifest{Name: "fake-ios"},
+		GuardSchema: []byte("readonly_roles: [architect]\n"),
+	}
+
+	_, err := deployGuard(dir, testBase(), GuardLayers{Overlays: []*overlay.Overlay{o}})
+	require.NoError(t, err)
+
+	data, err := os.ReadFile(filepath.Join(dir, ".claude", "guard.json"))
+	require.NoError(t, err)
+	var doc map[string]any
+	require.NoError(t, json.Unmarshal(data, &doc))
+	require.ElementsMatch(t, []any{"auditor", "architect"}, doc["readonly_roles"])
+
+	rules := doc["rules"].([]any)
+	var found bool
+	for _, r := range rules {
+		rule := r.(map[string]any)
+		if rule["id"] == "readonly_mutation" {
+			found = true
+			require.ElementsMatch(t, []any{"auditor", "architect"}, rule["roles"],
+				"readonly_mutation's $readonly_roles substitution must reflect the base+overlay merge")
+		}
+	}
+	require.True(t, found, "readonly_mutation rule must be present")
+}
+
 func boolPtr(b bool) *bool { return &b }
