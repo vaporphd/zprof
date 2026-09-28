@@ -2,13 +2,12 @@
 
 ## Status
 - 2026-09-27: panel-2026-09-27 (#14–#22 + #34/#36/#37, plan-1.md); guard (#23–#31, plan-2.md). Решения Alex: auto-merge везде; --delete-branch остаётся; защита контрактов = required CI; guard fail-open, deny везде.
-- Done: #14 PR #32, #22 PR #33, #34 PR #35, #15 PR #38, #16 PR #39, #19 PR #40 (runner.max_dispatches=14, audit.max_dispatches deprecated). #18 superseded #28.
-- Done: #20 PR #41.
-- Score 69/100 · Solid · done · 2026-09-27-runner-global-max-dispatches · confidence full
-  25.8M tok · 10 dispatch · 227 tool calls · 30 min · sonnet×9 opus×2 · −10 P7 19 нарушений (7 ролей) · −6 P6 12% токенов без результата (general-purpose, implementer) · −5 P1 5%
-- Тренд P7 за run: 15 → 5 → 17 → 19; implementer −13. Runner диспатчит general-purpose вместо отсутствующего spec-maintainer → #21.
+- Done: #14 PR #32, #22 PR #33, #34 PR #35, #15 PR #38, #16 PR #39, #19 PR #40, #20 PR #41 (verdicts.yaml, аудиторы на verdict:, 6 overlay reviewer'ов, ADR 0003), #21 PR #42. #18 superseded #28.
+- Score 84/100 · Solid · done · 2026-09-27-verdicts-yaml-registry · confidence full
+  92.1M tok · 7 dispatch · 442 tool calls · 68 min · sonnet×6 opus×2 · −10 P7 12 нарушений (5 ролей) · −3 P3 implementer 9/52 Read · −3 P1 3%
+- Тренд P7 за run: 15 → 5 → 17 → 19 → 12. Стоимость run #20 — 92M (implementer 59.6M): кандидат на разбор после Plan 1.
 
 ## Next
-- Done: #20. В работе: #21, #36, #37; Plan 2 с #23. #17 — руками Alex.
-- Раннер #19 оставил checkout на feature-ветке и не выровнял main — main сделал сам; локальные merged-ветки не удаляю (решение Alex).
-- Local main = origin/main (4cbb907). Untracked docs/*, thoughts/ не трогать.
+- В работе: #36, #37 (Plan 1); Plan 2 с #23. #17 — руками Alex.
+- Локальные merged-ветки и 5 старых remote-веток PR #3–#9 не удаляю — решение Alex.
+- Local main = origin/main (e4f09ae). Untracked docs/*, thoughts/ не трогать.
