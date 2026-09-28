@@ -71,6 +71,7 @@ func TestDiagnoseSingleOverlayNoCountIssue(t *testing.T) {
 	require.NoError(t, os.MkdirAll(ovDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
 		[]byte("name: a\nstop_list: [\"x\"]\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -134,6 +135,7 @@ func TestDiagnoseAgentResolvableModelIsClean(t *testing.T) {
 	// task-runner is a role, so it must also declare a return_format.
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "agents", "task-runner.md"),
 		[]byte("---\nname: task-runner\nmodel: opus\nreturn_format: |\n  verdict: done\n---\nBody.\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -207,6 +209,7 @@ func TestDiagnoseCleanProjectHasNoIssues(t *testing.T) {
 	repo := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(proj, "CLAUDE.md"),
 		[]byte("intro\n<!-- zprof:begin overlay=base block=intro -->\nbody\n<!-- zprof:end -->\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -1368,4 +1371,456 @@ func TestCheckAgentVerdicts_SchemaJSONWithVerdictsKeyIsSilent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentlogDir, "schema.json"), []byte(`{"schema_version":1,"verdicts":{"version":1}}`), 0o644))
 
 	require.Empty(t, checkAgentVerdicts(proj, repo))
+}
+
+// --- guard hooks in settings.local.json (guard stage, ADR 0009) ----------
+
+func guardHookJSON(events ...string) string {
+	entries := make([]string, len(events))
+	for i, e := range events {
+		entries[i] = fmt.Sprintf(`"%s": [{"hooks": [{"type": "command", "command": "test -x zprof-guard.py && zprof-guard.py %s || true"}]}]`, e, e)
+	}
+	return "{\n  \"hooks\": {\n    " + strings.Join(entries, ",\n    ") + "\n  }\n}"
+}
+
+func TestCheckGuardHooks(t *testing.T) {
+	cases := []struct {
+		name            string
+		setup           func(t *testing.T, dir string)
+		wantEmpty       bool
+		wantLevel       string
+		wantContains    string
+		wantNotContains string
+	}{
+		{
+			// Gated on the guard script being deployed — a project that
+			// never applied a guard-shipping base profile has nothing for
+			// hooks to call.
+			name:      "silent without guard script",
+			wantEmpty: true,
+		},
+		{
+			name: "warns when settings missing",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+			wantLevel:    LevelWarn,
+			wantContains: "guard hooks missing for PreToolUse, SubagentStop",
+		},
+		{
+			name: "warns on partial install",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+					[]byte(guardHookJSON("PreToolUse")), 0o644))
+			},
+			wantLevel:       LevelWarn,
+			wantContains:    "SubagentStop",
+			wantNotContains: "PreToolUse,",
+		},
+		{
+			name: "silent when fully installed",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+					[]byte(guardHookJSON("PreToolUse", "SubagentStop")), 0o644))
+			},
+			wantEmpty: true,
+		},
+		{
+			name: "warns on malformed JSON",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"), []byte("{not valid json"), 0o644))
+			},
+			wantLevel:    LevelWarn,
+			wantContains: "failed to parse",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.setup != nil {
+				tc.setup(t, dir)
+			}
+			issues := checkGuardHooks(dir)
+			if tc.wantEmpty {
+				require.Empty(t, issues)
+				return
+			}
+			require.Len(t, issues, 1)
+			require.Equal(t, tc.wantLevel, issues[0].Level)
+			require.Contains(t, issues[0].Message, tc.wantContains)
+			if tc.wantNotContains != "" {
+				require.NotContains(t, issues[0].Message, tc.wantNotContains)
+			}
+		})
+	}
+}
+
+// --- guard.json (guard stage, ADR 0009) -----------------------------------
+
+func TestCheckGuardConfig(t *testing.T) {
+	cases := []struct {
+		name         string
+		setup        func(t *testing.T, dir string)
+		wantEmpty    bool
+		wantContains string
+	}{
+		{
+			name:         "warns when missing",
+			wantContains: "missing",
+		},
+		{
+			name: "warns on malformed JSON",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte("{not valid json"), 0o644))
+			},
+			wantContains: "failed to parse",
+		},
+		{
+			name: "warns on empty rules",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte(`{"rules": []}`), 0o644))
+			},
+			wantContains: "no rules",
+		},
+		{
+			name: "silent when populated",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+					[]byte(`{"rules": [{"id": "force_push", "tools": ["Bash"]}]}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.setup != nil {
+				tc.setup(t, dir)
+			}
+			issues := checkGuardConfig(dir)
+			if tc.wantEmpty {
+				require.Empty(t, issues)
+				return
+			}
+			require.Len(t, issues, 1)
+			require.Equal(t, LevelWarn, issues[0].Level)
+			require.True(t, strings.HasPrefix(issues[0].Message, "guard.json"))
+			require.Contains(t, issues[0].Message, tc.wantContains)
+		})
+	}
+}
+
+// --- permissions.deny vs guard.json's permissions_deny (guard stage) -----
+
+func TestCheckPermissionsDeny(t *testing.T) {
+	cases := []struct {
+		name            string
+		setup           func(t *testing.T, dir string)
+		wantEmpty       bool
+		wantContains    string
+		wantNotContains string
+	}{
+		{
+			name:      "silent when guard config missing",
+			wantEmpty: true,
+		},
+		{
+			name: "silent when permissions_deny empty",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte(`{"permissions_deny": []}`), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"), []byte(`{"permissions": {"deny": []}}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+		{
+			name: "warns on missing entries",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+					[]byte(`{"permissions_deny": ["deny-a", "deny-b"]}`), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+					[]byte(`{"permissions": {"deny": ["deny-a"]}}`), 0o644))
+			},
+			wantContains:    "deny-b",
+			wantNotContains: "deny-a",
+		},
+		{
+			name: "warns when settings missing",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+					[]byte(`{"permissions_deny": ["deny-a"]}`), 0o644))
+			},
+			wantContains: "deny-a",
+		},
+		{
+			name: "silent when superset",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+					[]byte(`{"permissions_deny": ["deny-a"]}`), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+					[]byte(`{"permissions": {"deny": ["deny-a", "deny-b"]}}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.setup != nil {
+				tc.setup(t, dir)
+			}
+			issues := checkPermissionsDeny(dir)
+			if tc.wantEmpty {
+				require.Empty(t, issues)
+				return
+			}
+			require.Len(t, issues, 1)
+			require.Equal(t, LevelWarn, issues[0].Level)
+			require.Contains(t, issues[0].Message, tc.wantContains)
+			if tc.wantNotContains != "" {
+				require.NotContains(t, issues[0].Message, tc.wantNotContains)
+			}
+		})
+	}
+}
+
+// --- checkGuardDeployment: single gate on guard.enabled (guard stage) ----
+
+func TestCheckGuardDeployment(t *testing.T) {
+	enabled := true
+	disabled := false
+	cases := []struct {
+		name        string
+		setup       func(t *testing.T, dir string)
+		proj        *manifest.ProjectManifest
+		wantLen     int
+		wantLevel   string
+		wantMessage string
+	}{
+		{
+			name: "aggregates when guard nil",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+			proj: &manifest.ProjectManifest{},
+		},
+		{
+			name: "aggregates when explicitly enabled",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+			proj: &manifest.ProjectManifest{Guard: &manifest.GuardConfig{Enabled: &enabled}},
+		},
+		{
+			// zprof-guard.py deliberately absent and guard.json deliberately
+			// malformed — if the three underlying checks still ran, they'd
+			// each produce a warning. The gate must suppress all three, not
+			// just skip adding its own info on top.
+			name: "silences underlying checks when disabled",
+			setup: func(t *testing.T, dir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte("{not valid json"), 0o644))
+			},
+			proj:        &manifest.ProjectManifest{Guard: &manifest.GuardConfig{Enabled: &disabled}},
+			wantLen:     1,
+			wantLevel:   LevelInfo,
+			wantMessage: "guard disabled by project config",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tc.setup(t, dir)
+			issues := checkGuardDeployment(dir, tc.proj)
+			if tc.wantLen > 0 {
+				require.Len(t, issues, tc.wantLen)
+				require.Equal(t, tc.wantLevel, issues[0].Level)
+				require.Equal(t, tc.wantMessage, issues[0].Message)
+				return
+			}
+			require.NotEmpty(t, issues)
+			require.False(t, findIssue(issues, LevelInfo, "guard disabled by project config"))
+		})
+	}
+}
+
+// --- checkRoleResolution: subagent meta.json lookup -----------------------
+
+func slugFor(projectDir string) string {
+	return "-" + strings.ReplaceAll(strings.TrimPrefix(projectDir, "/"), "/", "-")
+}
+
+// satisfyNewGuardChecks writes the minimal fixtures needed so
+// checkGuardDeployment/checkRoleResolution stay silent: a guard.json with a
+// non-empty rules list (checkGuardConfig has no zprof-guard.py gate — see
+// plan-issue-29.md item 4 — so it fires on any project missing it), a HOME
+// override, and a matching subagent meta.json with agentType set. Used by
+// pre-existing "no issues" tests written before these two checks existed,
+// so their fixtures never accounted for either.
+func satisfyNewGuardChecks(t *testing.T, projectDir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, ".claude", "guard.json"),
+		[]byte(`{"rules": [{"id": "x", "tools": ["Bash"]}]}`), 0o644))
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(projectDir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+		[]byte(`{"agentType": "implementer"}`), 0o644))
+}
+
+func TestCheckRoleResolution(t *testing.T) {
+	cases := []struct {
+		name string
+		// setHome false simulates HOME unset (empty string), which must
+		// short-circuit before any glob — there's nothing to resolve
+		// against, and that must not be reported as a defect.
+		setHome bool
+		// setup receives the metaDir checkRoleResolution will glob and may
+		// leave it never created (e.g. "no projects dir at all").
+		setup       func(t *testing.T, metaDir string)
+		wantEmpty   bool
+		wantLevel   string
+		wantMessage string // exact match; empty skips the exact check
+	}{
+		{
+			name:        "info when no projects dir at all",
+			setHome:     true,
+			wantLevel:   LevelInfo,
+			wantMessage: "role resolution unverified: no subagent meta found yet",
+		},
+		{
+			name:    "silent when agentType found",
+			setHome: true,
+			setup: func(t *testing.T, metaDir string) {
+				require.NoError(t, os.MkdirAll(metaDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+					[]byte(`{"agentType": "implementer"}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+		{
+			name:    "info when meta lacks agentType",
+			setHome: true,
+			setup: func(t *testing.T, metaDir string) {
+				require.NoError(t, os.MkdirAll(metaDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+					[]byte(`{"model": "sonnet"}`), 0o644))
+			},
+			wantLevel: LevelInfo,
+		},
+		{
+			name:    "silent when one of many meta has agentType",
+			setHome: true,
+			setup: func(t *testing.T, metaDir string) {
+				require.NoError(t, os.MkdirAll(metaDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+					[]byte(`{"model": "sonnet"}`), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-2.meta.json"),
+					[]byte(`{"agentType": "tester"}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+		{
+			name:      "silent when HOME unset",
+			setHome:   false,
+			wantEmpty: true,
+		},
+		{
+			// A directory named *.meta.json matches the glob but fails
+			// os.ReadFile, exercising the read-error continue branch — the
+			// function still falls through to the "unverified" info once
+			// every match has failed to yield an agentType.
+			name:    "skips unreadable meta file",
+			setHome: true,
+			setup: func(t *testing.T, metaDir string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(metaDir, "agent-1.meta.json"), 0o755))
+			},
+			wantLevel:   LevelInfo,
+			wantMessage: "role resolution unverified: no subagent meta found yet",
+		},
+		{
+			// A *.meta.json file that isn't valid JSON is skipped via
+			// continue rather than failing the whole check — exercising the
+			// json.Unmarshal error branch — and a later, valid file with
+			// agentType is still found.
+			name:    "skips malformed meta JSON then finds later match",
+			setHome: true,
+			setup: func(t *testing.T, metaDir string) {
+				require.NoError(t, os.MkdirAll(metaDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"), []byte("{not valid json"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-2.meta.json"),
+					[]byte(`{"agentType": "implementer"}`), 0o644))
+			},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if !tc.setHome {
+				t.Setenv("HOME", "")
+			} else {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				if tc.setup != nil {
+					tc.setup(t, filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents"))
+				}
+			}
+
+			issues := checkRoleResolution(dir)
+			if tc.wantEmpty {
+				require.Empty(t, issues)
+				return
+			}
+			require.Len(t, issues, 1)
+			require.Equal(t, tc.wantLevel, issues[0].Level)
+			if tc.wantMessage != "" {
+				require.Equal(t, tc.wantMessage, issues[0].Message)
+			}
+		})
+	}
+}
+
+// --- Diagnose(): guard checks are wired in ---------------------------------
+
+// A project with no guard.yaml section and no zprof-guard.py/guard.json
+// deployed still gets the guard.json-missing warning (checkGuardConfig has
+// no deployment gate) and the role-resolution info — proof the two new
+// lines in Diagnose() are actually reached, without regressing the count of
+// issues the existing 19 checks already produce on this fixture.
+func TestDiagnoseIncludesGuardAndRoleResolutionChecks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelWarn, "guard.json"))
+	require.True(t, findIssue(issues, LevelInfo, "role resolution unverified"))
 }

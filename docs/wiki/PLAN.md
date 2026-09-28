@@ -80,3 +80,15 @@
   `implemented`, the dependency graph's `guard`/`apply` nodes got the new
   artifact-deploy edge (same pattern as collector → apply), Status Summary
   `Implemented: 21` / `In progress: 0`.
+- MAINTAIN run on `feat/doctor-guard-checks-29` / #29 updated `guard.md` in
+  place (new "Doctor checks" section, `Dependants` gained `doctor`, one new
+  invariant, Spec refs gained §10, Test coverage entry gained the 24-test
+  doctor breakdown) rather than writing `doctor.md` — `doctor.md` stays P2,
+  not yet written; #29's five checks are read-only diagnostics over guard's
+  already-documented deployed artifacts (`.claude/guard.json`,
+  `settings.local.json` hook entries, `guard.enabled`), not a new top-level
+  component, same reasoning as #27/#28 above. `INDEX.md` got the matching
+  data-contract edges (`guard`'s dependency-graph note gained the `doctor`
+  clause; `doctor`'s own graph line gained a `(+ reads guard's ... — #29)`
+  annotation) and a refreshed Head SHA — no Status Summary change since
+  neither component's `Status`/count moved.

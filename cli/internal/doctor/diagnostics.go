@@ -81,6 +81,9 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  18. every chain cell in task-runner.md's `## Роутинг` table names only
 //     agents present under .claude/agents/ or whitelisted in
 //     `### Условные агенты маршрутов`
+//  19. guard.enabled, guard hooks, guard.json and its permissions_deny are
+//     deployed consistently (ADR 0009)
+//  20. role resolution has at least one subagent meta.json on record
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -116,6 +119,8 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
 	out = append(out, checkAuditConfig(projectDir, proj)...)
 	out = append(out, checkRunnerBudget(proj)...)
+	out = append(out, checkGuardDeployment(projectDir, proj)...)
+	out = append(out, checkRoleResolution(projectDir)...)
 	return out, nil
 }
 
@@ -928,7 +933,7 @@ func checkTelemetryHooks(projectDir string) []Issue {
 	hooks, _ := settings["hooks"].(map[string]any)
 	var missing []string
 	for _, event := range telemetryHookEvents {
-		if !hookArrayHasCollector(hooks[event]) {
+		if !hookArrayHasScript(hooks[event], "zprof-collect.py") {
 			missing = append(missing, event)
 		}
 	}
@@ -942,10 +947,11 @@ func checkTelemetryHooks(projectDir string) []Issue {
 	}}
 }
 
-// hookArrayHasCollector reports whether a settings.local.json hooks[event]
-// value already contains a zprof-collect.py invocation. Mirrors
-// internal/apply.hasZprofHook's marshal-and-substring-check approach.
-func hookArrayHasCollector(v any) bool {
+// hookArrayHasScript reports whether a settings.local.json hooks[event]
+// value already contains an invocation of script (e.g. "zprof-collect.py"
+// or "zprof-guard.py"). Mirrors internal/apply.hasZprofHook's
+// marshal-and-substring-check approach.
+func hookArrayHasScript(v any, script string) bool {
 	entries, ok := v.([]any)
 	if !ok {
 		return false
@@ -955,11 +961,188 @@ func hookArrayHasCollector(v any) bool {
 		if err != nil {
 			continue
 		}
-		if strings.Contains(string(data), "zprof-collect.py") {
+		if strings.Contains(string(data), script) {
 			return true
 		}
 	}
 	return false
+}
+
+// guardHookEvents are the two Claude Code hook events zprof wires up to
+// drive zprof-guard.py (ADR 0009, design §8.4). Kept as a local literal —
+// mirroring internal/apply.guardHooks's keys — rather than importing
+// internal/apply for two string constants (same reasoning as
+// telemetryHookEvents above).
+var guardHookEvents = []string{"PreToolUse", "SubagentStop"}
+
+// checkGuardHooks warns when settings.local.json doesn't wire up both guard
+// hooks with a zprof-guard.py command.
+//
+// Gated on the guard script actually being deployed
+// (.claude/zprof-guard.py) — same reasoning as checkTelemetryHooks's gate: a
+// project that never applied a guard-shipping base profile has nothing for
+// the hooks to call, so there's nothing to warn about yet.
+func checkGuardHooks(projectDir string) []Issue {
+	if _, err := os.Stat(filepath.Join(projectDir, ".claude", "zprof-guard.py")); err != nil {
+		return nil
+	}
+
+	p := filepath.Join(projectDir, ".claude", "settings.local.json")
+	data, err := os.ReadFile(p)
+	var hooks map[string]any
+	if err == nil {
+		var settings map[string]any
+		if unmarshalErr := json.Unmarshal(data, &settings); unmarshalErr != nil {
+			return []Issue{{
+				Level:   LevelWarn,
+				Path:    p,
+				Message: fmt.Sprintf("settings.local.json failed to parse: %v — cannot verify guard hooks are installed", unmarshalErr),
+			}}
+		}
+		hooks, _ = settings["hooks"].(map[string]any)
+	}
+	// A missing settings.local.json and a missing "hooks" key are treated
+	// the same way: both events are absent, hooks stays nil either way.
+
+	var missing []string
+	for _, event := range guardHookEvents {
+		if !hookArrayHasScript(hooks[event], "zprof-guard.py") {
+			missing = append(missing, event)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return []Issue{{
+		Level:   LevelWarn,
+		Path:    p,
+		Message: fmt.Sprintf("guard hooks missing for %s; run `zprof apply`", strings.Join(missing, ", ")),
+	}}
+}
+
+// guardConfigRules is the shape checkGuardConfig needs from guard.json to
+// tell whether the merged ruleset is non-empty. Mirrors the `rules` key
+// apply/guard.go's guardDoc.render() writes.
+type guardConfigRules struct {
+	Rules []map[string]any `json:"rules"`
+}
+
+// checkGuardConfig warns about .claude/guard.json's presence, parseability
+// and content. Unlike checkGuardHooks, this is not gated on
+// .claude/zprof-guard.py existing: apply writes both files together
+// whenever a base profile ships GuardScript/GuardSchema, but guard.json can
+// in principle exist on its own, and doctor reports what's actually on
+// disk rather than assume the pairing (see plan-issue-29.md item 4).
+func checkGuardConfig(projectDir string) []Issue {
+	p := filepath.Join(projectDir, ".claude", "guard.json")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    p,
+			Message: "guard.json is missing — run `zprof apply`",
+		}}
+	}
+	var cfg guardConfigRules
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    p,
+			Message: fmt.Sprintf("guard.json failed to parse: %v", err),
+		}}
+	}
+	if len(cfg.Rules) == 0 {
+		return []Issue{{
+			Level:   LevelWarn,
+			Path:    p,
+			Message: "guard.json has no rules — guard will never deny anything; run `zprof apply`",
+		}}
+	}
+	return nil
+}
+
+// guardConfigDeny is the shape checkPermissionsDeny needs from guard.json.
+type guardConfigDeny struct {
+	PermissionsDeny []string `json:"permissions_deny"`
+}
+
+// settingsPermissionsDeny is the shape checkPermissionsDeny needs from
+// settings.local.json.
+type settingsPermissionsDeny struct {
+	Permissions struct {
+		Deny []string `json:"deny"`
+	} `json:"permissions"`
+}
+
+// checkPermissionsDeny warns when settings.local.json's permissions.deny
+// list is missing entries guard.json's permissions_deny declares. It
+// self-gates on guard.json being readable and non-empty: an unreadable or
+// unparseable guard.json is already reported by checkGuardConfig, and an
+// empty permissions_deny has nothing to compare against — either way this
+// check stays silent rather than duplicate or manufacture a warning.
+func checkPermissionsDeny(projectDir string) []Issue {
+	guardPath := filepath.Join(projectDir, ".claude", "guard.json")
+	data, err := os.ReadFile(guardPath)
+	if err != nil {
+		return nil
+	}
+	var guardCfg guardConfigDeny
+	if err := json.Unmarshal(data, &guardCfg); err != nil {
+		return nil
+	}
+	if len(guardCfg.PermissionsDeny) == 0 {
+		return nil
+	}
+
+	settingsPath := filepath.Join(projectDir, ".claude", "settings.local.json")
+	var current []string
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		var settingsCfg settingsPermissionsDeny
+		if json.Unmarshal(data, &settingsCfg) == nil {
+			current = settingsCfg.Permissions.Deny
+		}
+	}
+	// A missing or unparseable settings.local.json is treated as an empty
+	// deny list — checkGuardHooks/checkTelemetryHooks already diagnose a
+	// malformed settings.local.json; this check would only duplicate that.
+
+	have := make(map[string]bool, len(current))
+	for _, d := range current {
+		have[d] = true
+	}
+	var missing []string
+	for _, d := range guardCfg.PermissionsDeny {
+		if !have[d] {
+			missing = append(missing, d)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return []Issue{{
+		Level: LevelWarn,
+		Path:  settingsPath,
+		Message: fmt.Sprintf(
+			"permissions.deny is missing %d value(s) from guard.json's permissions_deny — run `zprof apply`: %s",
+			len(missing), strings.Join(missing, ", ")),
+	}}
+}
+
+// checkGuardDeployment is the single gate on guard.enabled: false. When a
+// project's .zprof.yaml explicitly disables guard, checkGuardHooks/
+// checkGuardConfig/checkPermissionsDeny never run — a project that opted
+// out shouldn't be nagged about a deployment it declined. proj.Guard == nil
+// means guard is on by default (GuardConfig.IsEnabled), so this reports
+// nothing unless the project layer is present and explicitly says false.
+func checkGuardDeployment(projectDir string, proj *manifest.ProjectManifest) []Issue {
+	if proj.Guard != nil && !proj.Guard.IsEnabled() {
+		return []Issue{{Level: LevelInfo, Message: "guard disabled by project config"}}
+	}
+	var out []Issue
+	out = append(out, checkGuardHooks(projectDir)...)
+	out = append(out, checkGuardConfig(projectDir)...)
+	out = append(out, checkPermissionsDeny(projectDir)...)
+	return out
 }
 
 // python3CheckTimeout bounds checkPython3Available so a broken python3 —
@@ -1052,4 +1235,39 @@ func checkAgentlogCleanVulnerability(projectDir string) []Issue {
 		Path:    dir,
 		Message: "`.agentlog/` is gitignored and lives in the working tree — `git clean -xdf` deletes it along with everything else untracked; back it up first (`cp -r .agentlog /somewhere`)",
 	}}
+}
+
+// checkRoleResolution reports whether any subagent transcript metadata is on
+// record yet for this project under ~/.claude/projects/<slug>/. It is
+// informational, not a defect: a brand-new project simply hasn't run any
+// subagent yet. HOME is read via os.Getenv rather than os.UserHomeDir so
+// tests can override it with t.Setenv; the slug algorithm mirrors
+// internal/eval.LocateSession's cwd-based rule (kept as a local literal —
+// doctor doesn't otherwise depend on internal/eval for one line).
+func checkRoleResolution(projectDir string) []Issue {
+	unverified := []Issue{{
+		Level:   LevelInfo,
+		Message: "role resolution unverified: no subagent meta found yet",
+	}}
+
+	home := os.Getenv("HOME")
+	if home == "" {
+		return nil
+	}
+	slug := "-" + strings.ReplaceAll(strings.TrimPrefix(projectDir, "/"), "/", "-")
+	matches, _ := filepath.Glob(filepath.Join(home, ".claude", "projects", slug, "*", "subagents", "*.meta.json"))
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			continue
+		}
+		var meta map[string]any
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		if _, ok := meta["agentType"]; ok {
+			return nil
+		}
+	}
+	return unverified
 }
