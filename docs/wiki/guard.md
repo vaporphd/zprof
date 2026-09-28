@@ -125,6 +125,24 @@ Key invariants:
     an `agentType` key regardless of `guard.enabled`, since role resolution
     also feeds `resolve_role`'s non-guard callers
     (`cli/internal/doctor/diagnostics.go:1247-1273`).
+  - The guard *doctrine* (the one-line policy an agent reads, distinct from the
+    `zprof-guard.py`/`guard.yaml` mechanism above) lives entirely in the
+    prompt layer, not in the script: `profiles/base/manifest.yaml`'s
+    `guard_doctrine` key and `profiles/base/claude-block-base.md`'s
+    `### Guard` subsection carry the same sentence, rendered into a project's
+    `CLAUDE.md` under the `<!-- zprof:begin doctrine -->` managed block
+    (`## Doctrine` → `### Guard`); `guard_doctrine` is an unknown top-level
+    key to `manifest.OverlayManifest`'s loose YAML unmarshal, so unlike
+    `stop_list` it is never rendered into `## Stop list` and `checkStopLists`
+    never sees it (#30; see "Doctrine and prompt contracts" below).
+  - Two overlay `guard.yaml` files exercise the base→overlay merge
+    (`mergeRules`, "Deployment" above) with real, non-synthetic content:
+    `profiles/overlays/ios-swift/guard.yaml`'s `exempt_roles: {publish:
+    [testflight-shipper]}` and `profiles/overlays/backend-python/guard.yaml`'s
+    `pip_install` rule (`tools: [Bash]`, denies `pip install`/`pip3
+    install`/`poetry add`) — both #30, both prompt/config-only, no change to
+    `zprof-guard.py` or the Go merge/render logic itself (see "Doctrine and
+    prompt contracts" below).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
   §8.1–§8.4, §9, §10, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
@@ -162,7 +180,19 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   `TestDiagnoseIncludesGuardAndRoleResolutionChecks` — `go test
   ./internal/doctor/...` → 108 passed, 95.5% coverage (verified 2026-09-28,
   `feat/doctor-guard-checks-29`@`d60e4a3`; `go test ./...` → 458 passed for the
-  Go module as a whole).
+  Go module as a whole). #30 (doctrine string + contract lines + two overlay
+  `guard.yaml` files, prompt/config-only — no `zprof-guard.py`/merge-logic
+  change) adds one pytest case,
+  `test_backend_python_pip_install_rule_denies_pip_and_poetry`
+  (`profiles/base/tests/test_guard.py:423-441`, three deny + one allow
+  assertion against the engine directly with the overlay's exact rule body)
+  and two Go E2E additions in `cli/internal/apply/guard_e2e_test.go`: an
+  `exempt_roles.publish` assertion appended to the existing
+  `TestE2E_GuardDeploysAndEnforcesForcePush` (:104-108) and a new
+  `TestE2E_GuardDeploysBackendPythonPipInstallRule` (:147-224) that runs a
+  real `Apply()` with the `backend-python` overlay and a real
+  `zprof-guard.py` subprocess denying `pip install`/`poetry add` while
+  allowing `uv add`.
 
 ---
 
@@ -182,7 +212,10 @@ from #25; §6 the subagent-stop `return_format` validator from #26; §7 the
 `zprof score`/`zprof stats` guard-events integration from #27 (Go-side only —
 the guard script itself is unchanged); §8.2–§8.4/§9 the `zprof apply` deployment
 from #28 (also Go-side only, see "Deployment" below) — not the full design in
-the spec (§12's phase-2 items are still deferred).
+the spec (§12's phase-2 items are still deferred). #30 adds prompt-layer-only
+artifacts on top of #23–#29 — a doctrine string, two agent-contract lines, and
+two overlay `guard.yaml` files exercising the already-implemented merge — see
+"Doctrine and prompt contracts" below.
 
 **Deployed by `zprof apply` since #28.** `zprof apply <overlay>...`, `zprof sync`,
 and `zprof apply --telemetry-only` all write `.claude/zprof-guard.py` and render
@@ -713,6 +746,72 @@ tests can override it with `t.Setenv` (design §10, `plan-issue-29.md` item 8).
 helper `checkTelemetryHooks` uses for `zprof-collect.py` — parameterized on
 the script substring instead of hardcoding it, a pure signature refactor that
 doesn't change `checkTelemetryHooks`'s own behavior.
+
+### Doctrine and prompt contracts (#30)
+
+Issue #30 is prompt/config-only: it does not touch `zprof-guard.py`,
+`guard.yaml`, or the Go merge/render logic in `cli/internal/apply/guard.go` —
+it adds the human/agent-facing text that tells an agent what the hook already
+enforces, plus two overlay `guard.yaml` files that exercise the base→overlay
+merge (`mergeRules`, "Deployment" above) with real content instead of only
+the force-push fixture `TestE2E_GuardDeploysAndEnforcesForcePush` used before.
+
+**Doctrine string.** The same one-line sentence — `` "Guard: стоп-лист, merge
+и формат ответа проверяет хук; на deny не ищи обход — верни `verdict:
+blocked` с reason" `` — is duplicated in two prompt-layer sources:
+`profiles/base/manifest.yaml`'s `guard_doctrine` key (`manifest.yaml:11`) and
+`profiles/base/claude-block-base.md`'s `### Guard` subsection
+(`claude-block-base.md:24-26`), placed between `### Изоляция` and `### Свои
+правила`. `guard_doctrine` is not `stop_list` — it is a new top-level key
+that `manifest.OverlayManifest`'s loose `yaml.Unmarshal` ignores safely (no Go
+change needed), and unlike `stop_list` it is never rendered into `##
+Stop list` by `buildStopListBlock` (`cli/internal/apply/tables.go:166`), so
+`checkStopLists` (`zprof doctor`) never inspects it. This repo's own
+`CLAUDE.md` was regenerated from `claude-block-base.md` (no `.zprof.yaml`
+here, so `zprof apply` was run against a scratch project and the resulting
+`<!-- zprof:begin doctrine --> … <!-- zprof:end doctrine -->` block was
+copied in by hand, same precedent as #15) — the `### Guard` subsection now
+sits at `CLAUDE.md:25-27`, inside `## Doctrine`, leaving `## Consilium`/`##
+Executing`/`## Stop list` untouched.
+
+**Agent contracts.** Two existing prompt sections got one new line each,
+telling an agent that a guard `deny` is the same category of event as the
+stop-list — don't rephrase the command to route around it, report it instead:
+
+- `profiles/base/agents/pr-shepherd.md`, new rule `0.8` in `# 0. HARD RULES`
+  (`pr-shepherd.md:40`): *"Guard `deny` = стоп-лист. Если команда этого
+  invocation получает `deny` от zprof guard-хука, не ищи обход и не
+  перефразируй команду, чтобы обойти правило — верни `verdict:
+  blocked-guard` с `question`, описывающим что заблокировано и почему."*
+- `profiles/base/agents/task-runner.md`, appended to the existing `##
+  Стоп-лист` section (`task-runner.md:399-400`): *"`deny` от zprof
+  guard-хука на любой команде субагента — тот же случай, что и стоп-лист: не
+  ищи обход, верни `verdict: blocked` с reason."*
+
+Both deploy copies (`.claude/agents/pr-shepherd.md`,
+`.claude/agents/task-runner.md`) carry the identical diff and stay
+byte-for-byte in sync with their `profiles/base/agents/` source, per this
+repo's own convention.
+
+**Overlay `guard.yaml` files.** Two new files, both merged in on top of
+`profiles/base/guard.yaml` by the #28/ADR-0009 three-layer merge (no `version`
+key — required only for the base layer):
+
+- `profiles/overlays/ios-swift/guard.yaml` — `exempt_roles: {publish:
+  [testflight-shipper]}`, exempting the overlay's TestFlight/App-Store
+  publishing role from the base `publish` stop-list rule (`xcrun altool` /
+  `fastlane pilot|deliver` would otherwise be denied for every role).
+- `profiles/overlays/backend-python/guard.yaml` — a new rule `pip_install`
+  (`tools: [Bash]`, `match: ['\b(pip|pip3)\s+install\b', '\bpoetry\s+add\b']`)
+  denying `pip install`/`pip3 install`/`poetry add` with a reason pointing at
+  `uv add <pkg>` (this overlay's lockfile is `uv.lock`, not
+  `requirements.txt`/`poetry.lock`).
+
+Both are exercised as regression fixtures for the already-implemented merge,
+not as new merge behavior — see Test coverage above for the specific pytest
+and Go E2E cases (`TestE2E_GuardDeploysAndEnforcesForcePush`'s new
+`exempt_roles.publish` assertion, and the new
+`TestE2E_GuardDeploysBackendPythonPipInstallRule`).
 
 ### See also
 

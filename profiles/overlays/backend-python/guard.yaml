@@ -1,0 +1,13 @@
+# overlay guard-слой backend-python (ADR 0009) — мёрджится поверх profiles/base/guard.yaml.
+# version не нужен: требуется только для base-слоя.
+#
+# Стиль — как в profiles/base/guard.yaml: отступ 2 пробела, каждое правило
+# начинается строкой `  - id: <id>`, regex — только в одинарных кавычках,
+# каждый отдельной строкой блочного списка.
+rules:
+  - id: pip_install
+    tools: [Bash]
+    match:
+      - '\b(pip|pip3)\s+install\b'
+      - '\bpoetry\s+add\b'
+    reason: "этот проект использует uv для lock и virtualenv: pip install/poetry add ломают uv.lock — используй uv add <pkg> (implementer.md:50)"

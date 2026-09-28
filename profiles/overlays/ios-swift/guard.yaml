@@ -1,0 +1,8 @@
+# overlay guard-слой ios-swift (ADR 0009) — мёрджится поверх profiles/base/guard.yaml.
+# version не нужен: требуется только для base-слоя.
+#
+# testflight-shipper — единственная роль этого overlay, чья задача — публикация
+# в TestFlight/App Store (xcrun altool / fastlane pilot|deliver), поэтому её
+# освобождаем от базового правила `publish` (profiles/base/guard.yaml), которое
+# иначе запрещает такие команды всем ролям стоп-листом.
+exempt_roles: {publish: [testflight-shipper]}

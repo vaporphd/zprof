@@ -414,6 +414,36 @@ def test_exempt_roles_lifts_rule_for_listed_role(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# backend-python overlay rule: pip_install (issue #30 AC5) — same content as
+# profiles/overlays/backend-python/guard.yaml, tested against the merge
+# engine directly (the overlay merge itself is covered by the Go E2E test
+# TestE2E_GuardDeploysBackendPythonPipInstallRule).
+# ---------------------------------------------------------------------------
+
+def test_backend_python_pip_install_rule_denies_pip_and_poetry(tmp_path):
+    config = build_guard_config()
+    config["rules"].append({
+        "id": "pip_install",
+        "tools": ["Bash"],
+        "match": [r'\b(pip|pip3)\s+install\b', r'\bpoetry\s+add\b'],
+        "reason": ("этот проект использует uv для lock и virtualenv: pip install/poetry add "
+                   "ломают uv.lock — используй uv add <pkg> (implementer.md:50)"),
+    })
+    _write_config(tmp_path, config)
+
+    for cmd in ("pip install requests", "pip3 install requests", "poetry add requests"):
+        payload = _payload("Bash", _bash(cmd), role="implementer", cwd=tmp_path)
+        out = zprof_guard.pre_tool(payload)
+        assert out is not None, f"{cmd!r} was not denied"
+        reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+        assert reason.startswith("zprof guard [pip_install]:")
+        assert "uv add" in reason
+
+    allowed = _payload("Bash", _bash("uv add requests"), role="implementer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(allowed) is None
+
+
+# ---------------------------------------------------------------------------
 # Rule order (AC5/AC6): first match wins
 # ---------------------------------------------------------------------------
 
