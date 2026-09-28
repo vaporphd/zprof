@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""zprof guard — deterministic PreToolUse enforcement, runs as a Claude Code hook.
+"""zprof guard — deterministic PreToolUse/SubagentStop enforcement, runs as a Claude Code hook.
 
 Usage: zprof-guard.py <mode>
-Modes: pre-tool | subagent-stop (subagent-stop is a no-op in this issue, see #26)
+Modes: pre-tool | subagent-stop
 
-Reads a JSON payload from stdin, writes at most one JSON line to stdout
-(a deny decision) and appends an event to `.agentlog/guard-events.jsonl`.
-Always exits 0 — a bug here must never block a tool call (fail-open).
+Reads a JSON payload from stdin, writes at most one JSON line to stdout —
+deny (pre-tool) or block (subagent-stop) — and appends an event to
+`.agentlog/guard-events.jsonl`. Always exits 0 — a bug here must never
+block a tool call or a subagent turn (fail-open).
 
-ADR: docs/adr/0004-zprof-guard-pre-tool-frame.md
-Spec: docs/superpowers/specs/2026-09-27-guard-hooks-design.md §4, §5, §7, §8.1
+ADR: docs/adr/0004-zprof-guard-pre-tool-frame.md,
+docs/adr/0007-guard-subagent-stop-validator.md
+Spec: docs/superpowers/specs/2026-09-27-guard-hooks-design.md §4, §5, §6, §7, §8.1
 """
 import fcntl
 import fnmatch
@@ -1279,6 +1281,268 @@ def pre_tool(payload: dict) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
+# subagent-stop entrypoint (ADR-0007, #26)
+# ---------------------------------------------------------------------------
+
+_RETURN_FORMAT_HEADER = "return_format: |"
+_TOP_LEVEL_KEY_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*:")
+_VERDICT_LINE_RE = re.compile(r"^\s*(verdict|completion):\s*(.+?)\s*$")
+_WILDCARD_VALUE_RE = re.compile(r"^<.*>$")
+
+
+def _return_format_contract(text: str) -> "tuple[str, str, list[str] | None] | None":
+    """Parse the `return_format: |` block out of an agent contract's frontmatter.
+
+    Pure function, no I/O (ADR-0007 G3/G4). Returns `(key, raw, values)`:
+    `key` is `verdict`/`completion`, `raw` is the value exactly as written
+    (unnormalized), `values` is the `|`-split allow-list, or `None` when
+    the whole value is a bare `<...>` sentinel ("any value" — check 2 is
+    skipped). Returns `None` (not an error, just "pass") when there's no
+    frontmatter, no `return_format: |` block, or its first significant
+    line isn't `verdict:`/`completion:`.
+    """
+    lines = text.splitlines()
+    if not lines or lines[0].rstrip() != "---":
+        return None
+
+    close_idx = None
+    for i in range(1, len(lines)):
+        if lines[i].rstrip() == "---":
+            close_idx = i
+            break
+    if close_idx is None:
+        return None
+
+    block_start = None
+    for i in range(1, close_idx):
+        if lines[i].rstrip() == _RETURN_FORMAT_HEADER:
+            block_start = i + 1
+            break
+    if block_start is None:
+        return None
+
+    for i in range(block_start, close_idx):
+        line = lines[i]
+        if _TOP_LEVEL_KEY_RE.match(line):
+            break
+        s = line.strip()
+        if s == "" or s.startswith("#"):
+            continue
+        m = _VERDICT_LINE_RE.match(line)
+        if not m:
+            return None
+        key, raw = m.group(1), m.group(2)
+        return key, raw, _parse_return_format_values(raw)
+
+    return None
+
+
+def _parse_return_format_values(raw: str) -> "list[str] | None":
+    """`|`-split allow-list for a `return_format` value (ADR-0007 G4).
+
+    A whole-value `<...>` sentinel (before splitting — `<a | b>` must not
+    be split into two elements), or a list where any single element is a
+    whole-value `<...>` sentinel, both mean "any value" — `None`.
+    """
+    if _WILDCARD_VALUE_RE.match(raw.strip()):
+        return None
+    items = [s.strip().lower() for s in raw.split("|")]
+    items = [s for s in items if s]
+    if any(_WILDCARD_VALUE_RE.match(item) for item in items):
+        return None
+    return items
+
+
+def _value_allowed(word: str, values: list[str]) -> bool:
+    """True when `word` matches an allow-list element (ADR-0007 G4).
+
+    An element containing `<` (e.g. `blocked-<reason>`) matches as a
+    literal prefix: `word.startswith(prefix)` where `prefix` is the part
+    before the first `<`, and `word` must be strictly longer than
+    `prefix` (`blocked-` alone doesn't count). Every other element must
+    match `word` exactly.
+    """
+    for item in values:
+        if "<" in item:
+            prefix = item.split("<", 1)[0]
+            if word.startswith(prefix) and len(word) > len(prefix):
+                return True
+        elif word == item:
+            return True
+    return False
+
+
+def _load_role_contract(root: str, role: str) -> "tuple[str, str, list[str] | None] | None":
+    """Find and parse `role`'s `return_format` contract (ADR-0007 G6).
+
+    Tries `<root>/.claude/agents/<role>.md`, then
+    `<root>/.claude/agents/gates/<role>.md`. A file that can't be read
+    (`OSError`, incl. `FileNotFoundError`) is the expected "role has no
+    contract here" path — caught locally, next candidate tried — not a
+    corruption to fail-open on (contrast `_last_assistant_text` below).
+    The first file that *is* read wins outright, even if its parse result
+    is `None` (no `return_format` block): a role's `agents/<role>.md`
+    lacking `return_format` never falls through to `gates/<role>.md`.
+    """
+    if not role or role in ("main", "unknown") or "/" in role or "\\" in role or role.startswith("."):
+        return None
+    for rel in (f".claude/agents/{role}.md", f".claude/agents/gates/{role}.md"):
+        try:
+            text = (Path(root) / rel).read_text(encoding="utf-8")
+        except OSError:
+            continue
+        return _return_format_contract(text)
+    return None
+
+
+def _final_text(payload: dict) -> str | None:
+    """Resolve the subagent's final reply text (ADR-0007 G5).
+
+    `payload["last_assistant_message"]`, if a string, wins outright — no
+    file I/O, the real-prod path. Otherwise falls back to a transcript:
+    `agent_transcript_path` if non-empty, else `transcript_path` but only
+    when that path is itself a subagent transcript (`agent-<id>.jsonl`
+    under a `subagents/` dir — same test as `resolve_role`); the main
+    session's own transcript is never read. `None` when neither source is
+    usable — pass, not an error.
+    """
+    msg = payload.get("last_assistant_message")
+    if isinstance(msg, str):
+        return msg
+
+    path = payload.get("agent_transcript_path")
+    if not (isinstance(path, str) and path):
+        tp = payload.get("transcript_path")
+        if isinstance(tp, str) and tp:
+            p = Path(tp)
+            if _AGENT_TRANSCRIPT_RE.match(p.name) and p.parent.name == "subagents":
+                path = tp
+
+    if not (isinstance(path, str) and path):
+        return None
+    return _last_assistant_text(path)
+
+
+def _last_assistant_text(path: str) -> str | None:
+    """Last `type == "assistant"` record's text from a subagent transcript.
+
+    Deliberately has **no** local `try/except` (ADR-0007 G5): a missing
+    file, unreadable permissions, invalid JSON on a line, or invalid
+    UTF-8 must propagate out of `subagent_stop()` to `main()`'s outer
+    `except Exception` (AC7) — a corrupt/unreadable transcript is
+    unexpected, unlike a missing contract file (`_load_role_contract`).
+    Returns `None` (a clean pass, not an error) when the file parses fine
+    but contains no `assistant` record at all.
+    """
+    last = None
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip() == "":
+                continue
+            rec = json.loads(line)
+            if isinstance(rec, dict) and rec.get("type") == "assistant":
+                last = rec
+    if last is None:
+        return None
+
+    message = last.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            b["text"] for b in content
+            if isinstance(b, dict) and b.get("type") == "text" and isinstance(b.get("text"), str)
+        )
+    return ""
+
+
+def subagent_stop(payload: dict) -> dict | None:
+    """Evaluate one `SubagentStop` call against its role's `return_format` (ADR-0007 G8).
+
+    Returns `{"decision": "block", "reason": ...}` on a first-time format
+    violation (also logs `event: "subagent-stop"`), or `None` on: no
+    contract for this role, no usable final text, a passing check
+    (silent — nothing written to the journal), or a repeat violation with
+    `stop_hook_active is True` (logs `event: "format_unfixed"` instead,
+    to avoid blocking forever). The contract is loaded *before* the final
+    text so a role without one never opens a transcript at all; reading a
+    corrupt transcript raises out of this function on purpose (G5).
+    """
+    role = resolve_role(payload)
+    root = project_root(payload)
+
+    contract = _load_role_contract(root, role)
+    if contract is None:
+        return None
+    key, raw, values = contract
+
+    text = _final_text(payload)
+    if text is None or not text.strip():
+        return None
+    first = next(line.strip() for line in text.splitlines() if line.strip())
+
+    detail = None
+    if not first.lower().startswith(f"{key}:"):
+        detail = "key"
+    elif values is not None:
+        rest = first.split(":", 1)[1].strip()
+        word = rest.split()[0].lower() if rest else ""
+        if not word or not _value_allowed(word, values):
+            detail = "value"
+
+    if detail is None:
+        return None
+
+    session_id = payload.get("session_id")
+    did = dispatch_id({
+        "transcript_path": payload.get("agent_transcript_path") or payload.get("transcript_path"),
+    })
+
+    if payload.get("stop_hook_active") is True:
+        _safe_write_event({
+            "ts": _now_ts(),
+            "session_id": session_id,
+            "event": "format_unfixed",
+            "role": role,
+            "dispatch_id": did,
+            "tool": None,
+            "rule": "return_format",
+            "decision": None,
+            "detail": detail,
+            "target": None,
+            "input_hash": None,
+            "run_id": None,
+        }, root)
+        return None
+
+    _safe_write_event({
+        "ts": _now_ts(),
+        "session_id": session_id,
+        "event": "subagent-stop",
+        "role": role,
+        "dispatch_id": did,
+        "tool": None,
+        "rule": "return_format",
+        "decision": "block",
+        "detail": detail,
+        "target": None,
+        "input_hash": None,
+        "run_id": None,
+    }, root)
+
+    shown = first if len(first) <= 120 else first[:120] + "…"
+    reason = (
+        f"zprof guard [return_format]: ответ {role} должен начинаться строкой "
+        f"`{key}: {raw}`. Сейчас первая строка: «{shown}». "
+        f"Перепиши ответ по return_format без преамбулы."
+    )
+    return {"decision": "block", "reason": reason}
+
+
+# ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
 
@@ -1295,7 +1559,8 @@ def main() -> None:
         out = None
         if mode == "pre-tool":
             out = pre_tool(payload)
-        # Any other mode (incl. "subagent-stop", implemented in #26) is a no-op.
+        elif mode == "subagent-stop":
+            out = subagent_stop(payload)
 
         if out is not None:
             sys.stdout.write(json.dumps(out, ensure_ascii=False))

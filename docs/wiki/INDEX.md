@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-28 · Head: `c905ff9c596fab9ed0bcf696d49160ea7b276e7f`
+Generated: 2026-09-28 · Head: `177539fa432b83eb324473f49a5356a26a082915`
 
 ## Components
 
@@ -64,8 +64,12 @@ verdicts  (leaf; loads/validates profiles/base/verdicts.yaml — ADR-0003)
   `linked_worktree`, `write_outside_repo`, `branch_pr_merged`) and the
   `context_error` journal event; #25 (ADR-0006) lands `merge_preflight`/
   `pr_create_gate` and the `allow_unverified` journal event — every
-  `guard.yaml` rule is now active; #26–#28 remain: subagent-stop validator,
-  `zprof score` integration, and `zprof apply` deployment)
+  `guard.yaml` rule is now active; #26 (ADR-0007) lands the `subagent-stop`
+  mode — a `return_format` validator on `SubagentStop`, independent of
+  `guard.yaml`/`CONTEXTS` — plus the `subagent-stop`/`format_unfixed` journal
+  events; #27–#28 remain: `zprof score` integration and `zprof apply`
+  deployment, the latter still blocking both modes from running in any real
+  project)
 - Planned: 0
 - Undocumented (has code, no wiki): 18 (overlay, manifest, managed, score, stats, eval,
   agents, models, detect, doctor, verdicts, wizard, sync, fsutil, cmd, profiles-base,
