@@ -29,6 +29,8 @@
 - [x] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
 - [x] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет — PR #61
 - [ ] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
+- [ ] fix(base): north-star-auditor при отсутствии NORTH_STAR.md — детерминированный skip, гейт условный (#60)
+- [ ] fix(base): раннер/pr-shepherd оставляют worktree main в scratchpad; checkout не на main после run (#62)
 
 ## Plan 2: guard
 - [x] fix(ci): ruff RUF059 ломает CI на main; запинить версию ruff (#56) — вне очереди, блокирует #28
@@ -38,7 +40,7 @@
 - [x] feat(base): guard — валидатор return_format на SubagentStop (#26) — depends: #23
 - [x] feat: guard-события в zprof score (P7) и zprof stats (#27) — depends: #23 — PR #55
 - [x] feat(cli): zprof apply деплоит guard — guard.json, хуки с matcher, permissions.deny (#28) — depends: #23; supersedes #18
-- [ ] feat(cli): zprof doctor — проверки guard (хуки, guard.json, deny, роли) (#29) — depends: #28
+- [x] feat(cli): zprof doctor — проверки guard (хуки, guard.json, deny, роли) (#29) — depends: #28 — PR #63
 - [ ] feat(base): guard — строка доктрины, контракты pr-shepherd/task-runner, overlay guard.yaml (#30) — depends: #28
 - [ ] test(base): shakedown — ноль ложных deny guard на штатном маршруте (#31) — depends: #24, #25, #26, #27, #28, #29, #30
 - [ ] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23
