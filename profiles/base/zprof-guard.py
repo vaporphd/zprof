@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections.abc import Callable
@@ -28,8 +29,8 @@ from pathlib import Path
 TOOLS_GUARDED = frozenset({"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 
 # Registry of built-in `context` evaluators, keyed by name. Populated at the
-# bottom of this module (ADR-0005, #24) — rules referencing a still
-# unregistered context (§5.5/§5.6, #25) simply never fire (ADR D4).
+# bottom of this module (ADR-0005 #24, ADR-0006 #25). A rule referencing an
+# unregistered context simply never fires (ADR D4).
 # Signature: (call, rule, config) -> bool | str. False/None = does not fire;
 # True = fires with rule["reason"]; str = fires with that reason instead.
 CONTEXTS: dict[str, Callable[[dict, dict, dict], "bool | str | None"]] = {}
@@ -338,6 +339,28 @@ def _note_context_error(call: dict, rule: dict, detail: str) -> None:
     call.setdefault("context_errors", []).append({"rule": rule.get("id"), "detail": detail})
 
 
+# `detail` codes for `_note_unverified` — a closed set (ADR-0006 F1).
+_PREFLIGHT_UNVERIFIED = "preflight_unverified"
+_PARSE_ERROR = "parse_error"
+
+
+def _note_unverified(call: dict, rule: dict, code: str, detail: str) -> None:
+    """Accumulate a fail-open `allow_unverified` decision on `call`. No I/O.
+
+    Mirrors `_note_context_error` in shape (accumulate on `call`, flush in
+    `pre_tool()`'s `finally`) but is a distinct *decision*, not a diagnostic:
+    `context_error` means "the context evaluator couldn't answer, the rule
+    stays silent" (`decision: null`); `allow_unverified` means "a gate rule
+    made a conscious fail-open call" (`decision: "allow_unverified"`).
+    Readers/doctor (#28/#29) must be able to tell them apart by `event`/
+    `decision` alone, without parsing `detail` (ADR-0006 F1). `detail` is
+    always `"<code>: <specifics>"`; `code` is one of `_PREFLIGHT_UNVERIFIED`/
+    `_PARSE_ERROR` — `<specifics>` is a fixed string or exception class name
+    only, never a path/stdout/stderr (spec §7).
+    """
+    call.setdefault("unverified", []).append({"rule": rule.get("id"), "detail": f"{code}: {detail}"})
+
+
 def _head_on_remote(call: dict, rule: dict, config: dict) -> bool:
     """`head_on_remote` (rules `rebase_published`/`amend_published`, ADR-0005 E3).
 
@@ -580,11 +603,419 @@ def _branch_pr_merged(call: dict, rule: dict, config: dict) -> bool:
         return True
 
 
+# ---------------------------------------------------------------------------
+# Merge/PR gates (ADR-0006, #25)
+# ---------------------------------------------------------------------------
+
+_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _shell_tokens(raw: str) -> list[str]:
+    """Tokenize a raw shell command line, preserving quoted newlines.
+
+    `lex.commenters = ""` — `#` is an ordinary character, not a comment
+    marker (Context §7: `-t a#b -b x` must not lose `-b x`). Operators
+    (`&&`, `||`, `;`, `|`, `>&`, `<<`, `(`, `)`) come out as their own
+    tokens; quoted content (including embedded newlines) stays one token —
+    this is why evaluators parse `tool_input["command"]` and not the
+    whitespace-normalized `call["command"]` (Context §3). Raises `ValueError`
+    on an unbalanced quote or trailing backslash — the caller decides what
+    that means (`parse_error`, F3/F4).
+    """
+    lex = shlex.shlex(raw, posix=True, punctuation_chars=True)
+    lex.whitespace_split = True
+    lex.commenters = ""
+    return list(lex)
+
+
+def _is_operator_token(tok: str) -> bool:
+    return bool(tok) and all(c in _OPERATOR_CHARS for c in tok)
+
+
+def _invocations(tokens: list[str], words: tuple[str, ...]) -> list[list[str]]:
+    """All `args` following each occurrence of `words` (e.g. `("gh", "pr", "create")`).
+
+    An occurrence is `os.path.basename(tokens[i]) == words[0]` with the
+    following tokens matching `words[1:]` exactly — finds `gh`, `rtk gh`,
+    `/opt/homebrew/bin/gh` without special-casing wrappers (ADR-0006 F2).
+    `args` runs from there to the next operator token or the end of
+    `tokens`. A trailing fd-redirect target (`2>&1` → lone digit right
+    before a `<`/`>` operator) is dropped from `args` (Context §7). Zero
+    occurrences (the words matched only inside a quoted token, e.g. `grep -r
+    "gh pr create" docs/`) → `[]`, deliberately not distinguished from "no
+    invocation at all" by the caller.
+    """
+    results: list[list[str]] = []
+    n = len(tokens)
+    w = len(words)
+    i = 0
+    while i < n:
+        if os.path.basename(tokens[i]) == words[0] and tokens[i + 1:i + w] == list(words[1:]):
+            j = i + w
+            args: list[str] = []
+            while j < n and not _is_operator_token(tokens[j]):
+                args.append(tokens[j])
+                j += 1
+            if j < n and tokens[j][:1] in ("<", ">") and args and re.match(r"^\d+$", args[-1]):
+                args.pop()
+            results.append(args)
+            i = j
+        else:
+            i += 1
+    return results
+
+
+_CLOSES_RE = re.compile(r"(?i)\bcloses\s+#\d+")
+_GATE_RE = re.compile(r"(?m)^##\s+Gate\b")
+
+
+def _missing_markers(body: str) -> list[str]:
+    """Subset of `["`Closes #`", "раздела `## Gate`"]` missing from `body`, in this order."""
+    missing = []
+    if not _CLOSES_RE.search(body):
+        missing.append("`Closes #`")
+    if not _GATE_RE.search(body):
+        missing.append("раздела `## Gate`")
+    return missing
+
+
+_MERGE_JSON_FIELDS = "number,body,closingIssuesReferences,state"
+
+_MERGE_VALUE_LONG = frozenset({
+    "subject", "body", "body-file", "author-email", "match-head-commit", "repo",
+})
+_MERGE_VALUE_SHORT = frozenset({"t", "b", "F", "A", "R"})
+
+
+def _parse_merge_args(args: list[str]) -> tuple[str | None, str | None, bool]:
+    """One `gh pr merge` invocation's `args` -> `(selector, repo, ok)`.
+
+    pflag semantics: `--name=value` slitno; `--name` from the value set
+    consumes the next token; a short cluster (`-xyz`) reads left to right,
+    the first char in the value set absorbs the rest of the token or the
+    next token, other chars are boolean; `--` ends flag parsing. `-R/--repo`
+    is remembered (last wins); the first positional is `selector`, later
+    positionals are ignored. `ok=False` means `selector` or `repo` starts
+    with `-` (only reachable after `--`, or as a flag's own value) — an
+    injection guard, caller notes `parse_error` and skips this target
+    (ADR-0006 F3).
+    """
+    repo: str | None = None
+    selector: str | None = None
+    end_of_flags = False
+    i = 0
+    n = len(args)
+    while i < n:
+        tok = args[i]
+        if end_of_flags:
+            if selector is None:
+                selector = tok
+            i += 1
+            continue
+        if tok == "--":
+            end_of_flags = True
+            i += 1
+            continue
+        if tok.startswith("--") and len(tok) > 2:
+            name, eq, val = tok[2:].partition("=")
+            consumed = 1
+            if not eq:
+                val = None
+                if name in _MERGE_VALUE_LONG:
+                    if i + 1 < n:
+                        val = args[i + 1]
+                        consumed = 2
+                    else:
+                        val = ""
+            if name == "repo" and val is not None:
+                repo = val
+            i += consumed
+            continue
+        if tok.startswith("-") and len(tok) > 1:
+            rest = tok[1:]
+            j = 0
+            consumed_next = False
+            while j < len(rest):
+                ch = rest[j]
+                if ch in _MERGE_VALUE_SHORT:
+                    remainder = rest[j + 1:]
+                    if remainder:
+                        val = remainder
+                    elif i + 1 < n:
+                        val = args[i + 1]
+                        consumed_next = True
+                    else:
+                        val = ""
+                    if ch == "R":
+                        repo = val
+                    break
+                j += 1
+            i += 2 if consumed_next else 1
+            continue
+        if selector is None:
+            selector = tok
+        i += 1
+    ok = not ((selector is not None and selector.startswith("-"))
+              or (repo is not None and repo.startswith("-")))
+    return selector, repo, ok
+
+
+_API_MERGE_SEARCH_RE = re.compile(r"/?pulls/(\d+)/merge\b")
+_API_MERGE_FULL_RE = re.compile(r"^/?repos/([^/]+)/([^/]+)/pulls/(\d+)/merge/?$")
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_API_REPO_PLACEHOLDERS = frozenset({"{owner}", "{repo}", ":owner", ":repo"})
+
+
+def _merge_target_from_api_args(args: list[str]) -> "tuple[str, str | None] | None":
+    """One `gh api` invocation's `args` -> `(number, repo | None)`, or None
+    when no token matches `/pulls/<N>/merge` at all (ADR-0006 F3)."""
+    for tok in args:
+        m_search = _API_MERGE_SEARCH_RE.search(tok)
+        if not m_search:
+            continue
+        m_full = _API_MERGE_FULL_RE.match(tok)
+        if m_full:
+            owner, repo_name, number = m_full.group(1), m_full.group(2), m_full.group(3)
+            if _SAFE_NAME_RE.match(owner) and _SAFE_NAME_RE.match(repo_name):
+                return number, f"{owner}/{repo_name}"
+            if owner in _API_REPO_PLACEHOLDERS and repo_name in _API_REPO_PLACEHOLDERS:
+                return number, None
+        return m_search.group(1), None
+    return None
+
+
+def _merge_preflight(call: dict, rule: dict, config: dict) -> "bool | str":
+    """`merge_preflight` (rule `merge_preflight`, roles: `$merge_roles`, ADR-0006 F3).
+
+    Fail-open on any `gh` failure — `_note_unverified` + this target is
+    skipped, never a deny (§5.5 decision 1: a sync failure must not block a
+    routine, revertible merge). Unlike `_branch_pr_merged` there is no
+    top-level `try/except Exception`: expected failures are caught
+    explicitly below; an unexpected exception is a bug and reaches `main()`'s
+    outer fail-open `except` -> allow + `error` (ADR-0004 D2).
+    """
+    raw = call.get("tool_input", {}).get("command")
+    if not isinstance(raw, str):
+        return False
+    try:
+        tokens = _shell_tokens(raw)
+    except ValueError:
+        _note_unverified(call, rule, _PARSE_ERROR, "shlex")
+        return False
+
+    wd = working_dir(call.get("command") or "", call.get("cwd") or call["root"])
+
+    targets: list[tuple[str | None, str | None]] = []
+    for args in _invocations(tokens, ("gh", "pr", "merge")):
+        selector, repo, ok = _parse_merge_args(args)
+        if not ok:
+            _note_unverified(call, rule, _PARSE_ERROR, "selector")
+            continue
+        targets.append((selector, repo))
+    for args in _invocations(tokens, ("gh", "api")):
+        target = _merge_target_from_api_args(args)
+        if target is not None:
+            targets.append(target)
+
+    if not targets:
+        return False
+
+    for selector, repo in targets:
+        argv = ["gh", "pr", "view", *([selector] if selector else []),
+                *(["-R", repo] if repo else []), "--json", _MERGE_JSON_FIELDS]
+        rc, out = _run(argv, wd, _GH_TIMEOUT)
+        if rc is None or rc != 0:
+            _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, _context_detail(argv, rc, out))
+            continue
+        try:
+            data = json.loads(out)
+        except ValueError:
+            _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, "gh pr view: invalid json")
+            continue
+        number = data.get("number") if isinstance(data, dict) else None
+        if (not isinstance(data, dict)
+                or not isinstance(number, int) or isinstance(number, bool)
+                or not isinstance(data.get("body"), str)
+                or not isinstance(data.get("closingIssuesReferences"), list)
+                or not isinstance(data.get("state"), str)):
+            _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, "gh pr view: unexpected shape")
+            continue
+
+        if data["state"] != "OPEN":
+            continue  # closed/merged already -- nothing to protect, not an event
+
+        body = data["body"]
+        closes_ok = bool(_CLOSES_RE.search(body)) or len(data["closingIssuesReferences"]) > 0
+        gate_ok = bool(_GATE_RE.search(body))
+        if closes_ok and gate_ok:
+            continue
+        if not closes_ok and not gate_ok:
+            return f"PR #{number} без `Closes #` и без раздела `## Gate`"
+        if not closes_ok:
+            return f"PR #{number} без `Closes #`"
+        return f"PR #{number} без раздела `## Gate`"
+
+    return False
+
+
+_CREATE_VALUE_LONG = frozenset({
+    "body", "body-file", "title", "base", "head", "assignee", "label",
+    "milestone", "project", "reviewer", "repo", "template", "recover",
+})
+_CREATE_VALUE_SHORT = frozenset({"b", "F", "t", "B", "H", "a", "l", "m", "p", "r", "R", "T"})
+_CREATE_FILL_LONG = frozenset({"fill", "fill-first", "fill-verbose"})
+_STDIN_MARKERS = frozenset({"-", "/dev/stdin", "/dev/fd/0"})
+_BODY_FILE_MAX = 1_048_576
+
+
+def _parse_create_args(args: list[str]) -> "tuple[bool, list[tuple[str, str]]]":
+    """One `gh pr create` invocation's `args` -> `(fill, sources)`.
+
+    `sources` is `[("inline", value)]`/`[("file", value)]` (at most one of
+    each) in the order each source type first appears; a repeated `-b`/`-F`
+    overwrites the value in place (pflag last-value-wins). `-f`/`--fill*`
+    (including `--fill=…`, exact name match, and `-f` anywhere in a short
+    cluster before a value-taking char, e.g. `-df`) sets `fill` — checked
+    with priority over any body source by the caller (ADR-0006 F4).
+    """
+    fill = False
+    source_values: dict[str, str] = {}
+    order: list[str] = []
+    end_of_flags = False
+    i = 0
+    n = len(args)
+    while i < n:
+        tok = args[i]
+        if end_of_flags or tok == "-" or not tok.startswith("-"):
+            i += 1
+            continue
+        if tok == "--":
+            end_of_flags = True
+            i += 1
+            continue
+        if tok.startswith("--") and len(tok) > 2:
+            name, eq, val = tok[2:].partition("=")
+            if name in _CREATE_FILL_LONG:
+                fill = True
+                i += 1
+                continue
+            consumed = 1
+            if not eq:
+                val = None
+                if name in _CREATE_VALUE_LONG:
+                    if i + 1 < n:
+                        val = args[i + 1]
+                        consumed = 2
+                    else:
+                        val = ""
+            if name in ("body", "body-file") and val is not None:
+                key = "inline" if name == "body" else "file"
+                if key not in source_values:
+                    order.append(key)
+                source_values[key] = val
+            i += consumed
+            continue
+        rest = tok[1:]
+        j = 0
+        consumed_next = False
+        while j < len(rest):
+            ch = rest[j]
+            if ch == "f":
+                fill = True
+                j += 1
+                continue
+            if ch in _CREATE_VALUE_SHORT:
+                remainder = rest[j + 1:]
+                if remainder:
+                    val = remainder
+                elif i + 1 < n:
+                    val = args[i + 1]
+                    consumed_next = True
+                else:
+                    val = ""
+                if ch in ("b", "F"):
+                    key = "inline" if ch == "b" else "file"
+                    if key not in source_values:
+                        order.append(key)
+                    source_values[key] = val
+                break
+            j += 1
+        i += 2 if consumed_next else 1
+    return fill, [(key, source_values[key]) for key in order]
+
+
+def _pr_create_gate(call: dict, rule: dict, config: dict) -> "bool | str":
+    """`pr_create_gate` (rule `pr_create_gate`, no `roles`/`not_roles`, ADR-0006 F4).
+
+    Applies to every role — §5.6: "anyone creating a PR in a zprof project
+    gives `Closes #N` and `## Gate`"; targeted exemption is
+    `exempt_roles.pr_create_gate` in `.zprof.yaml`. Never calls `_run` — no
+    network involved, only local `shlex` and a local file read.
+    """
+    raw = call.get("tool_input", {}).get("command")
+    if not isinstance(raw, str):
+        return False
+    try:
+        tokens = _shell_tokens(raw)
+    except ValueError:
+        _note_unverified(call, rule, _PARSE_ERROR, "shlex")
+        return False
+
+    wd = working_dir(call.get("command") or "", call.get("cwd") or call["root"])
+    invocations = _invocations(tokens, ("gh", "pr", "create"))
+    if not invocations:
+        return False
+
+    for args in invocations:
+        fill, sources = _parse_create_args(args)
+        if fill:
+            return ("`--fill*` запрещён: тело PR должно содержать `Closes #N` и раздел "
+                    "`## Gate` — передай --body или --body-file")
+        if not sources:
+            return ("нет тела PR: передай --body/-b или --body-file/-F с `Closes #N` "
+                    "и разделом `## Gate`")
+
+        unverified_this_call = False
+        for kind, value in sources:
+            if kind == "inline":
+                body = value
+            else:
+                if value in _STDIN_MARKERS:
+                    _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, "body-file: stdin")
+                    unverified_this_call = True
+                    break
+                path = os.path.expanduser(value)
+                if not os.path.isabs(path):
+                    path = os.path.join(wd, path)
+                if not os.path.isfile(path):
+                    _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, "body-file: not a regular file")
+                    unverified_this_call = True
+                    break
+                try:
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        body = f.read(_BODY_FILE_MAX)
+                except OSError as e:
+                    _note_unverified(call, rule, _PREFLIGHT_UNVERIFIED, f"body-file: {type(e).__name__}")
+                    unverified_this_call = True
+                    break
+
+            missing = _missing_markers(body)
+            if missing:
+                return "тело PR без " + " и без ".join(missing)
+
+        if unverified_this_call:
+            continue  # this invocation is unverified, not denied -- check the next one
+
+    return False
+
+
 CONTEXTS.update({
     "head_on_remote": _head_on_remote,
     "linked_worktree": _linked_worktree,
     "write_outside_repo": _write_outside_repo,
     "branch_pr_merged": _branch_pr_merged,
+    "merge_preflight": _merge_preflight,
+    "pr_create_gate": _pr_create_gate,
 })
 
 
@@ -718,6 +1149,24 @@ def _note_role_unresolved(session_id, root: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _is_role_gated(config: dict, rule_id) -> bool:
+    """True when the rule with this `id` restricts by non-empty `roles`/`not_roles`.
+
+    Used only for AC1's `unknown`-role hint (ADR-0006 F5): the criterion is
+    "this rule's deny depends on the caller's role", not a hardcoded rule id
+    — it applies equally to `merge_role` and `remote_ref_delete`, and gives
+    no hint for role-independent rules like `force_push` (would be
+    misleading there).
+    """
+    rules = config.get("rules")
+    if not isinstance(rules, list):
+        return False
+    for rule in rules:
+        if isinstance(rule, dict) and rule.get("id") == rule_id:
+            return bool(rule.get("roles")) or bool(rule.get("not_roles"))
+    return False
+
+
 def pre_tool(payload: dict) -> dict | None:
     """Evaluate one `PreToolUse` call. Returns the deny payload, or None (allow/silent)."""
     tool_name = payload.get("tool_name")
@@ -763,6 +1212,7 @@ def pre_tool(payload: dict) -> dict | None:
         "cwd": payload.get("cwd"),
         "tool_input": tool_input,
         "context_errors": [],
+        "unverified": [],
     }
     try:
         hit = evaluate_rules(call, config)
@@ -784,11 +1234,34 @@ def pre_tool(payload: dict) -> dict | None:
                 "input_hash": input_hash,
                 "run_id": None,
             }, root)
+        # ADR-0006 F1: same shape, distinct decision -- a gate rule (merge_preflight/
+        # pr_create_gate) chose to allow without being able to verify the PR body.
+        # Written even when a later rule ultimately denies the same call (this rule
+        # still passed the call through unverified; the `deny` row records the outcome).
+        for u in call.get("unverified") or []:
+            _safe_write_event({
+                "ts": _now_ts(),
+                "session_id": session_id,
+                "event": "pre-tool",
+                "role": role,
+                "dispatch_id": did,
+                "tool": tool_name,
+                "rule": u.get("rule"),
+                "decision": "allow_unverified",
+                "detail": u.get("detail"),
+                "target": _target(tool_name, tool_input, command),
+                "input_hash": input_hash,
+                "run_id": None,
+            }, root)
 
     if hit is None:
         return None
 
-    clean_reason = str(hit["reason"]).rstrip().rstrip(".")
+    reason = hit["reason"]
+    if role == "unknown" and _is_role_gated(config, hit["id"]):
+        reason = (f"{str(reason).rstrip().rstrip('.')}; роль не разрешена "
+                  f"(роль вызывающего не определена — unknown), проверь `zprof doctor`")
+    clean_reason = str(reason).rstrip().rstrip(".")
     _safe_write_event({
         "ts": _now_ts(),
         "session_id": session_id,
