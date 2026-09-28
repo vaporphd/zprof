@@ -381,3 +381,15 @@ def test_branch_pr_merged_deny_on_other_unparseable_forms_without_calling_gh(tmp
     assert out is not None
     assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
         "zprof guard [remote_ref_delete_unmerged]:")
+
+
+# ---------------------------------------------------------------------------
+# D5 drift invariant (ADR-0005 E8, recommended): `remote_ref_delete`'s
+# `not_roles` and `remote_ref_delete_unmerged`'s `roles` must name exactly
+# the same set -- otherwise a role falls into neither rule (a stop-list hole:
+# free remote branch/tag deletion) or both (double-checked, dead exemption).
+# ---------------------------------------------------------------------------
+
+def test_remote_ref_delete_not_roles_matches_unmerged_roles():
+    rules = {rule["id"]: rule for rule in build_guard_config()["rules"]}
+    assert set(rules["remote_ref_delete"]["not_roles"]) == set(rules["remote_ref_delete_unmerged"]["roles"])
