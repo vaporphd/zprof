@@ -522,6 +522,13 @@ func sectionParagraph(content, heading string) string {
 // name (e.g. the RE / анализ бинаря route's re-macho-only agents) is
 // expected to be absent until the owning overlay is applied — not a
 // configuration error at all.
+//
+// "Present" is resolved by role, not by exact filename: a multi-overlay
+// apply namespaces on-disk agent files (`implementer-ios.md`), so a route
+// table that names the bare role (`implementer`) must match against
+// diskRoles rather than stat the literal `implementer.md`, or every route
+// cell for a namespaced role false-positives the moment a second overlay
+// is applied.
 func checkRouteAgentsExist(projectDir string) []Issue {
 	trPath := filepath.Join(projectDir, ".claude", "agents", "task-runner.md")
 	data, err := os.ReadFile(trPath)
@@ -536,6 +543,7 @@ func checkRouteAgentsExist(projectDir string) []Issue {
 	}
 
 	agentsDir := filepath.Join(projectDir, ".claude", "agents")
+	diskRoles := rolesOnDisk(agentsDir)
 	seen := map[string]bool{}
 	var out []Issue
 	for _, line := range strings.Split(sectionUntilNextH2(content, "## Роутинг"), "\n") {
@@ -547,16 +555,48 @@ func checkRouteAgentsExist(projectDir string) []Issue {
 				continue
 			}
 			seen[name] = true
-			if _, err := os.Stat(filepath.Join(agentsDir, name+".md")); err != nil {
-				out = append(out, Issue{
-					Level:   LevelWarn,
-					Path:    trPath,
-					Message: fmt.Sprintf("route names agent %q, missing from .claude/agents/ and not marked conditional", name),
-				})
+			if agentPresentOnDisk(agentsDir, diskRoles, name) {
+				continue
 			}
+			out = append(out, Issue{
+				Level:   LevelWarn,
+				Path:    trPath,
+				Message: fmt.Sprintf("route names agent %q, missing from .claude/agents/ and not marked conditional", name),
+			})
 		}
 	}
 	return out
+}
+
+// rolesOnDisk walks agentsDir and returns the set of roles (per
+// agents.RoleOf) that at least one on-disk agent file implements. A
+// namespaced file such as `implementer-ios.md` contributes its role
+// (`implementer`), same as a bare `implementer.md` would.
+func rolesOnDisk(agentsDir string) map[string]bool {
+	roles := map[string]bool{}
+	_ = filepath.Walk(agentsDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		if role := agents.RoleOf(agentNameFor(agentsDir, path)); role != "" {
+			roles[role] = true
+		}
+		return nil
+	})
+	return roles
+}
+
+// agentPresentOnDisk reports whether a route table's agent name is backed by
+// a real file: either the exact `<name>.md` exists, or name is a role that a
+// namespaced on-disk file (`<role>-<stack>.md`) already implements.
+func agentPresentOnDisk(agentsDir string, diskRoles map[string]bool, name string) bool {
+	if _, err := os.Stat(filepath.Join(agentsDir, name+".md")); err == nil {
+		return true
+	}
+	if role := agents.RoleOf(name); role != "" && diskRoles[role] {
+		return true
+	}
+	return false
 }
 
 // checkStopLists errors for every active overlay whose manifest declares no

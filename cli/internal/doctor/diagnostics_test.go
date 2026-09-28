@@ -331,6 +331,23 @@ func TestCheckRouteAgentsExistSilentWhenAgentPresent(t *testing.T) {
 	require.Empty(t, checkRouteAgentsExist(dir))
 }
 
+// A multi-overlay apply namespaces on-disk agent files (`implementer-ios.md`
+// rather than `implementer.md`). The route table still names the bare role,
+// and that must resolve via agents.RoleOf instead of a literal os.Stat, or
+// every namespaced role false-positives as missing.
+func TestCheckRouteAgentsExistSilentWhenOnlyNamespacedFileOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	agentsDir := filepath.Join(dir, ".claude", "agents")
+	require.NoError(t, os.MkdirAll(agentsDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "planner.md"), []byte("---\nname: planner\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "tester.md"), []byte("---\nname: tester\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "implementer-ios.md"), []byte("---\nname: implementer-ios\n---\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"),
+		[]byte(routeTaskRunnerFixture("implementer", "report-writer")), 0o644))
+
+	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
 // The same missing, unwhitelisted agent named in multiple chain cells must
 // only warn once.
 func TestCheckRouteAgentsExistDedupesRepeatedAgent(t *testing.T) {
