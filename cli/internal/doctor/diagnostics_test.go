@@ -1075,6 +1075,61 @@ func TestCheckGitCheckoutHygieneSilentWhenMainNotOnDefaultBranchButRunActive(t *
 	require.False(t, findIssue(issues, LevelWarn, "main working tree is on"))
 }
 
+// The main working tree itself can be in detached HEAD (e.g. a CI checkout,
+// or a user who ran `git checkout --detach`), not just a linked worktree —
+// main.branch is then empty, and checkGitCheckoutHygiene must render that as
+// "detached HEAD" in the warning rather than an empty, confusing quoted
+// string.
+func TestCheckGitCheckoutHygieneWarnsWithDetachedHEADLabelWhenMainItselfIsDetached(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "--detach", "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, `main working tree is on "detached HEAD"`))
+}
+
+// A run log exists but is already complete (task-runner wrote `## Итог`
+// before returning its final schema) — hasActiveGitRun must tell this apart
+// from a run genuinely in flight, so stale run history left over from a
+// finished run must not silence the "main is on the wrong branch" warning.
+func TestCheckGitCheckoutHygieneWarnsWhenMainNotOnDefaultBranchAndRunLogIsCompleted(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".zprof", "runs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".zprof", "runs", "2026-09-29-x.md"),
+		[]byte("# task\nstarted: now\n\n## Итог\nverdict: done\n"), 0o644))
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+// gitDefaultBranch's fallback-to-"main" path is exercised implicitly by
+// every other fixture in this file (none of them configure an origin
+// remote). This is the mirror case: a repo whose refs/remotes/origin/HEAD
+// symref actually resolves — the way `git clone` sets it up — must report
+// that real branch name, exercising the TrimSpace/TrimPrefix parsing of
+// `git symbolic-ref`'s output rather than only its error path.
+func TestGitDefaultBranchResolvesFromOriginHEADSymref(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+
+	require.Equal(t, "develop", gitDefaultBranch(dir))
+}
+
+// Direct unit test of the fallback itself: no origin remote configured at
+// all, so `git symbolic-ref` fails and gitDefaultBranch must guess "main"
+// rather than propagate the error.
+func TestGitDefaultBranchFallsBackToMainWithoutOriginRemote(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+
+	require.Equal(t, "main", gitDefaultBranch(dir))
+}
+
 func TestCheckGitCheckoutHygieneSilentWithoutGitRepo(t *testing.T) {
 	dir := t.TempDir()
 	require.Empty(t, checkGitCheckoutHygiene(dir))
