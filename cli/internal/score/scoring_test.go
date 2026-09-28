@@ -103,6 +103,36 @@ func TestShortModel(t *testing.T) {
 	require.Equal(t, "?", ShortModel(""))
 }
 
+// TestCompute_BusyPollSignalPopulatesCard closes the gap between
+// computeBusyPoll (unit-tested in metrics_test.go) and its wiring into
+// Compute: a run with a busy-poll streak must produce a populated
+// card.Signals entry, and — because Signal carries no weight/saturation
+// (scoring.go's Signal doc comment) — must NOT change Score.
+func TestCompute_BusyPollSignalPopulatesCard(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "date", false),
+		ev(2, "Bash", "h2", "git log -1 --oneline", false),
+		ev(3, "Bash", "h3", "git diff", false),
+		ev(4, "Bash", "h4", "git status --porcelain", false),
+	)
+	c := Compute(run, Defaults(), "test")
+	require.Equal(t, 100, c.Score, "busy-poll is a signal, not a penalty — it must not touch Score")
+	require.Equal(t, "Ideal", c.Tier)
+	require.Len(t, c.Signals, 1)
+	require.Equal(t, "busy-poll", c.Signals[0].ID)
+	require.Equal(t, 1.0, c.Signals[0].Value)
+	require.Contains(t, c.Signals[0].Detail, "4 Bash подряд")
+}
+
+func TestCompute_NoBusyPollLeavesSignalsEmpty(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h1", "date", false),
+		ev(2, "Bash", "h2", "git log -1 --oneline", false),
+	)
+	c := Compute(run, Defaults(), "test")
+	require.Empty(t, c.Signals, "below busyPollThreshold — no signal emitted")
+}
+
 func TestCompute_ConfidencePartialListsRoles(t *testing.T) {
 	root := mkDispatch("r", "task-runner", "", "done", "completed", "2026-09-26T10:00:00Z")
 	tester := mkDispatch("t", "tester", "r", "done", "completed", "2026-09-26T10:05:00Z")

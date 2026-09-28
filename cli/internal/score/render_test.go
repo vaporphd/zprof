@@ -78,6 +78,22 @@ func TestRenderCard_ZeroGuardDeniesUnchanged(t *testing.T) {
 	require.Equal(t, "", lines[3], "no pinned P7 line — GuardDenies is 0")
 }
 
+// TestRenderCard_BusyPollSignalLine pins the AC5 signal-line shape (issue
+// #53): no −N prefix — it's unscored, prefixed with "· " instead — and
+// rendered after the penalty findings ("no penalties" here since none are
+// set).
+func TestRenderCard_BusyPollSignalLine(t *testing.T) {
+	c := Card{Score: 100, Tier: "Ideal", Verdict: "done", RunID: "claude-code:s:abcdefgh",
+		Facts: Facts{ModelCounts: map[string]int{}},
+		Signals: []Signal{{ID: "busy-poll", Value: 1,
+			Detail: "implementer: 4 Bash подряд без sleep/правок между (посл. `git status --porcelain`)"}},
+	}
+	out := RenderCard(c)
+	require.Contains(t, out, "no penalties")
+	require.Contains(t, out, "· busy-poll implementer: 4 Bash подряд без sleep/правок между (посл. `git status --porcelain`)")
+	require.NotContains(t, out, "−1 busy-poll", "signals are unscored — no −N prefix")
+}
+
 func TestHumanTokens(t *testing.T) {
 	require.Equal(t, "0", humanTokens(0))
 	require.Equal(t, "999", humanTokens(999))

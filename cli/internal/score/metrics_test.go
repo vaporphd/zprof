@@ -102,6 +102,24 @@ func TestBlindRetries_RtkWrappedSleepIsExempt(t *testing.T) {
 	require.Equal(t, 0.0, computeP2(run, Defaults()).value)
 }
 
+// TestBlindRetries_RtkWrappedNonExemptRepeatStillCounts is the end-to-end
+// counterpart to TestIsP2Exempt_RtkPrefixStripped's `rtk proxy git status`
+// case: real `rtk`-proxied traffic (.agentlog/tool-events.jsonl carries 93
+// `rtk proxy ...` / `rtk recall ...` / `rtk --version` events on this repo,
+// none of them sleep/wait) must still count as a blind retry through the
+// full computeP2 pipeline when it repeats after an error — the rtk-prefix
+// strip only feeds the sleep/wait exemption check, it must not blanket-
+// exempt every rtk-wrapped command.
+func TestBlindRetries_RtkWrappedNonExemptRepeatStillCounts(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h-status", "rtk proxy git status", true),
+		ev(2, "Bash", "h-status", "rtk proxy git status", true),
+	)
+	p := computeP2(run, Defaults())
+	require.Equal(t, 1.0, p.value)
+	require.Equal(t, 1.0, p.byRole["implementer"])
+}
+
 func TestBusyPoll_TriggersOnConsecutiveNonMutatingBash(t *testing.T) {
 	run := oneDispatchRun(
 		ev(1, "Bash", "h1", "date", false),
