@@ -1,12 +1,13 @@
 # Component Index
 
-Generated: 2026-09-27 · Head: `32be8d054fe9e3e62a1366970e9b120de51671e4`
+Generated: 2026-09-28 · Head: `9ad6233111b666f4ceb94d9057d84536a5085165`
 
 ## Components
 
 | Component | Path | Status | Depends | Doc |
 |-----------|------|--------|---------|-----|
 | collector | `profiles/base/zprof-collect.py` | implemented | profiles-base | [collector.md](collector.md) |
+| guard | `profiles/base/zprof-guard.py`, `profiles/base/guard.yaml` | in-progress | profiles-base | [guard.md](guard.md) |
 | apply | `cli/internal/apply/`, `cli/internal/cmd/apply.go` | implemented | overlay, manifest, managed, models, agents, fsutil, verdicts | [apply.md](apply.md) |
 | overlay | `cli/internal/overlay/` | implemented | manifest | — |
 | manifest | `cli/internal/manifest/` | implemented | fsutil, models | — |
@@ -37,6 +38,7 @@ written yet; treat them as provisional until `PLAN.md`'s P1/P2/P3 docs land.
 ```
 profiles-base
 ├── collector → [profiles-base]
+├── guard → [profiles-base]   (not yet an apply dependant — deploy is #28)
 └── overlays → [profiles-base]
 
 fsutil
@@ -57,7 +59,9 @@ verdicts  (leaf; loads/validates profiles/base/verdicts.yaml — ADR-0003)
 ## Status Summary
 
 - Implemented: 20
-- In progress: 0
+- In progress: 1 (guard — #23 lands the frame + stop-list/read-only rules;
+  #24–#28 add contexts, merge/PR gates, subagent-stop, score integration, and
+  `zprof apply` deployment)
 - Planned: 0
 - Undocumented (has code, no wiki): 18 (overlay, manifest, managed, score, stats, eval,
   agents, models, detect, doctor, verdicts, wizard, sync, fsutil, cmd, profiles-base,

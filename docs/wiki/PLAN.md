@@ -12,6 +12,7 @@
 |----------|-----|--------------------|------------------|
 | P0 | `collector.md` | `profiles/base/zprof-collect.py` | "how does the telemetry collector work, and how is `config_hash`/`verdict` computed?" |
 | P0 | `apply.md` | `cli/internal/apply/`, `cli/internal/cmd/apply.go` | "what does `zprof apply` write, and what does `--telemetry-only` do?" |
+| P0 | `guard.md` | `profiles/base/zprof-guard.py`, `profiles/base/guard.yaml` | "how does the `PreToolUse` guard hook decide deny vs. silence, and which rules are actually live vs. data-only?" |
 | P1 | `overlay.md` | `cli/internal/overlay/` | "how are the base profile and overlays loaded from disk?" |
 | P1 | `manifest.md` | `cli/internal/manifest/` | "what's persisted in `.zprof.yaml`, and how do model/agent overrides carry over?" |
 | P1 | `managed.md` | `cli/internal/managed/` | "how are managed blocks in `CLAUDE.md`/`AGENT_LOOP.md`/`workflows/*.md` merged without clobbering user edits?" |
@@ -49,3 +50,10 @@
   whose sources changed on `feat/issue-22-collector-config-hash`) and `INDEX.md`, ahead of
   the P1/P2/P3 docs above, per wiki-keeper's own judgment call for a first run that lands
   alongside a feature branch touching those components.
+- `guard.md` (P0, added retroactively to this table) was written on
+  `feat/issue-23-zprof-guard-py` / #23 — same judgment call as above: `zprof-guard.py`
+  and `guard.yaml` are new top-level sources in `profiles/base/`, so they get their own
+  doc rather than waiting for the generic `profiles-base.md` (P1, not yet written).
+  #23 is the first of a six-issue milestone (#23–#28); `guard.md` is `Status: in-progress`
+  until #28 (`zprof apply` deployment) lands — see `guard.md` and `plan-2.md` for the
+  issue breakdown.
