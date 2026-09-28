@@ -512,6 +512,14 @@ guard и все `permissions_deny` из `guard.json` удаляются, чуж�
    UserPromptSubmit на «следующая задача» — первый незакрытый пункт todo.
 6. **Frontmatter-хуки** для tester (blacklist API, >500 строк) — подход B.
 7. **Bash-запись вне репо** (`>` в путь вне репо, `rm -rf` вне репо).
+8. **PENDING, не реализовано.** `git worktree add … <default-ветка>` без
+   `--detach` → `deny` для всех ролей. Причина (issue #62): занятый под
+   не-detached worktree `main` ломает `git checkout main` в основном
+   каталоге репозитория — именно так pr-shepherd однажды застрял, создав
+   worktree на `main` в scratchpad и не сумев его убрать (§0.6 запрещал
+   любое удаление). Правило пока не добавлено в `profiles/base/guard.yaml` /
+   `profiles/base/zprof-guard.py` — только зафиксировано здесь как решение
+   на будущее.
 
 ## 13. Риски и границы
 
