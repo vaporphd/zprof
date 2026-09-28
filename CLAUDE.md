@@ -106,11 +106,13 @@ Main-сессия НИКОГДА не цитирует output subagent'а. По�
 по всему файлу независимо от секции (ADR 0002). Метки, которых ещё нет в
 managed-блоке, — здесь:
 
-- Python collector (`profiles/base/`): Test: `ruff check profiles/base/`
-  (lint, дополняет `Test:`-строку с pytest в managed-блоке выше) — версия
-  зафиксирована в `ruff.toml` (`required-version`) и
-  `.github/workflows/ci.yml` (`pip install ... ruff==0.16.9`), должны
-  совпадать.
+- Python collector (`profiles/base/`): Test: `uvx ruff@0.16.9 check profiles/base/`
+  (lint, дополняет `Test:`-строку с pytest в managed-блоке выше) — `uvx`
+  запускает ruff эфемерно (без постоянной установки), поэтому команда
+  самодостаточна и не полагается на предустановленный ruff в среде, где
+  исполняет её pr-shepherd. Версия зафиксирована в трёх местах и должна
+  совпадать: здесь, в `ruff.toml` (`required-version`) и в
+  `.github/workflows/ci.yml` (`pip install ... ruff==0.16.9`).
 
 ## Интеграция ветки
 
