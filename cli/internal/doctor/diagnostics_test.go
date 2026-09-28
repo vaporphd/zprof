@@ -71,6 +71,7 @@ func TestDiagnoseSingleOverlayNoCountIssue(t *testing.T) {
 	require.NoError(t, os.MkdirAll(ovDir, 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(ovDir, "manifest.yaml"),
 		[]byte("name: a\nstop_list: [\"x\"]\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -134,6 +135,7 @@ func TestDiagnoseAgentResolvableModelIsClean(t *testing.T) {
 	// task-runner is a role, so it must also declare a return_format.
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "agents", "task-runner.md"),
 		[]byte("---\nname: task-runner\nmodel: opus\nreturn_format: |\n  verdict: done\n---\nBody.\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -207,6 +209,7 @@ func TestDiagnoseCleanProjectHasNoIssues(t *testing.T) {
 	repo := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(proj, "CLAUDE.md"),
 		[]byte("intro\n<!-- zprof:begin overlay=base block=intro -->\nbody\n<!-- zprof:end -->\n"), 0o644))
+	satisfyNewGuardChecks(t, proj)
 	issues, err := Diagnose(proj, repo)
 	require.NoError(t, err)
 	require.Empty(t, issues)
@@ -1368,4 +1371,304 @@ func TestCheckAgentVerdicts_SchemaJSONWithVerdictsKeyIsSilent(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentlogDir, "schema.json"), []byte(`{"schema_version":1,"verdicts":{"version":1}}`), 0o644))
 
 	require.Empty(t, checkAgentVerdicts(proj, repo))
+}
+
+// --- guard hooks in settings.local.json (guard stage, ADR 0009) ----------
+
+func guardHookJSON(events ...string) string {
+	entries := make([]string, len(events))
+	for i, e := range events {
+		entries[i] = fmt.Sprintf(`"%s": [{"hooks": [{"type": "command", "command": "test -x zprof-guard.py && zprof-guard.py %s || true"}]}]`, e, e)
+	}
+	return "{\n  \"hooks\": {\n    " + strings.Join(entries, ",\n    ") + "\n  }\n}"
+}
+
+// Gated on the guard script being deployed — a project that never applied a
+// guard-shipping base profile has nothing for hooks to call.
+func TestCheckGuardHooksSilentWithoutGuardScript(t *testing.T) {
+	require.Empty(t, checkGuardHooks(t.TempDir()))
+}
+
+func TestCheckGuardHooksWarnsWhenSettingsMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+
+	issues := checkGuardHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "guard hooks missing for PreToolUse, SubagentStop")
+}
+
+func TestCheckGuardHooksWarnsOnPartialInstall(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(guardHookJSON("PreToolUse")), 0o644))
+
+	issues := checkGuardHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "SubagentStop")
+	require.NotContains(t, issues[0].Message, "PreToolUse,")
+}
+
+func TestCheckGuardHooksSilentWhenFullyInstalled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(guardHookJSON("PreToolUse", "SubagentStop")), 0o644))
+
+	require.Empty(t, checkGuardHooks(dir))
+}
+
+func TestCheckGuardHooksWarnsOnMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"), []byte("{not valid json"), 0o644))
+
+	issues := checkGuardHooks(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "failed to parse")
+}
+
+// --- guard.json (guard stage, ADR 0009) -----------------------------------
+
+func TestCheckGuardConfigWarnsWhenMissing(t *testing.T) {
+	issues := checkGuardConfig(t.TempDir())
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.True(t, strings.HasPrefix(issues[0].Message, "guard.json"))
+	require.Contains(t, issues[0].Message, "missing")
+}
+
+func TestCheckGuardConfigWarnsOnMalformedJSON(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte("{not valid json"), 0o644))
+
+	issues := checkGuardConfig(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.True(t, strings.HasPrefix(issues[0].Message, "guard.json"))
+	require.Contains(t, issues[0].Message, "failed to parse")
+}
+
+func TestCheckGuardConfigWarnsOnEmptyRules(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte(`{"rules": []}`), 0o644))
+
+	issues := checkGuardConfig(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.True(t, strings.HasPrefix(issues[0].Message, "guard.json"))
+	require.Contains(t, issues[0].Message, "no rules")
+}
+
+func TestCheckGuardConfigSilentWhenPopulated(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+		[]byte(`{"rules": [{"id": "force_push", "tools": ["Bash"]}]}`), 0o644))
+
+	require.Empty(t, checkGuardConfig(dir))
+}
+
+// --- permissions.deny vs guard.json's permissions_deny (guard stage) -----
+
+func TestCheckPermissionsDenySilentWhenGuardConfigMissing(t *testing.T) {
+	require.Empty(t, checkPermissionsDeny(t.TempDir()))
+}
+
+func TestCheckPermissionsDenySilentWhenPermissionsDenyEmpty(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte(`{"permissions_deny": []}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"), []byte(`{"permissions": {"deny": []}}`), 0o644))
+
+	require.Empty(t, checkPermissionsDeny(dir))
+}
+
+func TestCheckPermissionsDenyWarnsOnMissingEntries(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+		[]byte(`{"permissions_deny": ["deny-a", "deny-b"]}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(`{"permissions": {"deny": ["deny-a"]}}`), 0o644))
+
+	issues := checkPermissionsDeny(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "deny-b")
+	require.NotContains(t, issues[0].Message, "deny-a")
+}
+
+func TestCheckPermissionsDenyWarnsWhenSettingsMissing(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+		[]byte(`{"permissions_deny": ["deny-a"]}`), 0o644))
+
+	issues := checkPermissionsDeny(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, "deny-a")
+}
+
+func TestCheckPermissionsDenySilentWhenSuperset(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"),
+		[]byte(`{"permissions_deny": ["deny-a"]}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "settings.local.json"),
+		[]byte(`{"permissions": {"deny": ["deny-a", "deny-b"]}}`), 0o644))
+
+	require.Empty(t, checkPermissionsDeny(dir))
+}
+
+// --- checkGuardDeployment: single gate on guard.enabled (guard stage) ----
+
+func TestCheckGuardDeploymentAggregatesWhenGuardNil(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+
+	issues := checkGuardDeployment(dir, &manifest.ProjectManifest{})
+	require.NotEmpty(t, issues)
+	require.False(t, findIssue(issues, LevelInfo, "guard disabled by project config"))
+}
+
+func TestCheckGuardDeploymentAggregatesWhenExplicitlyEnabled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	enabled := true
+
+	issues := checkGuardDeployment(dir, &manifest.ProjectManifest{Guard: &manifest.GuardConfig{Enabled: &enabled}})
+	require.NotEmpty(t, issues)
+	require.False(t, findIssue(issues, LevelInfo, "guard disabled by project config"))
+}
+
+func TestCheckGuardDeploymentSilencesUnderlyingChecksWhenDisabled(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".claude"), 0o755))
+	// zprof-guard.py deliberately absent and guard.json deliberately
+	// malformed — if the three underlying checks still ran, they'd each
+	// produce a warning. The gate must suppress all three, not just skip
+	// adding its own info on top.
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".claude", "guard.json"), []byte("{not valid json"), 0o644))
+	disabled := false
+
+	issues := checkGuardDeployment(dir, &manifest.ProjectManifest{Guard: &manifest.GuardConfig{Enabled: &disabled}})
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelInfo, issues[0].Level)
+	require.Equal(t, "guard disabled by project config", issues[0].Message)
+}
+
+// --- checkRoleResolution: subagent meta.json lookup -----------------------
+
+func TestCheckRoleResolutionInfoWhenNoProjectsDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	issues := checkRoleResolution(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelInfo, issues[0].Level)
+	require.Equal(t, "role resolution unverified: no subagent meta found yet", issues[0].Message)
+}
+
+func slugFor(projectDir string) string {
+	return "-" + strings.ReplaceAll(strings.TrimPrefix(projectDir, "/"), "/", "-")
+}
+
+// satisfyNewGuardChecks writes the minimal fixtures needed so
+// checkGuardDeployment/checkRoleResolution stay silent: a guard.json with a
+// non-empty rules list (checkGuardConfig has no zprof-guard.py gate — see
+// plan-issue-29.md item 4 — so it fires on any project missing it), a HOME
+// override, and a matching subagent meta.json with agentType set. Used by
+// pre-existing "no issues" tests written before these two checks existed,
+// so their fixtures never accounted for either.
+func satisfyNewGuardChecks(t *testing.T, projectDir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Join(projectDir, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(projectDir, ".claude", "guard.json"),
+		[]byte(`{"rules": [{"id": "x", "tools": ["Bash"]}]}`), 0o644))
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(projectDir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+		[]byte(`{"agentType": "implementer"}`), 0o644))
+}
+
+func TestCheckRoleResolutionSilentWhenAgentTypeFound(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+		[]byte(`{"agentType": "implementer"}`), 0o644))
+
+	require.Empty(t, checkRoleResolution(dir))
+}
+
+func TestCheckRoleResolutionInfoWhenMetaLacksAgentType(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+		[]byte(`{"model": "sonnet"}`), 0o644))
+
+	issues := checkRoleResolution(dir)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelInfo, issues[0].Level)
+}
+
+func TestCheckRoleResolutionSilentWhenOneOfManyMetaHasAgentType(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	dir := t.TempDir()
+
+	metaDir := filepath.Join(home, ".claude", "projects", slugFor(dir), "session-1", "subagents")
+	require.NoError(t, os.MkdirAll(metaDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-1.meta.json"),
+		[]byte(`{"model": "sonnet"}`), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(metaDir, "agent-2.meta.json"),
+		[]byte(`{"agentType": "tester"}`), 0o644))
+
+	require.Empty(t, checkRoleResolution(dir))
+}
+
+// --- Diagnose(): guard checks are wired in ---------------------------------
+
+// A project with no guard.yaml section and no zprof-guard.py/guard.json
+// deployed still gets the guard.json-missing warning (checkGuardConfig has
+// no deployment gate) and the role-resolution info — proof the two new
+// lines in Diagnose() are actually reached, without regressing the count of
+// issues the existing 19 checks already produce on this fixture.
+func TestDiagnoseIncludesGuardAndRoleResolutionChecks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	proj := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelWarn, "guard.json"))
+	require.True(t, findIssue(issues, LevelInfo, "role resolution unverified"))
 }
