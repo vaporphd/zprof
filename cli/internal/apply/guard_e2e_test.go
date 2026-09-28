@@ -101,6 +101,12 @@ func TestE2E_GuardDeploysAndEnforcesForcePush(t *testing.T) {
 	require.NoError(t, json.Unmarshal(guardJSON, &guardDocJSON))
 	require.Equal(t, float64(1), guardDocJSON["version"])
 
+	// --- 2b. exempt_roles picked up from the ios-swift overlay (issue #30 AC5) ---
+	exemptRoles, _ := guardDocJSON["exempt_roles"].(map[string]any)
+	require.NotNil(t, exemptRoles, "exempt_roles must be present in merged guard.json")
+	publishExempt := toStringSlice(exemptRoles["publish"])
+	require.Contains(t, publishExempt, "testflight-shipper")
+
 	scriptPath := filepath.Join(proj, ".claude", "zprof-guard.py")
 	require.FileExists(t, scriptPath)
 
@@ -130,6 +136,91 @@ func TestE2E_GuardDeploysAndEnforcesForcePush(t *testing.T) {
 	}
 	allowOut := runGuardScript(t, python3, scriptPath, proj, statusPayload)
 	require.Empty(t, strings.TrimSpace(string(allowOut)), "an allowed call must produce no stdout")
+}
+
+// TestE2E_GuardDeploysBackendPythonPipInstallRule is issue #30 AC5 (Go part,
+// backend-python half): a full `zprof apply` against the real base profile
+// plus the real profiles/overlays/backend-python overlay must merge the
+// overlay's pip_install rule into .claude/guard.json, and the deployed
+// zprof-guard.py must actually deny `pip install` / `poetry add` while
+// staying silent on the sanctioned `uv add`.
+func TestE2E_GuardDeploysBackendPythonPipInstallRule(t *testing.T) {
+	python3, lookErr := exec.LookPath("python3")
+	if lookErr != nil {
+		t.Skip("python3 not found in PATH, skipping guard subprocess E2E")
+	}
+
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	require.NoError(t, err)
+	profilesDir := filepath.Join(root, "profiles")
+	fixture := filepath.Join(root, "cli", "testdata", "projects", "fake-empty")
+
+	proj := t.TempDir()
+	copyDir(t, fixture, proj)
+
+	base, err := overlay.LoadBase(filepath.Join(profilesDir, "base"))
+	require.NoError(t, err)
+	backendPython, err := overlay.LoadOverlay(filepath.Join(profilesDir, "overlays", "backend-python"))
+	require.NoError(t, err)
+
+	_, err = Apply(ApplyOpts{
+		ProjectDir: proj, Base: base, Overlays: []*overlay.Overlay{backendPython},
+		Project:   &manifest.ProjectManifest{Overlays: []string{"backend-python"}, Language: "ru"},
+		MergeMode: managed.ModeOverwrite,
+	})
+	require.NoError(t, err)
+
+	// --- 1. .claude/guard.json carries the pip_install rule with both patterns ---
+	guardJSONPath := filepath.Join(proj, ".claude", "guard.json")
+	guardJSON, err := os.ReadFile(guardJSONPath)
+	require.NoError(t, err)
+	var guardDocJSON map[string]any
+	require.NoError(t, json.Unmarshal(guardJSON, &guardDocJSON))
+
+	rules, _ := guardDocJSON["rules"].([]any)
+	require.NotEmpty(t, rules)
+	var pipInstallRule map[string]any
+	for _, r := range rules {
+		rule := r.(map[string]any)
+		if rule["id"] == "pip_install" {
+			pipInstallRule = rule
+			break
+		}
+	}
+	require.NotNil(t, pipInstallRule, "pip_install rule missing from merged guard.json")
+	matches := toStringSlice(pipInstallRule["match"])
+	require.Contains(t, matches, `\b(pip|pip3)\s+install\b`)
+	require.Contains(t, matches, `\bpoetry\s+add\b`)
+
+	scriptPath := filepath.Join(proj, ".claude", "zprof-guard.py")
+	require.FileExists(t, scriptPath)
+
+	// --- 2. subprocess: `pip install` is denied -------------------------------
+	pipInstallPayload := map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "pip install requests"},
+		"cwd":        proj,
+	}
+	out := runGuardScript(t, python3, scriptPath, proj, pipInstallPayload)
+	require.NotEmpty(t, out, "pip install must produce a deny payload on stdout")
+
+	var denyResp map[string]any
+	require.NoError(t, json.Unmarshal(out, &denyResp), "stdout must be valid JSON: %s", out)
+	hso, ok := denyResp["hookSpecificOutput"].(map[string]any)
+	require.True(t, ok, "missing hookSpecificOutput: %s", out)
+	require.Equal(t, "deny", hso["permissionDecision"])
+	reason, _ := hso["permissionDecisionReason"].(string)
+	require.Contains(t, reason, "pip_install")
+	require.Contains(t, reason, "uv add")
+
+	// --- 3. subprocess: `uv add` is allowed (silent) ---------------------------
+	uvAddPayload := map[string]any{
+		"tool_name":  "Bash",
+		"tool_input": map[string]any{"command": "uv add requests"},
+		"cwd":        proj,
+	}
+	allowOut := runGuardScript(t, python3, scriptPath, proj, uvAddPayload)
+	require.Empty(t, strings.TrimSpace(string(allowOut)), "uv add must produce no stdout")
 }
 
 // runGuardScript invokes zprof-guard.py exactly as the PreToolUse hook
