@@ -311,6 +311,11 @@ class Collector:
             # #34: task-notification carried neither <tool-use-id> nor a
             # resolvable <task-id> — genuine loss, not "format drift".
             self.state.increment_losses(meta["unresolved_notifications"])
+            # #36 P2-2: record the task_id(s) so "why no card?" is
+            # answerable from collect.log instead of a bare count.
+            _log_error(self.agentlog,
+                       f"session {session_id}: {meta['unresolved_notifications']} unresolved "
+                       f"task-notifications (task_ids={meta.get('unresolved_task_ids', [])})")
         if meta.get("unparsed_lines", 0) > 0:
             _log_error(self.agentlog,
                        f"session {session_id}: {meta['unparsed_lines']} unparsed lines (format drift?)")
@@ -449,10 +454,13 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
 
     Handles the sync path (Agent tool_use + toolUseResult), the async path
     (<task-notification>), and legacy notification fields. Returns
-    {"dispatches", "unparsed_lines", "unresolved_notifications", "truncated",
-    "harness_version"}.
+    {"dispatches", "unparsed_lines", "unresolved_notifications",
+    "unresolved_task_ids", "truncated", "harness_version"}.
     `notify_seq` and `seen_notifications` are mutated in place so the main-log
     caller can persist them; nested callers pass fresh containers.
+    `seen_notifications` also dedups unresolved notifications (#36 P2-1),
+    keyed as `("task:" + task_id, status)` to avoid colliding with the
+    `(tool_use_id, status)` keys used for resolved notifications.
 
     `agent_index` maps `agent_id -> {"tool_use_id", "role"}` and is used to
     resolve <task-notification> records that carry <task-id> but no
@@ -471,6 +479,7 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
     truncated = False
     unparsed = 0
     unresolved_notifications = 0
+    unresolved_task_ids: list[str] = []
 
     for line in raw.split("\n"):
         line = line.strip()
@@ -618,6 +627,7 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
             if notif:
                 tool_use_id = notif.get("tool_use_id", "")
                 resolved_role = ""
+                notif_status = notif.get("status", "completed")
                 if not tool_use_id:
                     # #34: this Claude Code build omits <tool-use-id>.
                     # Resolve via task_id -> {tool_use_id, role}: (a)
@@ -633,10 +643,26 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
                     else:
                         # Neither source resolved it — do not fold this
                         # into unparsed_lines (that means "format drift");
-                        # this is a distinct, countable loss (AC1).
+                        # this is a distinct, countable loss (AC1). But
+                        # Claude Code still writes every notification
+                        # twice (queue-operation + user, ~15ms apart), so
+                        # dedup against the same `seen_notifications` set
+                        # used below (#36 P2-1) — with a "task:" prefix to
+                        # avoid colliding with the (tool_use_id, status)
+                        # namespace used for resolved notifications.
+                        if task_id:
+                            unresolved_key = ("task:" + task_id, notif_status)
+                            if unresolved_key in seen_notifications:
+                                continue
+                            seen_notifications.add(unresolved_key)
+                        # No task_id at all shouldn't happen (the parser
+                        # requires task_id or tool_use_id, and tool_use_id
+                        # is empty here) — count it unconditionally rather
+                        # than risk colliding empty-key dedup.
                         unresolved_notifications += 1
+                        if task_id and task_id not in unresolved_task_ids:
+                            unresolved_task_ids.append(task_id)
                         continue
-                notif_status = notif.get("status", "completed")
 
                 # Dedup: Claude Code writes every notification twice
                 # (~15ms apart) — once as queue-operation, once as user
@@ -682,6 +708,7 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
 
     return {"dispatches": dispatches, "unparsed_lines": unparsed,
             "unresolved_notifications": unresolved_notifications,
+            "unresolved_task_ids": unresolved_task_ids,
             "truncated": truncated, "harness_version": harness_version}
 
 
@@ -738,6 +765,7 @@ def _extract_main_log(session_id: str, path: Path, sess: dict) -> tuple[list[dic
     dispatches = out["dispatches"]
     meta["unparsed_lines"] += out["unparsed_lines"]
     meta["unresolved_notifications"] = out["unresolved_notifications"]
+    meta["unresolved_task_ids"] = out["unresolved_task_ids"]
 
     # Update meta
     meta["offset"] = file_size
