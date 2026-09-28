@@ -29,6 +29,17 @@ Key invariants:
     source a) takes priority over the cross-Stop launch-map fallback persisted in
     `sess["agent_launch_map"]` (source b) (`zprof-collect.py:398-426`, `625-673`,
     `756-762`).
+  - `<task-notification>` XML is recognized in three record shapes: `queue-operation`,
+    `user`, and — for task-runner transcripts specifically — `type=="attachment"` with
+    `attachment.commandMode=="task-notification"` (XML in `attachment.prompt`; #52,
+    `zprof-collect.py:615-635`). All three share the same dedup/resolution path, so a
+    nested (task-runner-spawned) dispatch resolves identically to a main-log one.
+  - Nested Pass 1 (`_collect_subagent_transcripts`) resolves `<tool-use-id>`-less
+    notifications the same way `_extract_main_log` does: it builds one `agent_index` from
+    every `meta.json` in the flat `subagents/` dir and passes it into every nested
+    `_extract_dispatches_from_text` call, so grandchildren spawned by a task-runner resolve
+    via their sibling meta.json entries regardless of whose transcript the notification is
+    read from (#52, `zprof-collect.py:1268-1272`, `1299-1300`).
   - A notification that resolves via neither source is counted as a loss
     (`State.increment_losses`, `zprof-collect.py:199-200`, `310-318`), never folded into
     `unparsed_lines` — a genuine drop is distinguishable from format drift.
@@ -44,7 +55,8 @@ Key invariants:
     dispatch, why no card?" (#36 P2-2, `zprof-collect.py:314-318`, `663-664`).
 Spec refs: docs/adr/0001-collector-config-hash-and-telemetry-redeploy.md,
   docs/reviews/bug-2026-09-27-collector-async-dispatch.md (#34 root cause),
-  docs/reviews/bug-2026-09-28-issue-36-loss-dedup.md (#36 root cause)
+  docs/reviews/bug-2026-09-28-issue-36-loss-dedup.md (#36 root cause),
+  docs/reviews/bug-2026-09-28-issue-52-nested-async-stitch.md (#52 root cause)
 Test coverage: pytest, `profiles/base/tests/` — `test_config_hash.py` (35 tests: frontmatter
   parsing, name/stem indexing, resolution incl. ambiguity/symlink-escape/backup-file
   skip, hash stability/invalidation on body or `model:` edits, SubagentStop pointer
@@ -55,12 +67,18 @@ Test coverage: pytest, `profiles/base/tests/` — `test_config_hash.py` (35 test
   the same unresolved task_id counts as one loss, two distinct unresolved task_ids count
   separately, same task_id under two different statuses counts separately (dedup key
   includes status, not just task_id), unresolved task_id is traceable in `collect.log`),
-  plus `test_e2e.py`, `test_normalization.py`, `test_subagent_transcripts.py`,
-  `test_nested_dispatches.py`, `test_main_log_extraction.py` for the surrounding
-  dispatch pipeline. Verified green: `python3 -m pytest profiles/base/tests/ -q` → 229
-  passed (run 2026-09-28, branch `fix/issue-36-loss-dedup`); `.claude/` and
-  `profiles/base/` copies of the script currently **differ** — the #36 fix has not yet
-  been redeployed to `.claude/zprof-collect.py` (last updated at `5f8fd1a`, the #34 fix)
+  `test_nested_async_attachment_stitch.py` (5 tests for #52: nested children resolved via
+  `type=="attachment"` notifications incl. `<tool-use-id>`-less ones via the shared
+  `agent_index`, verdict/`parent_dispatch_id` land on the nested row, attachment records
+  dedup against queue-operation/user duplicates of the same notification, `attachment.usage`
+  backfills `subagent_tokens`/`tool_uses`/`duration_ms` only when the XML lacks `<usage>` and
+  never overrides XML-provided values), plus `test_e2e.py`, `test_normalization.py`,
+  `test_subagent_transcripts.py`, `test_nested_dispatches.py`, `test_main_log_extraction.py`
+  for the surrounding dispatch pipeline. Verified green: `python3 -m pytest
+  profiles/base/tests/ -q` → 506 passed (run 2026-09-28, branch
+  `fix/collector-nested-async-stitch-52`); `.claude/` and `profiles/base/` copies of the
+  script currently **differ** — the #52 fix has not yet been redeployed to
+  `.claude/zprof-collect.py` (last updated at `aaa06ca`, the #36 fix)
   via `zprof apply --telemetry-only`; see [apply.md](apply.md) / ADR-0001 for the
   redeploy mechanism. Not drift in the PROJECT_SPEC/ADR sense — expected pre-merge state
   for a source change awaiting its own dogfooding redeploy.
@@ -179,6 +197,38 @@ now logs it — `_log_error(..., f"session {session_id}: {n} unresolved task-not
 `collect.log` names the dropped `task_id`s instead of leaving only a bare counter in
 `state.json`.
 
+**Nested (task-runner) dispatches: attachment-form notifications (#52).** Everything above
+resolves notifications found in the *main* session log. But a `task-runner` subagent that
+itself dispatches implementer/tester/reviewer/etc. async writes those children's
+`<task-notification>` blocks into its own transcript (`subagents/agent-<id>.jsonl`), read by
+`_collect_subagent_transcripts`'s Pass 1 (`:1199-1300`) via a *nested* call to
+`_extract_dispatches_from_text` — and Claude Code records notifications there in a third
+shape the main log doesn't use: `type=="attachment"` with
+`attachment.commandMode=="task-notification"`, XML in `attachment.prompt`
+(`attachment.rendered`/`renderedInHumanTurn` are copies for the model's own context and are
+intentionally not parsed, to avoid double-counting). Before #52 this shape wasn't recognized
+at all — on a real `.agentlog/` run, 14/14 nested dispatches sat at `status: async_launched`
+forever, which `zprof score`'s P6 counts as "tokens spent in dispatches with no result" (run
+#25: P6 0.579/15 pts → 0/0 pts, overall score 47 "Lucky" → 62 "Solid" after the fix).
+
+The fix adds a third detection branch alongside `queue-operation`/`user` (`:627-635`) that
+reads `attachment.prompt` as `notification_text` when `commandMode` matches; parsing, the
+`agent_index` lookup, and both dedup keys (`(tool_use_id, status)` and
+`("task:"+task_id, status)`, #36) are shared code, so an attachment record and a
+queue-operation/user duplicate of the same logical notification still collapse into one
+dispatch/loss. When the XML has no `<usage>` block (background-command notifications without
+a `<result>`), `attachment.usage`'s camelCase siblings (`totalTokens`/`toolUses`/
+`durationMs`) backfill `subagent_tokens`/`tool_uses`/`duration_ms` — but only fields the XML
+didn't already set (`:652-658`), so the XML always wins when both are present.
+
+Separately, nested `<tool-use-id>`-less notifications need the same `agent_index` resolution
+`_extract_main_log` already had for the main log — `_collect_subagent_transcripts` didn't
+build or pass one into its nested calls at all. It now builds a single `agent_index` from
+every `meta.json` in the (flat) `subagents/` dir *before* Pass 1 and passes it into every
+nested `_extract_dispatches_from_text` call (`:1268-1272`, `:1299-1300`), so a grandchild's
+notification resolves via a sibling's meta.json regardless of whose transcript it's read
+from — mirroring `_extract_main_log`'s own `agent_index` construction (`:756-762`).
+
 ### State and recovery
 
 `State` (`:174-209`) tracks per-session watermarks (`main_log_offset`,
@@ -200,6 +250,9 @@ once used by transcript collection, so they don't accumulate unboundedly across 
 - [Bug: unresolved task-notification loss counted twice, no collect.log trace
   (#36)](../reviews/bug-2026-09-28-issue-36-loss-dedup.md) — root cause and fix design
   for the dedup/logging behavior above
+- [Bug: collector doesn't stitch nested async dispatches with attachment-form
+  task-notifications (#52)](../reviews/bug-2026-09-28-issue-52-nested-async-stitch.md) —
+  root cause and fix design for the task-runner-transcript stitching above
 - `score` (`cli/internal/score/`, doc not yet written — see `PLAN.md`) — consumes
   `dispatches.jsonl` produced here, including the `role`/`dispatch_complete` fields this
   fix now sets on previously-stuck async rows

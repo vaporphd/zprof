@@ -27,7 +27,7 @@
 - [x] fix(base): loss-счётчик #34 дублируется до дедупа; диагностика нерезолвленных task-notification (#36) — follow-up к #34
 - [x] chore: переразвернуть .claude/zprof-collect.py после #36 (#45)
 - [x] fix(overlays): issue-loop-github-strict/pr-shepherd — старый human-gated контракт противоречит auto-merge (#37) — после #15
-- [ ] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет
+- [x] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет — PR #61
 - [ ] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 
 ## Plan 2: guard
