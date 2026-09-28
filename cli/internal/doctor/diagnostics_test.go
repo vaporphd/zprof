@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -419,6 +420,100 @@ func TestCheckRouteAgentsExistSilentWhenRoutingSectionHasNoTable(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(agentsDir, "task-runner.md"), []byte(trContent), 0o644))
 
 	require.Empty(t, checkRouteAgentsExist(dir))
+}
+
+// doctorRepoRoot locates the zprof repository root from this test file's own
+// path, mirroring internal/verdicts/repo_test.go's convention — cli/internal/
+// doctor is three directories under the root, same depth as cli/internal/
+// verdicts.
+func doctorRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, f, _, ok := runtime.Caller(0)
+	require.True(t, ok)
+	root, err := filepath.Abs(filepath.Join(filepath.Dir(f), "..", "..", ".."))
+	require.NoError(t, err)
+	return root
+}
+
+// copyAgentFiles copies every top-level *.md file from srcDir into dstDir
+// (creating dstDir if needed), overwriting on name collision. Used to
+// assemble a realistic .claude/agents/ roster out of the actual profiles/base
+// and profiles/overlays checkouts rather than a synthetic fixture.
+func copyAgentFiles(t *testing.T, dstDir, srcDir string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(dstDir, 0o755))
+	entries, err := os.ReadDir(srcDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(srcDir, e.Name()))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(dstDir, e.Name()), data, 0o644))
+	}
+}
+
+// realTaskRunnerProjectFixture assembles .claude/agents/ out of the actual
+// profiles/base/agents/ plus every overlay's agents/ EXCEPT re-macho, whose
+// intake/unpacker/hypothesizer/verifier/report-writer are exactly the names
+// the real `### Условные агенты маршрутов` whitelist covers. Excluding
+// re-macho is deliberate: if its agents were on disk, checkRouteAgentsExist
+// would find them via the plain os.Stat path and the whitelist parsing (five
+// separate comma-joined backtick spans, plus non-agent backtick text like
+// `.claude/agents/` and `re-macho` in the very same sentence) would never be
+// exercised at all.
+func realTaskRunnerProjectFixture(t *testing.T) string {
+	t.Helper()
+	root := doctorRepoRoot(t)
+	proj := t.TempDir()
+	agentsDir := filepath.Join(proj, ".claude", "agents")
+	copyAgentFiles(t, agentsDir, filepath.Join(root, "profiles", "base", "agents"))
+
+	overlaysDir := filepath.Join(root, "profiles", "overlays")
+	entries, err := os.ReadDir(overlaysDir)
+	require.NoError(t, err)
+	for _, e := range entries {
+		if !e.IsDir() || e.Name() == "re-macho" {
+			continue
+		}
+		src := filepath.Join(overlaysDir, e.Name(), "agents")
+		if info, statErr := os.Stat(src); statErr == nil && info.IsDir() {
+			copyAgentFiles(t, agentsDir, src)
+		}
+	}
+	return proj
+}
+
+// TestCheckRouteAgentsExistAgainstRealTaskRunnerIsClean is the repo-level
+// backstop for AC1/AC6: the actual `## Роутинг` table and `### Условные
+// агенты маршрутов` whitelist in profiles/base/agents/task-runner.md — not a
+// synthetic single-name fixture — must produce zero warnings once every
+// generic-route role is deployed somewhere in the fleet, even though the
+// real whitelist paragraph lists five agents as separate comma-joined
+// backtick spans and also backtick-quotes non-agent text (`.claude/agents/`,
+// `re-macho`) in that same sentence. A regression here means either the
+// canonical route table names a role no overlay ships, or a routing-table
+// edit broke the very whitelist parsing meant to keep RE-only agents from
+// false-warning.
+func TestCheckRouteAgentsExistAgainstRealTaskRunnerIsClean(t *testing.T) {
+	proj := realTaskRunnerProjectFixture(t)
+	require.Empty(t, checkRouteAgentsExist(proj))
+}
+
+// The mirror case against the real file: a genuinely missing, unwhitelisted
+// agent named in two different routes (`implementer` appears in both the
+// new-feature and the bugfix chain) must still warn exactly once, not
+// per-occurrence — proving the dedupe behavior holds against the production
+// table, not just the synthetic DedupesRepeatedAgent fixture.
+func TestCheckRouteAgentsExistAgainstRealTaskRunnerWarnsOnGenuinelyMissingAgent(t *testing.T) {
+	proj := realTaskRunnerProjectFixture(t)
+	require.NoError(t, os.Remove(filepath.Join(proj, ".claude", "agents", "implementer.md")))
+
+	issues := checkRouteAgentsExist(proj)
+	require.Len(t, issues, 1)
+	require.Equal(t, LevelWarn, issues[0].Level)
+	require.Contains(t, issues[0].Message, `"implementer"`)
 }
 
 func TestCheckRunLogsWarnsAboveFifty(t *testing.T) {
