@@ -57,3 +57,11 @@
   #23 is the first of a six-issue milestone (#23–#28); `guard.md` is `Status: in-progress`
   until #28 (`zprof apply` deployment) lands — see `guard.md` and `plan-2.md` for the
   issue breakdown.
+- MAINTAIN run on `feat/guard-events-score-27` / #27 (ADR-0008) updated `guard.md`
+  in place (new "Score and stats integration" section, `Dependants: [score, stats]`,
+  two invariants) rather than writing `score.md`/`stats.md` — those stay P1/P2, not
+  yet written. #27's source changes are entirely in `cli/internal/score/` and
+  `cli/internal/cmd/{score,stats}.go`, consuming a file format
+  (`.agentlog/guard-events.jsonl`) that `guard.md` already owns, not a new
+  top-level component. `INDEX.md`'s dependency graph got the matching edge (data
+  contract, not a Go import — same pattern already used for collector → apply).
