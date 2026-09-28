@@ -453,14 +453,20 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
     """Extract dispatch records from JSONL text (main log or a subagent transcript).
 
     Handles the sync path (Agent tool_use + toolUseResult), the async path
-    (<task-notification>), and legacy notification fields. Returns
-    {"dispatches", "unparsed_lines", "unresolved_notifications",
-    "unresolved_task_ids", "truncated", "harness_version"}.
+    (<task-notification>, as a `queue-operation`, a `user` message, or a
+    `type=="attachment"` record with `attachment.commandMode=="task-
+    notification"` — the form task-runner transcripts use, #52), and legacy
+    notification fields. Returns {"dispatches", "unparsed_lines",
+    "unresolved_notifications", "unresolved_task_ids", "truncated",
+    "harness_version"}.
     `notify_seq` and `seen_notifications` are mutated in place so the main-log
     caller can persist them; nested callers pass fresh containers.
     `seen_notifications` also dedups unresolved notifications (#36 P2-1),
     keyed as `("task:" + task_id, status)` to avoid colliding with the
-    `(tool_use_id, status)` keys used for resolved notifications.
+    `(tool_use_id, status)` keys used for resolved notifications. This dedup
+    is shared across all three notification forms, so an attachment record
+    and its queue-operation/user duplicates of the same logical notification
+    still collapse into a single dispatch/loss.
 
     `agent_index` maps `agent_id -> {"tool_use_id", "role"}` and is used to
     resolve <task-notification> records that carry <task-id> but no
@@ -606,12 +612,27 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
             dispatches.append(dispatch)
             continue
 
-        # --- Path 2 & 3: task-notification in user message or queue-operation ---
+        # --- Path 2 & 3: task-notification in user message, queue-operation,
+        # or attachment (#52: task-runner transcripts carry notifications as
+        # type=="attachment" with attachment.commandMode=="task-notification"
+        # and the XML in attachment.prompt; attachment.rendered /
+        # renderedInHumanTurn are copies of the same text for the model's
+        # context and are not parsed here, to avoid double-counting) ---
         notification_text = None
+        attachment_usage = None
         if rec_type == "queue-operation":
             c = record.get("content", "")
             if isinstance(c, str) and "<task-notification>" in c:
                 notification_text = c
+        elif rec_type == "attachment":
+            att = record.get("attachment", {})
+            if isinstance(att, dict) and att.get("commandMode") == "task-notification":
+                prompt = att.get("prompt", "")
+                if isinstance(prompt, str) and "<task-notification>" in prompt:
+                    notification_text = prompt
+                    usage = att.get("usage")
+                    if isinstance(usage, dict):
+                        attachment_usage = usage
         elif role == "user" and isinstance(content, str) and "<task-notification>" in content:
             notification_text = content
         elif role == "user" and isinstance(content, list):
@@ -625,6 +646,16 @@ def _extract_dispatches_from_text(session_id: str, raw: str, notify_seq: dict,
         if notification_text:
             notif = _parse_task_notification_xml(notification_text)
             if notif:
+                # attachment.usage carries camelCase fields as a sibling of
+                # the XML rather than nested <usage> tags; only backfill
+                # what the XML itself didn't already provide.
+                if attachment_usage:
+                    if "subagent_tokens" not in notif and attachment_usage.get("totalTokens") is not None:
+                        notif["subagent_tokens"] = attachment_usage["totalTokens"]
+                    if "tool_uses" not in notif and attachment_usage.get("toolUses") is not None:
+                        notif["tool_uses"] = attachment_usage["toolUses"]
+                    if "duration_ms" not in notif and attachment_usage.get("durationMs") is not None:
+                        notif["duration_ms"] = attachment_usage["durationMs"]
                 tool_use_id = notif.get("tool_use_id", "")
                 resolved_role = ""
                 notif_status = notif.get("status", "completed")
@@ -1226,6 +1257,20 @@ def _collect_subagent_transcripts(
     # Read every meta.json once.
     metas = _read_agent_metas(subagents_dir, agentlog)
 
+    # #52: agent_id -> {tool_use_id, role} index for Pass 1, built once from
+    # every meta.json in this (flat) subagents/ dir — grandchildren spawned
+    # by a task-runner live alongside their parent's siblings here, so a
+    # single shared index resolves <task-notification> records without
+    # <tool-use-id> regardless of whose transcript they're found in. Mirrors
+    # _extract_main_log's agent_index (:750-762), passed to every nested
+    # call below so it accumulates across agents the same way the main-log
+    # call accumulates across incremental Stop reads.
+    agent_index: dict[str, dict] = {}
+    for agent_id, meta in metas.items():
+        tuid = meta.get("toolUseId", "")
+        if tuid:
+            agent_index[agent_id] = {"tool_use_id": tuid, "role": meta.get("agentType", "")}
+
     # Defer children whose parent is still running: their full row comes from
     # the parent's transcript, and a thin row written now would block it via
     # (dispatch_id, seq) dedup on the next pass.
@@ -1251,7 +1296,8 @@ def _collect_subagent_transcripts(
         except OSError:
             continue
         try:
-            nested = _extract_dispatches_from_text(session_id, raw, {}, set())
+            nested = _extract_dispatches_from_text(session_id, raw, {}, set(),
+                                                    agent_index=agent_index)
         except Exception:
             _log_error(agentlog, f"nested extraction failed for agent {agent_id}: {traceback.format_exc()}")
             continue
