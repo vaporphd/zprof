@@ -113,6 +113,7 @@ def build_guard_config() -> dict:
              "match": [r'\bgit\s+branch\b.*\s(-D|-[a-zA-Z]*D[a-zA-Z]*|--delete\s+--force|--force\s+--delete)\b'],
              "reason": "удаление несмерженной ветки (-D/--force) запрещено стоп-листом; смерженную удаляй через git branch -d"},
             {"id": "remote_ref_delete", "tools": ["Bash"],
+             "not_roles": ["pr-shepherd"],
              "match": [r'\bgit\s+push\b.*(\s--delete\b|\s-d\b|\s:refs/|\s\S+\s+:\S+)'],
              "reason": "удаление ветки или тега на remote запрещено стоп-листом"},
             {"id": "tag_delete", "tools": ["Bash"],
@@ -351,23 +352,36 @@ def test_pr_shepherd_admin_merge_deny(tmp_path):
 
 
 def test_pr_shepherd_remote_ref_delete_deny(tmp_path):
-    """ADR D5: `remote_ref_delete` has no context/roles — pr-shepherd is denied same as anyone."""
+    """ADR-0005 D5/E8: `remote_ref_delete` now excludes pr-shepherd (`not_roles`); for
+    pr-shepherd, `remote_ref_delete_unmerged` (`context: branch_pr_merged`) decides
+    instead. `tmp_path` isn't a git repo, so `gh` can't confirm a merged PR either way
+    -> `branch_pr_merged` is fail-closed (ADR-0005 E6) -> still deny, under a new id.
+    """
     _write_config(tmp_path, build_guard_config())
     payload = _payload("Bash", _bash("git push origin --delete feat/x"), role="pr-shepherd", cwd=tmp_path)
     out = zprof_guard.pre_tool(payload)
     assert out is not None
-    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [remote_ref_delete]:")
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [remote_ref_delete_unmerged]:")
 
 
 # ---------------------------------------------------------------------------
-# Unregistered context: rule never fires in #23 (ADR D4)
+# Unregistered context: rule never fires (ADR D4). Since #24 registered
+# `head_on_remote`/`linked_worktree` (ADR-0005), the first two cases below
+# return None for a different reason than before: the context now runs for
+# real, but `tmp_path` isn't a git repo, so the evaluator's own fail-open
+# path (`context_error` + False) applies -- net effect unchanged. `gh pr
+# create`/`gh pr merge` still hit a genuinely unregistered context
+# (`pr_create_gate`/`merge_preflight`, #25). A `Write` outside the repo case
+# used to live here too; #24's `write_outside_repo` is no longer
+# unregistered and does deny it for real -- see
+# `test_guard_context.py::test_write_outside_repo_deny_etc`.
 # ---------------------------------------------------------------------------
 
 UNKNOWN_CONTEXT_CASES = [
     ("Bash", {"command": "git rebase main"}, "implementer"),
     ("Bash", {"command": "git stash"}, "implementer"),
     ("Bash", {"command": "gh pr create -t x -b y"}, "implementer"),
-    ("Write", {"file_path": "/etc/hosts", "content": "x"}, "implementer"),
     ("Bash", {"command": "gh pr merge 7"}, "pr-shepherd"),
 ]
 

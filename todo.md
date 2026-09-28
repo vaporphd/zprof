@@ -30,7 +30,7 @@
 
 ## Plan 2: guard
 - [x] feat(base): zprof-guard.py — каркас, стоп-лист без контекста, read-only роли (#23)
-- [ ] feat(base): guard — контекстные правила (head_on_remote, linked_worktree, запись вне репо) (#24) — depends: #23
+- [x] feat(base): guard — контекстные правила (head_on_remote, linked_worktree, запись вне репо) (#24) — depends: #23
 - [ ] feat(base): guard — merge-гейт и PR-гейт (Closes #N + ## Gate) (#25) — depends: #23
 - [ ] feat(base): guard — валидатор return_format на SubagentStop (#26) — depends: #23
 - [ ] feat: guard-события в zprof score (P7) и zprof stats (#27) — depends: #23
@@ -38,3 +38,4 @@
 - [ ] feat(cli): zprof doctor — проверки guard (хуки, guard.json, deny, роли) (#29) — depends: #28
 - [ ] feat(base): guard — строка доктрины, контракты pr-shepherd/task-runner, overlay guard.yaml (#30) — depends: #28
 - [ ] test(base): shakedown — ноль ложных deny guard на штатном маршруте (#31) — depends: #24, #25, #26, #27, #28, #29, #30
+- [ ] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23

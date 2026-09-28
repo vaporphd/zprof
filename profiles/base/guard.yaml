@@ -50,7 +50,8 @@ rules:
       - '\bgit\s+branch\b.*\s(-D|-[a-zA-Z]*D[a-zA-Z]*|--delete\s+--force|--force\s+--delete)\b'
     reason: "удаление несмерженной ветки (-D/--force) запрещено стоп-листом; смерженную удаляй через git branch -d"
   - id: remote_ref_delete
-    tools: [Bash]      # БЕЗ context, БЕЗ roles — ADR D5: безусловно для всех ролей в #23
+    tools: [Bash]
+    not_roles: [pr-shepherd]   # ADR-0004 D5 / ADR-0005: для pr-shepherd решает remote_ref_delete_unmerged
     match:
       - '\bgit\s+push\b.*(\s--delete\b|\s-d\b|\s:refs/|\s\S+\s+:\S+)'
     reason: "удаление ветки или тега на remote запрещено стоп-листом"
@@ -76,7 +77,7 @@ rules:
     match:
       - '\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b'
     reason: "исполнение скачанного кода (curl/wget в shell) запрещено стоп-листом"
-  # --- §5.2 стоп-лист с контекстом (данные; evaluator'ы — #24) ---
+  # --- §5.2 стоп-лист с контекстом (активно с #24) ---
   - id: rebase_published
     tools: [Bash]
     match:
@@ -102,7 +103,7 @@ rules:
       - '\bgit\s+push\b.*(\s--delete\b|\s-d\b|\s:refs/|\s\S+\s+:\S+)'
     context: branch_pr_merged
     reason: "удалять на remote можно только ветку уже смерженного PR"
-  # --- §5.3 запись вне репозитория (данные; evaluator — #24) ---
+  # --- §5.3 запись вне репозитория (активно с #24) ---
   - id: write_outside_repo
     tools: [Edit, Write, MultiEdit, NotebookEdit]
     context: write_outside_repo      # match отсутствует — условие целиком в evaluator'е

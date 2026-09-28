@@ -12,10 +12,12 @@ ADR: docs/adr/0004-zprof-guard-pre-tool-frame.md
 Spec: docs/superpowers/specs/2026-09-27-guard-hooks-design.md §4, §5, §7, §8.1
 """
 import fcntl
+import fnmatch
 import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -25,8 +27,9 @@ from pathlib import Path
 # not matched — see spec §13 (latency).
 TOOLS_GUARDED = frozenset({"Bash", "Edit", "Write", "MultiEdit", "NotebookEdit"})
 
-# Registry of built-in `context` evaluators, keyed by name. Empty in #23 —
-# rules referencing an unregistered context simply never fire (ADR D4).
+# Registry of built-in `context` evaluators, keyed by name. Populated at the
+# bottom of this module (ADR-0005, #24) — rules referencing a still
+# unregistered context (§5.5/§5.6, #25) simply never fire (ADR D4).
 # Signature: (call, rule, config) -> bool | str. False/None = does not fire;
 # True = fires with rule["reason"]; str = fires with that reason instead.
 CONTEXTS: dict[str, Callable[[dict, dict, dict], "bool | str | None"]] = {}
@@ -278,6 +281,314 @@ def deny_output(rule_id: str, reason: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Context evaluators (ADR-0005, #24)
+# ---------------------------------------------------------------------------
+
+_GIT_TIMEOUT = 3
+_GH_TIMEOUT = 10
+
+
+def _run(argv: list[str], cwd: str, timeout: float) -> tuple[int | None, str]:
+    """Run one external command for a context evaluator. Never raises.
+
+    Returns `(0, stdout)` on success; `(returncode, "")` on a non-zero exit —
+    stdout is discarded and stderr is never inspected (locale-dependent);
+    `(None, type(exc).__name__)` on `TimeoutExpired`/`OSError` (missing
+    binary, `cwd` not a directory, ...).
+
+    Deciding whether a given return means "error" or a normal "no" is left
+    to the caller — the same non-zero exit means different things for
+    different questions (ADR-0005 Context §2). `_run` itself writes nothing
+    to the journal. Evaluators call this via the module-level name (not a
+    bound default argument) so tests can `monkeypatch.setattr(module, "_run", fake)`
+    to exercise `branch_pr_merged` without a network/`gh`.
+    """
+    env = dict(os.environ)
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GH_PROMPT_DISABLED"] = "1"
+    env["GIT_OPTIONAL_LOCKS"] = "0"
+    try:
+        proc = subprocess.run(
+            argv, cwd=cwd, timeout=timeout, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, check=False, env=env,
+        )
+    except (subprocess.TimeoutExpired, OSError) as e:
+        return None, type(e).__name__
+    if proc.returncode == 0:
+        return 0, proc.stdout
+    return proc.returncode, ""
+
+
+def _context_detail(argv: list[str], rc: int | None, out: str) -> str:
+    """`context_error` `detail`: `"<argv[0]> <argv[1]>: exit <rc>"` or
+    `"...: <ExceptionName>"` (`out` holds the exception class name when
+    `rc is None`). Never includes paths, stdout or stderr (spec §7)."""
+    head = " ".join(argv[:2])
+    return f"{head}: {out}" if rc is None else f"{head}: exit {rc}"
+
+
+def _note_context_error(call: dict, rule: dict, detail: str) -> None:
+    """Accumulate a diagnostic context-evaluator failure on `call`. No I/O.
+
+    `pre_tool()` flushes `call["context_errors"]` to the journal after rule
+    evaluation (ADR-0005 E2) — evaluators have no `session_id`/`input_hash`/
+    `target` to build a full event themselves, and `setdefault` lets them be
+    called in unit tests against a bare `call` dict.
+    """
+    call.setdefault("context_errors", []).append({"rule": rule.get("id"), "detail": detail})
+
+
+def _head_on_remote(call: dict, rule: dict, config: dict) -> bool:
+    """`head_on_remote` (rules `rebase_published`/`amend_published`, ADR-0005 E3).
+
+    True when HEAD is reachable from some remote-tracking branch (published)
+    *and* has an upstream. The cheap, unambiguous check runs first: if HEAD
+    isn't on any remote branch, the upstream check is skipped entirely — "no
+    upstream" is a normal "no" (detached HEAD, unpublished branch), not an
+    error, so it must not be the check that decides whether we're in a repo
+    at all (a bare `git rev-parse @{u}` gives the same exit 128 for both).
+    """
+    wd = working_dir(call.get("command") or "", call.get("cwd") or call["root"])
+    argv = ["git", "branch", "-r", "--contains", "HEAD"]
+    rc, out = _run(argv, wd, _GIT_TIMEOUT)
+    if rc is None or rc != 0:
+        _note_context_error(call, rule, _context_detail(argv, rc, out))
+        return False
+    if out.strip() == "":
+        return False  # HEAD not published yet -- allow, no second call needed
+
+    argv2 = ["git", "rev-parse", "--abbrev-ref", "@{u}"]
+    rc2, out2 = _run(argv2, wd, _GIT_TIMEOUT)
+    if rc2 == 0:
+        return True
+    if rc2 is None:
+        _note_context_error(call, rule, _context_detail(argv2, rc2, out2))
+        return False
+    return False  # no upstream / detached HEAD -- a repo was already proven above, not an error
+
+
+def _linked_worktree(call: dict, rule: dict, config: dict) -> bool:
+    """`linked_worktree` (rule `stash_in_worktree`, ADR-0005 E4).
+
+    True when the current worktree is a linked worktree: `git-dir` and
+    `git-common-dir` differ once both are resolved relative to `wd` (git
+    prints them relative to its own cwd, not the guard process's cwd — a
+    bare `os.path.realpath` would resolve from the wrong directory).
+    """
+    wd = working_dir(call.get("command") or "", call.get("cwd") or call["root"])
+    argv = ["git", "rev-parse", "--git-dir", "--git-common-dir"]
+    rc, out = _run(argv, wd, _GIT_TIMEOUT)
+    if rc is None or rc != 0:
+        _note_context_error(call, rule, _context_detail(argv, rc, out))
+        return False
+    lines = [line for line in out.splitlines() if line.strip()]
+    if len(lines) < 2:
+        _note_context_error(call, rule, "git rev-parse: unexpected output")
+        return False
+    git_dir = os.path.realpath(os.path.join(wd, lines[0]))
+    common_dir = os.path.realpath(os.path.join(wd, lines[1]))
+    return git_dir != common_dir
+
+
+_ENV_HEAD_RE = re.compile(r"^\$([A-Za-z_][A-Za-z0-9_]*)")
+_GLOB_CHARS = frozenset("*?[")
+
+
+def _expand_prefix_head(prefix: str, root: str) -> str | None:
+    """Expand the `$VAR`/`~` head of one `allow_write_prefixes` entry.
+
+    Returns None when the whole prefix must be skipped: an unset/empty env
+    var, or `~` with no HOME to expand against (ADR-0005 E5 step 1). Only
+    the head is substituted — a glob tail like `*/memory/` is left as-is.
+    `$VAR` is only recognized at the very start of the prefix.
+    """
+    if prefix == "$CLAUDE_PROJECT_DIR" or prefix.startswith("$CLAUDE_PROJECT_DIR/"):
+        return root + prefix[len("$CLAUDE_PROJECT_DIR"):]
+    m = _ENV_HEAD_RE.match(prefix)
+    if m:
+        value = os.environ.get(m.group(1))
+        if not value:
+            return None
+        return value + prefix[m.end():]
+    if prefix.startswith("~"):
+        head, _, rest = prefix.partition("/")
+        expanded = os.path.expanduser(head)
+        if expanded == head:
+            return None  # no HOME to expand against
+        return expanded + ("/" + rest if rest else "")
+    return prefix
+
+
+def _prefix_segments(prefix: str, root: str) -> "tuple[list[str], list[str]] | None":
+    """Literal head (realpath'd) + untouched glob tail segments for one prefix.
+
+    None means "this prefix never matches anything" (unresolvable $VAR/~, or
+    not absolute after expansion). ADR-0005 E5 steps 1.2-1.3: only the
+    literal head (up to the first segment containing `*?[`) is realpath'd —
+    glob segments are left untouched so `fnmatch` still sees them.
+    """
+    expanded = _expand_prefix_head(prefix, root)
+    if not expanded or not os.path.isabs(expanded):
+        return None
+    if expanded != "/":
+        expanded = expanded.rstrip("/")
+    segs = expanded.split("/")
+    k = len(segs)
+    for i, seg in enumerate(segs):
+        if any(c in seg for c in _GLOB_CHARS):
+            k = i
+            break
+    literal = "/".join(segs[:k]) or "/"
+    head_segs = os.path.realpath(literal).split("/")
+    return head_segs, segs[k:]
+
+
+def _prefix_matches(head_segs: list[str], tail: list[str], rsegs: list[str]) -> bool:
+    """Positional segment match: literal head by equality, glob tail by `fnmatchcase`.
+
+    Prefix semantics only — path segments beyond `len(head_segs) + len(tail)`
+    are not inspected (ADR-0005 E5 step 2). A tail glob segment (`*`) matches
+    exactly one path segment; it can never absorb a `/`.
+    """
+    if len(head_segs) + len(tail) > len(rsegs):
+        return False
+    if rsegs[:len(head_segs)] != head_segs:
+        return False
+    return all(
+        fnmatch.fnmatchcase(rsegs[len(head_segs) + j], pat)
+        for j, pat in enumerate(tail)
+    )
+
+
+def _write_outside_repo(call: dict, rule: dict, config: dict) -> bool:
+    """`write_outside_repo` (Edit/Write/MultiEdit/NotebookEdit, ADR-0005 E5).
+
+    Subject is `call["subject"]` (already `file_path`/`notebook_path`, D2);
+    there's no shell command here, so `working_dir()` is not used. Deny
+    unless the realpath'd target sits under one of the (expanded, glob-aware)
+    `allow_write_prefixes`, or under a linked worktree of this project
+    (`git rev-parse --git-common-dir`, run from the nearest existing
+    ancestor directory, resolves to `$CLAUDE_PROJECT_DIR/.git`).
+    """
+    subject = call.get("subject")
+    if not isinstance(subject, str) or not subject:
+        return False
+    path = subject if os.path.isabs(subject) else os.path.join(call.get("cwd") or call["root"], subject)
+    real = os.path.realpath(path)
+    rsegs = real.split("/")
+
+    prefixes = config.get("allow_write_prefixes")
+    if not isinstance(prefixes, list) or not all(isinstance(p, str) for p in prefixes):
+        raise ValueError("allow_write_prefixes: expected list[str]")
+    for prefix in prefixes:
+        expanded = _prefix_segments(prefix, call["root"])
+        if expanded is None:
+            continue
+        head_segs, tail = expanded
+        if _prefix_matches(head_segs, tail, rsegs):
+            return False
+
+    d = os.path.dirname(real)
+    while d != "/" and not os.path.isdir(d):
+        d = os.path.dirname(d)
+    argv = ["git", "rev-parse", "--git-common-dir"]
+    rc, out = _run(argv, d, _GIT_TIMEOUT)
+    if rc == 0:
+        common = os.path.realpath(os.path.join(d, out.strip()))
+        expected = os.path.join(os.path.realpath(call["root"]), ".git")
+        if common == expected:
+            return False
+    elif rc is None:
+        _note_context_error(call, rule, _context_detail(argv, rc, out))
+    return True  # no prefix matched, and allowance did not confirm a linked worktree of this repo
+
+
+_QUOTE_RE = re.compile(r'^(["\'])(.*)\1$')
+_REF_NAME_RE = re.compile(r'^[A-Za-z0-9._][A-Za-z0-9._/-]*$')
+
+
+def _strip_one_quote_pair(token: str) -> str:
+    m = _QUOTE_RE.match(token)
+    return m.group(2) if m else token
+
+
+def _branch_pr_merged(call: dict, rule: dict, config: dict) -> bool:
+    """`branch_pr_merged` (rule `remote_ref_delete_unmerged`, roles: [pr-shepherd]).
+
+    ADR-0005 E6 — the one fail-closed evaluator. Any failure (unparseable
+    command, non-zero/timeout/missing `gh`, malformed JSON, empty result) is
+    a *decision* (deny), not silence, so unlike the other three evaluators
+    this never calls `_note_context_error`. The whole body runs inside
+    `try/except Exception: return True` — an uncaught exception here would
+    otherwise escape into `main()`'s outer fail-open `except` and produce an
+    allow, exactly backwards for an irreversible remote branch deletion.
+    """
+    try:
+        command = call.get("command") or ""
+        targets: set[str] = set()
+        for segment in re.split(r"&&|\|\||;|\|", command):
+            tokens = [_strip_one_quote_pair(t) for t in segment.split()]
+            push_at = None
+            for i in range(len(tokens) - 1):
+                if tokens[i] == "git" and tokens[i + 1] == "push":
+                    push_at = i
+                    break
+            if push_at is None:
+                continue
+
+            delete_mode = False
+            positionals: list[str] = []
+            for tok in tokens[push_at + 2:]:
+                if tok.startswith("-"):
+                    if tok in ("--delete", "-d"):
+                        delete_mode = True
+                    continue  # other flags (and their values) fall through below
+                positionals.append(tok)
+            if not positionals:
+                continue
+
+            for refspec in positionals[1:]:  # positionals[0] is the remote
+                if delete_mode:
+                    if ":" in refspec:
+                        return True  # unparseable
+                    name = refspec
+                elif refspec.startswith(":"):
+                    name = refspec[1:]
+                else:
+                    continue  # ordinary push, not a deletion target
+
+                if name.startswith("refs/heads/"):
+                    name = name[len("refs/heads/"):]
+                elif name.startswith("refs/"):
+                    return True  # refs/tags/..., refs/pull/... -- unparseable
+                if ".." in name or not _REF_NAME_RE.match(name):
+                    return True
+                targets.add(name)
+
+        if len(targets) != 1:
+            return True  # zero or ambiguous (multiple) targets -- deny without calling gh
+        name = next(iter(targets))
+
+        wd = working_dir(command, call.get("cwd") or call["root"])
+        argv = ["gh", "pr", "list", "--head", name, "--state", "merged", "--json", "number"]
+        rc, out = _run(argv, wd, _GH_TIMEOUT)
+        if rc != 0:
+            return True
+        data = json.loads(out)
+        return not (isinstance(data, list) and len(data) > 0)
+    except Exception:
+        return True
+
+
+CONTEXTS.update({
+    "head_on_remote": _head_on_remote,
+    "linked_worktree": _linked_worktree,
+    "write_outside_repo": _write_outside_repo,
+    "branch_pr_merged": _branch_pr_merged,
+})
+
+
+# ---------------------------------------------------------------------------
 # Journal: .agentlog/guard-events.jsonl + guard-state.json (ADR D9)
 # ---------------------------------------------------------------------------
 
@@ -451,8 +762,29 @@ def pre_tool(payload: dict) -> dict | None:
         "root": root,
         "cwd": payload.get("cwd"),
         "tool_input": tool_input,
+        "context_errors": [],
     }
-    hit = evaluate_rules(call, config)
+    try:
+        hit = evaluate_rules(call, config)
+    finally:
+        # ADR-0005 E2: flushed in `finally` so a later rule raising (bad
+        # regex/$ref -> fail-open) doesn't swallow earlier context_errors.
+        for err in call.get("context_errors") or []:
+            _safe_write_event({
+                "ts": _now_ts(),
+                "session_id": session_id,
+                "event": "context_error",
+                "role": role,
+                "dispatch_id": did,
+                "tool": tool_name,
+                "rule": err.get("rule"),
+                "decision": None,
+                "detail": err.get("detail"),
+                "target": _target(tool_name, tool_input, command),
+                "input_hash": input_hash,
+                "run_id": None,
+            }, root)
+
     if hit is None:
         return None
 
