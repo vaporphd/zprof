@@ -301,12 +301,22 @@ def _input_hash(tool_input) -> str:
     return hashlib.sha1(canon.encode("utf-8")).hexdigest()[:12]
 
 
+_ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
+
+
 def _target(tool_name: str, tool_input: dict, command: str | None) -> str | None:
-    """First two whitespace tokens of the command, or basename of file/notebook path."""
+    """First two whitespace tokens of the command, or basename of file/notebook path.
+
+    Leading `NAME=value` shell env-var assignments (e.g. `GH_TOKEN=ghp_xxx gh
+    release create`) are skipped before picking the two tokens — the journal
+    must never record a secret verbatim (review P1-1).
+    """
     if tool_name == "Bash":
         if not command:
             return None
         tokens = command.split()
+        while tokens and _ENV_ASSIGNMENT_RE.match(tokens[0]):
+            tokens = tokens[1:]
         return " ".join(tokens[:2]) if tokens else None
     if tool_name in ("Edit", "Write", "MultiEdit"):
         fp = tool_input.get("file_path")
@@ -332,42 +342,64 @@ def write_event(event: dict, root: str) -> None:
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
+def _safe_write_event(event: dict, root: str) -> None:
+    """`write_event`, with any failure swallowed (review P1-2).
+
+    `.agentlog/` being unwritable (missing perms, a plain file where a dir
+    is expected, a full disk...) must never turn an already-decided deny
+    into an allow by raising out of `pre_tool()` into `main()`'s outer
+    fail-open `except` — the journal is best-effort, the decision is not.
+    """
+    try:
+        write_event(event, root)
+    except Exception:
+        pass
+
+
 def _note_role_unresolved(session_id, root: str) -> bool:
     """True the first time `session_id` is seen with an unresolved role.
 
     Dedup state lives in `.agentlog/guard-state.json`, read-modify-write
     under `.agentlog/.guard.lock` (not the collector's `.agentlog/.lock` —
     guard runs on every Bash/Edit, the collector holds its lock for seconds).
+
+    Any failure touching `.agentlog/` (review P1-2: e.g. it exists as a
+    plain file, or the filesystem rejects the write) is swallowed and
+    treated as "not seen before" — this is a best-effort dedup for a purely
+    informational event and must never break the surrounding rule check.
     """
     if not session_id:
         return True
-    agentlog = Path(root) / ".agentlog"
-    agentlog.mkdir(parents=True, exist_ok=True)
-    lock_path = agentlog / ".guard.lock"
-    state_path = agentlog / "guard-state.json"
-    lock_path.touch(exist_ok=True)
-    with open(lock_path, "r+") as lf:
-        fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-        try:
+    try:
+        agentlog = Path(root) / ".agentlog"
+        agentlog.mkdir(parents=True, exist_ok=True)
+        lock_path = agentlog / ".guard.lock"
+        state_path = agentlog / "guard-state.json"
+        lock_path.touch(exist_ok=True)
+        with open(lock_path, "r+") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
-                state = json.loads(state_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                state = {}
-            if not isinstance(state, dict):
-                state = {}
-            sessions = state.get("role_unresolved_sessions")
-            if not isinstance(sessions, list):
-                sessions = []
-            if session_id in sessions:
-                return False
-            sessions = (sessions + [session_id])[-_MAX_ROLE_UNRESOLVED_SESSIONS:]
-            new_state = {"version": 1, "role_unresolved_sessions": sessions}
-            tmp = state_path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(new_state, ensure_ascii=False))
-            os.replace(tmp, state_path)
-            return True
-        finally:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+                try:
+                    state = json.loads(state_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    state = {}
+                if not isinstance(state, dict):
+                    state = {}
+                sessions = state.get("role_unresolved_sessions")
+                if not isinstance(sessions, list):
+                    sessions = []
+                if session_id in sessions:
+                    return False
+                sessions = (sessions + [session_id])[-_MAX_ROLE_UNRESOLVED_SESSIONS:]
+                new_state = {"version": 1, "role_unresolved_sessions": sessions}
+                tmp = state_path.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(new_state, ensure_ascii=False))
+                os.replace(tmp, state_path)
+                return True
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+    except Exception:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -396,7 +428,7 @@ def pre_tool(payload: dict) -> dict | None:
     input_hash = _input_hash(tool_input)
 
     if role == "unknown" and _note_role_unresolved(session_id, root):
-        write_event({
+        _safe_write_event({
             "ts": _now_ts(),
             "session_id": session_id,
             "event": "role_unresolved",
@@ -425,7 +457,7 @@ def pre_tool(payload: dict) -> dict | None:
         return None
 
     clean_reason = str(hit["reason"]).rstrip().rstrip(".")
-    write_event({
+    _safe_write_event({
         "ts": _now_ts(),
         "session_id": session_id,
         "event": "pre-tool",

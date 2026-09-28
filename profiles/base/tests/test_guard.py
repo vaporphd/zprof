@@ -814,6 +814,40 @@ def test_target_unknown_tool_is_none():
 
 
 # ---------------------------------------------------------------------------
+# P1-1 (review, #23): leading `NAME=value` env-assignment must not leak a
+# secret into `target`
+# ---------------------------------------------------------------------------
+
+def test_target_skips_leading_env_assignment_secret():
+    target = zprof_guard._target("Bash", {}, "SECRET=xxx some-command args")
+    assert target == "some-command args"
+    assert "SECRET" not in target
+
+
+def test_target_skips_multiple_leading_env_assignments():
+    target = zprof_guard._target("Bash", {}, "A=1 B=2 git push")
+    assert target == "git push"
+
+
+def test_deny_event_target_does_not_leak_leading_env_assignment_secret(tmp_path):
+    """End-to-end (review repro): `GH_TOKEN=ghp_SECRET123 gh release create v1`
+    must not put `GH_TOKEN=ghp_SECRET123` into the journal's `target` field.
+    """
+    _write_config(tmp_path, build_guard_config())
+    tool_input = {"command": "GH_TOKEN=ghp_SECRET123 gh release create v1"}
+    payload = _payload("Bash", tool_input, role="implementer", cwd=tmp_path, session_id="sess-secret")
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+
+    events = _read_events(tmp_path)
+    ev = events[-1]
+    assert ev["rule"] == "publish"
+    assert ev["target"] == "gh release"
+    assert "GH_TOKEN" not in ev["target"]
+    assert "SECRET" not in ev["target"]
+
+
+# ---------------------------------------------------------------------------
 # load_config: version/shape validation beyond malformed JSON
 # ---------------------------------------------------------------------------
 
@@ -930,6 +964,60 @@ def test_note_role_unresolved_resets_non_dict_state(tmp_path):
     assert zprof_guard._note_role_unresolved("sess-reset", str(tmp_path)) is True
     state = json.loads((agentlog / "guard-state.json").read_text(encoding="utf-8"))
     assert state["role_unresolved_sessions"] == ["sess-reset"]
+
+
+# ---------------------------------------------------------------------------
+# P1-2 (review, #23): a failed `.agentlog/` write must never turn an
+# already-decided deny into an allow
+# ---------------------------------------------------------------------------
+
+def test_deny_survives_unwritable_agentlog(tmp_path):
+    """`.agentlog` exists as a plain file (not a dir) -> write_event raises
+    internally, but `pre_tool()` must still return the deny decision."""
+    _write_config(tmp_path, build_guard_config())
+    (tmp_path / ".agentlog").write_text("not a directory", encoding="utf-8")
+    payload = _payload("Bash", _bash("git push --force"), role="implementer", cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [force_push]:")
+
+
+def test_deny_survives_unwritable_agentlog_with_unknown_role(tmp_path):
+    """Same as above but role is unknown, so both the `role_unresolved`
+    write and `_note_role_unresolved`'s own state write must be swallowed
+    too, without preventing the deny from firing."""
+    _write_config(tmp_path, build_guard_config())
+    (tmp_path / ".agentlog").write_text("not a directory", encoding="utf-8")
+    payload = {"session_id": "sess-u2", "cwd": str(tmp_path), "tool_name": "Bash",
+               "tool_input": _bash("git push --force")}  # no agent_type -> role unknown
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [force_push]:")
+
+
+def test_e2e_deny_survives_unwritable_agentlog(tmp_path):
+    """Subprocess-level repro of the review report: fail-open must not
+    leak past a deny decision even though the journal write fails."""
+    _write_config(tmp_path, build_guard_config())
+    (tmp_path / ".agentlog").write_text("not a directory", encoding="utf-8")
+    payload = _payload("Bash", _bash("git push --force"), role="implementer", cwd=tmp_path)
+    result = _run_guard(tmp_path, json.dumps(payload))
+    assert result.returncode == 0
+    assert result.stderr == ""
+    out = json.loads(result.stdout)
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith("zprof guard [force_push]:")
+
+
+def test_safe_write_event_swallows_failure(tmp_path):
+    (tmp_path / ".agentlog").write_text("not a directory", encoding="utf-8")
+    zprof_guard._safe_write_event({"x": 1}, str(tmp_path))  # must not raise
+
+
+def test_note_role_unresolved_swallows_unwritable_agentlog(tmp_path):
+    (tmp_path / ".agentlog").write_text("not a directory", encoding="utf-8")
+    assert zprof_guard._note_role_unresolved("sess-x", str(tmp_path)) is True
 
 
 # ---------------------------------------------------------------------------
