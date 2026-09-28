@@ -49,10 +49,27 @@ func NewApplyCmd() *cobra.Command {
 					fmt.Println("[dry-run] --telemetry-only would write:")
 					fmt.Println("  .claude/zprof-collect.py")
 					fmt.Println("  .agentlog/schema.json")
-					fmt.Println("  .claude/settings.local.json (telemetry hooks)")
+					fmt.Println("  .claude/zprof-guard.py")
+					fmt.Println("  .claude/guard.json")
+					fmt.Println("  .claude/settings.local.json (telemetry + guard hooks)")
 					return nil
 				}
-				written, err := apply.DeployTelemetry(pwd, base)
+				// Guard deploys on --telemetry-only too (ADR 0009 I7): load
+				// the overlay + guard layers from an existing .zprof.yaml if
+				// one is present, otherwise fall back to base-only defaults
+				// (guard enabled, no overlay/project layer — §8.3).
+				guardLayers := apply.GuardLayers{}
+				if proj, err := manifest.LoadProject(filepath.Join(pwd, ".zprof.yaml")); err == nil {
+					for _, name := range proj.Overlays {
+						o, err := overlay.LoadOverlay(filepath.Join(repo, "overlays", name))
+						if err != nil {
+							return fmt.Errorf("load overlay %s: %w", name, err)
+						}
+						guardLayers.Overlays = append(guardLayers.Overlays, o)
+					}
+					guardLayers.Project = proj.Guard
+				}
+				written, err := apply.DeployTelemetry(pwd, base, guardLayers)
 				if err != nil {
 					return err
 				}

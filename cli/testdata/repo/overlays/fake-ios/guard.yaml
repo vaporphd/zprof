@@ -1,0 +1,11 @@
+# Test-fixture stub for an overlay guard.yaml (ADR 0009). No real overlay
+# ships one yet (#30) — this fixture exists so apply.deployGuard tests can
+# exercise the base -> overlay merge layer without a live overlay.
+readonly_roles: [architect]
+merge_roles: [pr-shepherd, architect]
+rules:
+  - id: overlay_only_rule
+    tools: [Bash]
+    match:
+      - '\boverlay-only-pattern\b'
+    reason: "overlay-only stub rule"

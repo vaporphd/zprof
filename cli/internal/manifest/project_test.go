@@ -67,6 +67,82 @@ func TestCarryOverFrom_KeepsScore(t *testing.T) {
 	require.Same(t, prev.Score, m.Score)
 }
 
+// TestLoadProjectManifest_GuardSection is table-driven over the shapes
+// GuardConfig must parse — mirrors TestLoadProjectManifest_ScoreSection.
+func TestLoadProjectManifest_GuardSection(t *testing.T) {
+	cases := []struct {
+		name  string
+		yaml  string
+		check func(t *testing.T, g *GuardConfig)
+	}{
+		{
+			name: "no guard section at all",
+			yaml: "overlays: [x]\n",
+			check: func(t *testing.T, g *GuardConfig) {
+				require.Nil(t, g)
+			},
+		},
+		{
+			name: "enabled: false",
+			yaml: "overlays: [x]\nguard:\n  enabled: false\n",
+			check: func(t *testing.T, g *GuardConfig) {
+				require.NotNil(t, g)
+				require.NotNil(t, g.Enabled)
+				require.False(t, *g.Enabled)
+				require.False(t, g.IsEnabled())
+			},
+		},
+		{
+			name: "full section",
+			yaml: "overlays: [x]\nguard:\n" +
+				"  extra_deny_bash: [\"rm -rf /\"]\n" +
+				"  merge_roles: [pr-shepherd, architect]\n" +
+				"  readonly_roles: [explorer]\n" +
+				"  allow_write_outside: [\"/tmp/scratch\"]\n" +
+				"  exempt_roles:\n    force_push: [architect]\n",
+			check: func(t *testing.T, g *GuardConfig) {
+				require.NotNil(t, g)
+				require.True(t, g.IsEnabled(), "nil Enabled means on")
+				require.Equal(t, []string{"rm -rf /"}, g.ExtraDenyBash)
+				require.Equal(t, []string{"pr-shepherd", "architect"}, g.MergeRoles)
+				require.Equal(t, []string{"explorer"}, g.ReadonlyRoles)
+				require.Equal(t, []string{"/tmp/scratch"}, g.AllowWriteOutside)
+				require.Equal(t, []string{"architect"}, g.ExemptRoles["force_push"])
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			p := filepath.Join(dir, ".zprof.yaml")
+			require.NoError(t, os.WriteFile(p, []byte(tc.yaml), 0o644))
+			m, err := LoadProject(p)
+			require.NoError(t, err)
+			tc.check(t, m.Guard)
+		})
+	}
+}
+
+func TestGuardConfig_IsEnabled_NilIsOn(t *testing.T) {
+	var g *GuardConfig
+	require.True(t, g.IsEnabled())
+}
+
+func TestCarryOverFrom_KeepsGuard(t *testing.T) {
+	prev := &ProjectManifest{Guard: &GuardConfig{ReadonlyRoles: []string{"explorer"}}}
+	m := &ProjectManifest{}
+	m.CarryOverFrom(prev)
+	require.Same(t, prev.Guard, m.Guard)
+}
+
+func TestCarryOverFrom_DoesNotOverwriteExplicitGuard(t *testing.T) {
+	prev := &ProjectManifest{Guard: &GuardConfig{ReadonlyRoles: []string{"explorer"}}}
+	fresh := &GuardConfig{ReadonlyRoles: []string{"architect"}}
+	m := &ProjectManifest{Guard: fresh}
+	m.CarryOverFrom(prev)
+	require.Same(t, fresh, m.Guard)
+}
+
 func TestCarryOverFrom_KeepsRunner(t *testing.T) {
 	prev := &ProjectManifest{Runner: &RunnerConfig{MaxDispatches: 20}}
 	m := &ProjectManifest{}

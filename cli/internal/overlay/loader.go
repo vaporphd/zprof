@@ -26,6 +26,11 @@ type Overlay struct {
 	LoopMD      string
 	ClaudeBlock string
 	Dir         string
+	// GuardSchema is the raw contents of this overlay's guard.yaml, if any
+	// (ADR 0009). Optional: most overlays ship no guard.yaml today, and
+	// its absence is not an error — deployGuard simply has one less layer
+	// to merge.
+	GuardSchema []byte
 }
 
 // Base is the fully loaded base profile: its manifest, base agent prompts,
@@ -49,6 +54,13 @@ type Base struct {
 	// registry). Its normalized form is merged into schema.json under the
 	// `verdicts` key — see apply.renderSchema.
 	Verdicts []byte
+	// GuardScript is the raw contents of zprof-guard.py, deployed verbatim
+	// to <project>/.claude/zprof-guard.py on apply (ADR 0009).
+	GuardScript []byte
+	// GuardSchema is the raw contents of guard.yaml, the base layer of the
+	// three-layer guard config merge (base -> overlay -> .zprof.yaml)
+	// rendered to <project>/.claude/guard.json — see apply.deployGuard.
+	GuardSchema []byte
 }
 
 // readAgents walks dir and returns a map of agent name (relative path, without
@@ -146,6 +158,10 @@ func LoadOverlay(dir string) (*Overlay, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read claude-block.md: %w", err)
 	}
+	guardSchema, err := os.ReadFile(filepath.Join(dir, "guard.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read guard.yaml: %w", err)
+	}
 	return &Overlay{
 		Manifest:    m,
 		Detect:      det,
@@ -153,18 +169,20 @@ func LoadOverlay(dir string) (*Overlay, error) {
 		LoopMD:      string(loop),
 		ClaudeBlock: string(claude),
 		Dir:         dir,
+		GuardSchema: guardSchema,
 	}, nil
 }
 
 // LoadBase loads the base profile directory (base/) into a Base: its
 // manifest.yaml, agents/*.md, workflows/*.md, state-templates/*.md, and the
 // router file named by the manifest's `router:` key.
-// claude-block-base.md, zprof-collect.py, and telemetry.yaml are all
-// optional: callers that only need the manifest/agents/workflows (doctor's
-// expectedAgentNames, minimal test fixtures) must not fail to load a base
-// profile that predates telemetry support. deployCollector (apply package)
-// is what makes them effectively required for `zprof apply`, by skipping
-// its writes when the content is absent.
+// claude-block-base.md, zprof-collect.py, telemetry.yaml, zprof-guard.py,
+// and guard.yaml are all optional: callers that only need the
+// manifest/agents/workflows (doctor's expectedAgentNames, minimal test
+// fixtures) must not fail to load a base profile that predates telemetry or
+// guard support. deployCollector/deployGuard (apply package) are what make
+// them effectively required for `zprof apply`, by skipping their writes
+// when the content is absent.
 func LoadBase(dir string) (*Base, error) {
 	m, err := manifest.LoadOverlay(filepath.Join(dir, "manifest.yaml"))
 	if err != nil {
@@ -206,6 +224,14 @@ func LoadBase(dir string) (*Base, error) {
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("read verdicts.yaml: %w", err)
 	}
+	guardScript, err := os.ReadFile(filepath.Join(dir, "zprof-guard.py"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read zprof-guard.py: %w", err)
+	}
+	guardSchema, err := os.ReadFile(filepath.Join(dir, "guard.yaml"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read guard.yaml: %w", err)
+	}
 	return &Base{
 		Manifest:        m,
 		Agents:          agents,
@@ -216,6 +242,8 @@ func LoadBase(dir string) (*Base, error) {
 		CollectorScript: collectorScript,
 		TelemetrySchema: telemetrySchema,
 		Verdicts:        verdictsYAML,
+		GuardScript:     guardScript,
+		GuardSchema:     guardSchema,
 	}, nil
 }
 

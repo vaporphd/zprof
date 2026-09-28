@@ -57,14 +57,18 @@ func deployCollector(projectDir string, base *overlay.Base) ([]string, error) {
 	return written, nil
 }
 
-// DeployTelemetry writes .claude/zprof-collect.py and .agentlog/schema.json
-// and upserts the telemetry hooks (SubagentStop/Stop/SessionStart) into
+// DeployTelemetry writes .claude/zprof-collect.py, .agentlog/schema.json,
+// and the guard artifacts (.claude/zprof-guard.py, .claude/guard.json —
+// ADR 0009), then upserts the telemetry hooks (SubagentStop/Stop/
+// SessionStart) and the guard hooks (PreToolUse/SubagentStop) into
 // .claude/settings.local.json. It touches nothing else: no agents, no
 // managed CLAUDE.md/AGENT_LOOP.md blocks, no .zprof.yaml. This is the
 // narrow redeploy path behind `zprof apply --telemetry-only`, for projects
 // where applying a full overlay would be destructive or isn't wanted
-// (see ADR 0001).
-func DeployTelemetry(projectDir string, base *overlay.Base) ([]string, error) {
+// (see ADR 0001). deployGuard lives inside this single function — not
+// duplicated between Apply() and --telemetry-only — precisely so the two
+// paths can never deploy guard differently (ADR 0009 I7).
+func DeployTelemetry(projectDir string, base *overlay.Base, layers GuardLayers) ([]string, error) {
 	if base == nil {
 		return nil, errors.New("base is required")
 	}
@@ -72,6 +76,11 @@ func DeployTelemetry(projectDir string, base *overlay.Base) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("deploy collector: %w", err)
 	}
+	guardFiles, err := deployGuard(projectDir, base, layers)
+	if err != nil {
+		return nil, fmt.Errorf("deploy guard: %w", err)
+	}
+	written = append(written, guardFiles...)
 	if err := EnsureHooks(projectDir); err != nil {
 		return nil, fmt.Errorf("ensure telemetry hooks: %w", err)
 	}
