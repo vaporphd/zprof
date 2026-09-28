@@ -27,24 +27,43 @@ Key invariants:
     Claude Code builds don't guarantee `<tool-use-id>` (#34). A missing `tool_use_id` is
     resolved via `task_id` against `agent_index`: meta.json (`agent-<id>.meta.json`,
     source a) takes priority over the cross-Stop launch-map fallback persisted in
-    `sess["agent_launch_map"]` (source b) (`zprof-collect.py:393-421`, `616-638`,
-    `721-735`).
+    `sess["agent_launch_map"]` (source b) (`zprof-collect.py:398-426`, `625-673`,
+    `756-762`).
   - A notification that resolves via neither source is counted as a loss
-    (`State.increment_losses`, `zprof-collect.py:199-200`, `310-313`), never folded into
+    (`State.increment_losses`, `zprof-collect.py:199-200`, `310-318`), never folded into
     `unparsed_lines` — a genuine drop is distinguishable from format drift.
+  - Claude Code writes every `<task-notification>` twice (`queue-operation` + `user`,
+    ~15ms apart) — including unresolved ones. Dedup for the unresolved branch happens
+    *before* the loss increment, keyed `("task:" + task_id, status)` in the same
+    `seen_notifications` set used for resolved-notification dedup (`"task:"` prefix
+    avoids colliding with the `(tool_use_id, status)` keys), so one logical loss
+    increments `losses` once, not twice (#36 P2-1, `zprof-collect.py:630, 653-664`).
+  - Every unresolved `<task-notification>`'s `task_id` is collected
+    (`unresolved_task_ids`) and written to `.agentlog/collect.log` via `_log_error`
+    alongside the loss count — a silent `losses` counter alone can't answer "which
+    dispatch, why no card?" (#36 P2-2, `zprof-collect.py:314-318`, `663-664`).
 Spec refs: docs/adr/0001-collector-config-hash-and-telemetry-redeploy.md,
-  docs/reviews/bug-2026-09-27-collector-async-dispatch.md (#34 root cause)
+  docs/reviews/bug-2026-09-27-collector-async-dispatch.md (#34 root cause),
+  docs/reviews/bug-2026-09-28-issue-36-loss-dedup.md (#36 root cause)
 Test coverage: pytest, `profiles/base/tests/` — `test_config_hash.py` (35 tests: frontmatter
   parsing, name/stem indexing, resolution incl. ambiguity/symlink-escape/backup-file
   skip, hash stability/invalidation on body or `model:` edits, SubagentStop pointer
   snapshot + consumption, fallback source labeling), `test_async_notification_no_tool_use_id.py`
-  (6 tests, #34: parser keeps task_id-only records, meta.json resolution in-process and
-  across split Stops, launch-map fallback across split Stops, unresolved → loss counted,
-  meta.json priority over launch-map), plus `test_e2e.py`, `test_normalization.py`,
-  `test_subagent_transcripts.py`, `test_nested_dispatches.py`,
-  `test_main_log_extraction.py` for the surrounding dispatch pipeline. Verified green:
-  `python3 -m pytest profiles/base/tests/ -q` → 224 passed (run 2026-09-27); `.claude/`
-  and `profiles/base/` copies of the script are byte-identical (`diff -q`, no drift).
+  (10 tests: 6 for #34 — parser keeps task_id-only records, meta.json resolution
+  in-process and across split Stops, launch-map fallback across split Stops,
+  meta.json priority over launch-map; 4 added for #36 — duplicate notification pair for
+  the same unresolved task_id counts as one loss, two distinct unresolved task_ids count
+  separately, same task_id under two different statuses counts separately (dedup key
+  includes status, not just task_id), unresolved task_id is traceable in `collect.log`),
+  plus `test_e2e.py`, `test_normalization.py`, `test_subagent_transcripts.py`,
+  `test_nested_dispatches.py`, `test_main_log_extraction.py` for the surrounding
+  dispatch pipeline. Verified green: `python3 -m pytest profiles/base/tests/ -q` → 229
+  passed (run 2026-09-28, branch `fix/issue-36-loss-dedup`); `.claude/` and
+  `profiles/base/` copies of the script currently **differ** — the #36 fix has not yet
+  been redeployed to `.claude/zprof-collect.py` (last updated at `5f8fd1a`, the #34 fix)
+  via `zprof apply --telemetry-only`; see [apply.md](apply.md) / ADR-0001 for the
+  redeploy mechanism. Not drift in the PROJECT_SPEC/ADR sense — expected pre-merge state
+  for a source change awaiting its own dogfooding redeploy.
 
 ---
 
@@ -108,40 +127,57 @@ a *stale deployed copy* of the script in zprof's own `.claude/` that predated it
 Background (`Agent(..., async=true)`) dispatches complete via a `<task-notification>` XML
 block that arrives later, in a *different* JSONL record than the one that launched the
 agent — sometimes even in a different `Stop` invocation, since `_extract_main_log`
-(`:688-750`) reads only the bytes appended since the last processed offset
+(`:715-779`) reads only the bytes appended since the last processed offset
 (`main_log_offset`). Some Claude Code builds omit `<tool-use-id>` from that block, leaving
 only `<task-id>` (the `agentId` assigned at launch). Before this fix,
-`_parse_task_notification_xml` (`:393-421`) required `tool_use_id` and returned `None`
+`_parse_task_notification_xml` (`:398-426`) required `tool_use_id` and returned `None`
 otherwise, so the notification was counted as an "unparsed line" (misleadingly logged as
 possible format drift) and the dispatch's launch row was left stuck at
 `status: async_launched` forever — invisible to `zprof score`, which looks for a
 completed row per `dispatch_id` (see [apply.md](apply.md) / `cli/internal/score/`).
 
-The parser now accepts a record with `task_id` **or** `tool_use_id` (`:421`) and stays
+The parser now accepts a record with `task_id` **or** `tool_use_id` (`:426`) and stays
 context-free — resolution happens in the caller, `_extract_dispatches_from_text`
-(`:445-685`), between parsing and dedup/`seq` assignment (`:616-638`). A missing
+(`:450-712`), between parsing and dedup/`seq` assignment (`:625-673`). A missing
 `tool_use_id` is looked up by `task_id` in `agent_index: dict[agent_id -> {tool_use_id,
 role}]`, built from two sources, (a) taking priority over (b):
 
-1. **meta.json** — `_read_agent_metas(subagents_dir)` (`:1117-1137`, shared with
+1. **meta.json** — `_read_agent_metas(subagents_dir)` (`:1145-1164`, shared with
    `_collect_subagent_transcripts`'s own pass) reads every
    `<transcript>/subagents/agent-*.meta.json` and keys `toolUseId`/`agentType` by
-   `agent_id`. Built fresh in `_extract_main_log` (`:730-735`) on every call.
+   `agent_id`. Built fresh in `_extract_main_log` (`:756-762`) on every call.
 2. **launch-map fallback** — when the agent's `Agent` tool_use is in the *same* `raw`
-   chunk as the notification, the async branch of Path 1 (`:573-583`) records
+   chunk as the notification, the async branch of Path 1 (`:582-592`) records
    `agentId -> {tool_use_id, role}` itself. Because launch and notification routinely land
    in different Stop invocations, this map is also persisted across calls as
-   `sess["agent_launch_map"]` (`:308-309`, `:731`, `:749`) rather than rebuilt from
+   `sess["agent_launch_map"]` (`:308-309`, `:758`, `:777`) rather than rebuilt from
    scratch each time.
 
 If neither source resolves the `task_id`, the notification is dropped (`continue`,
-`:638`) and counted in `unresolved_notifications`, which `_collect_session` turns into
-`State.increment_losses` (`:310-313`) — a distinct, non-zero `losses` field in
+`:665`) and counted in `unresolved_notifications`, which `_collect_session` turns into
+`State.increment_losses` (`:310-318`) — a distinct, non-zero `losses` field in
 `state.json`, not folded into the `unparsed_lines` "format drift?" log line. When
 resolution succeeds via meta.json, `role` (the agent's type, e.g. `task-runner`) is set
-directly on the notification's dispatch row (`:662-667`), because pass-2 enrichment in
+directly on the notification's dispatch row (`:688-693`), because pass-2 enrichment in
 `_collect_subagent_transcripts` skips agents already in `agents_done` and `score`'s
 `BuildRuns` needs `role` on the *last* row per `dispatch_id` to find a scoring root.
+
+**One logical loss, not two (#36).** Claude Code emits every `<task-notification>` as a
+duplicate pair (`queue-operation` then `user`, ~15ms apart) — including unresolved ones.
+Before #36, `unresolved_notifications += 1` ran on *both* copies, so one genuine drop
+inflated `losses` by 2. The fix dedups the unresolved branch the same way the resolved
+branch already dedups: a key `("task:" + task_id, notif_status)` is checked against
+`seen_notifications` *before* the increment (`:653-664`) — the `"task:"` prefix keeps it
+from colliding with the `(tool_use_id, status)` keys the resolved path uses
+(`:670-673`). A task_id showing up under two different statuses (e.g. `running` then
+`completed`) is two distinct events and still counts as two losses, since `status` is
+part of the key. Separately, each unresolved notification's `task_id` is accumulated
+into `unresolved_task_ids` (deduped, insertion order, `:663-664`) and threaded through
+`_extract_main_log` (`meta["unresolved_task_ids"]`, `:768`) to `_collect_session`, which
+now logs it — `_log_error(..., f"session {session_id}: {n} unresolved task-notifications
+(task_ids=[...])")` (`:314-318`) — right next to the `increment_losses` call, so
+`collect.log` names the dropped `task_id`s instead of leaving only a bare counter in
+`state.json`.
 
 ### State and recovery
 
@@ -161,6 +197,9 @@ once used by transcript collection, so they don't accumulate unboundedly across 
 - [Bug: collector doesn't stitch async Agent-dispatch to a `<tool-use-id>`-less
   `<task-notification>` (#34)](../reviews/bug-2026-09-27-collector-async-dispatch.md) — root
   cause and fix design for the resolution logic above
+- [Bug: unresolved task-notification loss counted twice, no collect.log trace
+  (#36)](../reviews/bug-2026-09-28-issue-36-loss-dedup.md) — root cause and fix design
+  for the dedup/logging behavior above
 - `score` (`cli/internal/score/`, doc not yet written — see `PLAN.md`) — consumes
   `dispatches.jsonl` produced here, including the `role`/`dispatch_complete` fields this
   fix now sets on previously-stuck async rows
