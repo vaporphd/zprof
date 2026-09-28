@@ -2,10 +2,10 @@
 
 Component: guard
 Path: `profiles/base/zprof-guard.py` (rules: `profiles/base/guard.yaml`; tests:
-  `profiles/base/tests/test_guard*.py`)
-Status: in-progress
+  `profiles/base/tests/test_guard*.py`; deploy: `cli/internal/apply/guard.go`)
+Status: implemented
 Depends: [profiles-base]
-Dependants: [score, stats]
+Dependants: [apply, score, stats]
 Exports: [pre_tool, subagent_stop, evaluate_rules, resolve_role, dispatch_id,
   normalize_command, working_dir, project_root, load_config, deny_output,
   write_event, main, TOOLS_GUARDED, CONTEXTS]
@@ -66,7 +66,8 @@ Key invariants:
     (ADR-0004 D2, `zprof-guard.py:171-187`).
   - The script never reads `guard.yaml` — only `.claude/guard.json`; rendering
     `guard.yaml` → `guard.json` (resolving `$readonly_roles`, `$merge_roles`,
-    `$mutating_bash_patterns`) is `zprof apply`'s job, not yet implemented (#28)
+    `$mutating_bash_patterns`) is `zprof apply`'s job (`deployGuard`,
+    `cli/internal/apply/guard.go`, #28, ADR-0009) — see "Deployment" below
     (`zprof-guard.py:2-13, 156-168`; `guard.yaml:1-9`).
   - Deny events and the deny reason never contain the full command/content — `target`
     is the first two whitespace tokens of the normalized command or a file basename;
@@ -101,8 +102,19 @@ Key invariants:
     **regardless of `verdict_exempt_roles`** — the guard-events loop in `computeP7`
     is separate from the contract-fields loop above it and never checks
     `cfg.ExemptRoles` (#27, ADR-0008 H3; `cli/internal/score/metrics.go:261-268`).
+  - `guard.enabled: false` (`.zprof.yaml`) gates only *deployment* — the
+    base→overlay→project `guard.yaml` merge and `$ref` resolution always run,
+    so a broken overlay `guard.yaml` fails `zprof apply` even for a project
+    that has guard disabled; `.claude/zprof-guard.py`/`guard.json` from a prior
+    enabled apply are left on disk untouched, not deleted (#28, ADR-0009 I4/I6;
+    `cli/internal/apply/guard.go:483-544`).
+  - `permissions.deny` upsert/subtraction is computed from the **current**
+    merge result, not from `.claude/guard.json` on disk — disabling guard
+    subtracts today's `permissions_deny`, not whatever was deployed
+    historically; foreign `deny` entries and the rest of `permissions.*` are
+    never touched (#28, ADR-0009 I4; `cli/internal/apply/settings.go:257-320`).
 Spec refs: `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` §4, §5, §6, §7,
-  §8.1, §11, §13
+  §8.1–§8.4, §9, §11, §13
 Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-list,
   read-only roles, merge gate, D5 `remote_ref_delete`/`remote_ref_delete_unmerged`
   role split) plus 30 tests in `test_guard_context.py` (the four #24 context
@@ -123,7 +135,12 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   profiles/base/tests/test_guard_context.py profiles/base/tests/test_guard_merge.py
   profiles/base/tests/test_guard_subagent_stop.py -q` → 272 passed (501 passed for
   `profiles/base/tests/` as a whole; verified 2026-09-28,
-  `feat/guard-subagent-stop-26`@`177539f`).
+  `feat/guard-subagent-stop-26`@`177539f`). #28's Go-side deploy is unrelated code
+  (`zprof-guard.py`/`guard.yaml` themselves are unchanged by #28) and covered
+  separately in `cli/internal/apply/guard_test.go` (parse/merge/`$ref`-resolve/
+  render, 30+ cases) and `guard_e2e_test.go` (a real `zprof-guard.py` subprocess
+  denying `git push --force` after `deployGuard` writes it) — see `apply.md`'s
+  Test coverage entry for the full count.
 
 ---
 
@@ -136,22 +153,21 @@ replaces prompt-only policy ("don't force-push", "only pr-shepherd merges") with
 deterministic check that runs before the tool executes. In `subagent-stop` mode it
 reads one `SubagentStop` payload and decides `block` or silence, checking that a
 subagent's final reply opens with the `verdict:`/`completion:` line its own
-`return_format` contract promises. Issues #23–#27 are the first five of a
-six-issue milestone (#23–#28); this doc describes what's shipped so far — §5.1
-stop-list, read-only roles, and the merge gate from #23; §5.2/§5.3 context rules
-from #24; §5.5 merge preflight and §5.6 PR-create gate from #25; §6 the
-subagent-stop `return_format` validator from #26; §7 the `zprof score`/`zprof
-stats` guard-events integration from #27 (Go-side only — the guard script
-itself is unchanged) — not the full design in the spec.
+`return_format` contract promises. Issues #23–#28 are the six-issue milestone this
+doc describes — §5.1 stop-list, read-only roles, and the merge gate from #23;
+§5.2/§5.3 context rules from #24; §5.5 merge preflight and §5.6 PR-create gate
+from #25; §6 the subagent-stop `return_format` validator from #26; §7 the
+`zprof score`/`zprof stats` guard-events integration from #27 (Go-side only —
+the guard script itself is unchanged); §8.2–§8.4/§9 the `zprof apply` deployment
+from #28 (also Go-side only, see "Deployment" below) — not the full design in
+the spec (§12's phase-2 items are still deferred).
 
-**Not yet deployed anywhere.** No project's `.claude/` directory runs this hook today —
-that wiring (`zprof apply` writing `.claude/zprof-guard.py`, rendering
-`guard.yaml` → `.claude/guard.json`, upserting the `PreToolUse`/`SubagentStop` hook
-entries in `settings.local.json`) is issue #28. This is true for **both** modes:
-`subagent-stop` doesn't depend on `guard.json` the way `pre-tool` does (see below),
-but nothing today invokes `zprof-guard.py subagent-stop` from a real `SubagentStop`
-hook either. Until #28 lands, `guard.md` describes source-only behavior, exercised
-by `test_guard.py`/`test_guard_subagent_stop.py` invoking the script directly.
+**Deployed by `zprof apply` since #28.** `zprof apply <overlay>...`, `zprof sync`,
+and `zprof apply --telemetry-only` all write `.claude/zprof-guard.py` and render
+`.claude/guard.json`, and upsert the `PreToolUse`/`SubagentStop` guard hooks into
+`.claude/settings.local.json` — see "Deployment" below for how. This is true for
+**both** modes: `subagent-stop` doesn't depend on `guard.json` the way `pre-tool`
+does (see below), but its hook entry is deployed identically to `pre-tool`'s.
 
 ### What's active in `guard.yaml` as of #23–#25
 
@@ -160,8 +176,7 @@ the eventual design calls for. As of #25 every rule in it is active — the last
 data-only placeholders (`merge_preflight`, `pr_create_gate`) got their evaluators
 registered by ADR-0006. The subagent-stop `return_format` validator from #26 is
 **not** a `guard.yaml` rule at all — it's a separate `main()` mode (see
-"Subagent-stop validator" below) — so it never appears in this table. What
-remains outside both is the *deployment* of the hook itself, #28:
+"Subagent-stop validator" below) — so it never appears in this table.
 
 | Group (spec §) | Rules | Status |
 |---|---|---|
@@ -175,10 +190,10 @@ remains outside both is the *deployment* of the hook itself, #28:
 
 Reading guard events into `zprof score`/`zprof stats` shipped in
 [#27](../../plan-2.md) (ADR-0008; see "Score and stats integration" below);
-actually deploying the hook into `.claude/` is [#28](../../plan-2.md) — until
-#28 lands, `.agentlog/guard-events.jsonl` is never written in a real project
-(only by tests/fixtures), so #27's reading code has nothing to read and
-`zprof score`/`zprof stats` are still silent on guard everywhere but here.
+deploying the hook into `.claude/` shipped in [#28](../../plan-2.md) (ADR-0009;
+see "Deployment" below) — a project that runs `zprof apply`/`zprof sync` (or
+`zprof apply --telemetry-only`) now actually writes
+`.agentlog/guard-events.jsonl`, so #27's reading code has something to read.
 
 ### Role resolution
 
@@ -536,12 +551,120 @@ and not a `runOf`-style index, why the temporal window is
 `[end − duration, end]` rather than "largest timestamp ≤ ts", and the exact
 golden-fixture numbers) — not duplicated here.
 
+### Deployment (`zprof apply`, #28, ADR-0009)
+
+All of the Go-side deploy logic lives in `cli/internal/apply/guard.go`
+(`deployGuard` and its helpers), with three small, narrowly-scoped changes
+elsewhere: `cli/internal/apply/settings.go` (the two guard hook specs and
+`permissions.deny` upsert/subtract), `cli/internal/manifest/project.go`
+(`GuardConfig`, the project layer), and `cli/internal/overlay/loader.go`
+(`Base.GuardScript`/`GuardSchema`, `Overlay.GuardSchema`). This is the code
+that turns `guard.yaml` (implementer-authored source, above) into
+`.claude/guard.json` (what `zprof-guard.py` actually reads) — see
+[Apply](apply.md)'s "DeployTelemetry and `--telemetry-only`" section for how
+it's wired into `zprof apply`/`zprof sync`/`--telemetry-only`; this section
+covers what the merge and render actually do.
+
+**Three-layer merge, always computed.** `deployGuard` parses `Base.GuardSchema`
+(required `version: 1`), then each applied overlay's `guard.yaml` if it ships
+one (`version` optional), then folds in the project's `.zprof.yaml` `guard:`
+section (`manifest.GuardConfig`) — in that order, base → overlays → project
+(`guard.go:206-251, 498-521`). The four known string lists
+(`readonly_roles`, `merge_roles`, `allow_write_prefixes`, `permissions_deny`)
+concatenate across base/overlay layers with first-occurrence-order dedup;
+`exempt_roles` unions per rule id; `rules` merge by `id` — a later layer's
+rule with an existing id replaces it **in place**, a new id is appended
+(`mergeRules`, `guard.go:288-311`). Any top-level key this Go binary doesn't
+know about round-trips verbatim through `Extra` (later layer wins) — a newer
+profile's new `guard.yaml` key doesn't break an older `zprof` binary
+(`guard.go:39-53, 313-326`). The project layer is different from an overlay:
+`readonly_roles`/`allow_write_outside` only *append*, `exempt_roles` only
+*unions*, but `merge_roles` — if the project sets a non-empty list —
+**replaces** the merged result wholesale rather than extending it (an empty
+project list must never be read as "nobody merges"); a non-empty
+`extra_deny_bash` produces one synthetic `id: "extra_deny"` rule
+(`tools: [Bash]`, `match` = the deduped list, a fixed `reason` string with no
+"Не обходи…" tail — the script appends that tail exactly once) merged in by
+the same by-id rule (`guard.go:224-251`, `extraDenyReason` constant).
+**The merge runs unconditionally, even when the project's guard is
+disabled** — a broken overlay `guard.yaml` fails `zprof apply` regardless of
+`guard.enabled`.
+
+**`$ref` resolution, one pass, after merge.** `resolveGuardRefs` walks every
+rule's `match`/`roles`/`not_roles` once, over the already-merged doc, and
+substitutes a bare `"$readonly_roles"`/`"$merge_roles"`/
+`"$mutating_bash_patterns"` value with a copy of the resolved list
+(`guard.go:377-434`). `$mutating_bash_patterns` is read lazily from
+`Base.TelemetrySchema` (`profiles/base/telemetry.yaml`'s
+`mutating_bash_patterns` key) — parsed only if some rule actually references
+it, so an older base without that key doesn't break a `guard.yaml` that never
+uses the reference (`guard.go:336-375`). Three things are apply-time errors
+(fail-closed, unlike the script's own runtime fail-open): an unknown `$name`;
+a `$name` inside a list (a splice the format doesn't support); and a
+`roles`/`not_roles` reference that resolves to an empty list (an empty
+`$merge_roles` must never silently mean "merge is unrestricted for everyone"
+— that's exactly the silent-disable the script's own `ValueError` on a raw
+`$ref` guards against at runtime, closed here at apply time instead).
+
+**Render.** `guardDoc.render()` produces `guard.json`'s exact shape —
+`version: 1` plus the known keys, `rules`, and `Extra` — with nil
+slices/maps normalized to `[]`/`{}` (never JSON `null`, which
+`load_config()` would reject) and `encoding/json`'s sorted map keys giving a
+byte-stable result across repeated applies with unchanged input
+(`guard.go:436-481`).
+
+**`enabled` gates deployment, not the merge.** `guard.enabled: false` in
+`.zprof.yaml` still runs the full merge/resolve above (so profile bugs are
+still caught), but skips writing `.claude/zprof-guard.py`/`guard.json` and
+instead *removes* both guard hooks and subtracts the current
+`permissions_deny` list from `settings.local.json` — computed from **this**
+merge, not from whatever `guard.json` is sitting on disk, since the file is
+an output artifact, not an ownership registry (`ensureGuardSettings`,
+`settings.go:127-167`). Files from a previous enabled apply are left as-is,
+neither rewritten nor deleted.
+
+**Hooks.** Two entries, defined in `settings.go`'s `guardHooks`: `PreToolUse`
+carries `matcher: "Bash|Edit|Write|MultiEdit|NotebookEdit"` (`TOOLS_GUARDED`)
+and runs `zprof-guard.py pre-tool`; `SubagentStop` has no matcher and runs
+`zprof-guard.py subagent-stop` — both wrapped in the same
+`test -x ... && ... || true` fail-open shell guard the collector's hooks use
+(`settings.go:23-54`). `zprofHookIndex` matches an existing entry by
+substring of the script name, so the guard's `SubagentStop` entry and the
+collector's pre-existing `SubagentStop` entry (`zprof-collect.py`) coexist on
+the same event and upgrade independently when either script's command or
+matcher changes (`settings.go:216-234`).
+
+**Wiring.** `deployGuard(projectDir, base, GuardLayers{Overlays, Project})` is
+called from inside `DeployTelemetry` (`collector.go`), never duplicated —
+`zprof apply`'s `engine.go` and `zprof apply --telemetry-only`
+(`cmd/apply.go`) both go through the one function, so the two paths cannot
+deploy guard differently. `--telemetry-only` builds `GuardLayers` from an
+existing `.zprof.yaml` if present (loading each of its overlays' `guard.yaml`
+too), or falls back to base-only defaults (guard enabled, no overlay/project
+layer) when there's no project manifest yet. `ProjectManifest.CarryOverFrom`
+copies a previously saved `Guard` forward when the fresh manifest being built
+doesn't set one explicitly — without this, every `zprof apply <overlay>`
+would silently drop the project's `guard:` section and redeploy guard at its
+default (enabled) (`manifest/project.go:168-193`). `zprof sync` needs no
+special case: it loads the full saved manifest, `Guard` included.
+
+Test coverage: `cli/internal/apply/guard_test.go` (parse/merge/`$ref`-resolve/
+render unit tests, AC1–AC9) and `guard_e2e_test.go` (real `zprof-guard.py`
+subprocess denying `git push --force` after `deployGuard`, AC10/AC11) —
+`go test ./...` → 429 passed (verified 2026-09-28,
+`feat/guard-apply-deploy-28`). See
+[ADR-0009: `zprof apply` деплоит guard](../adr/0009-guard-apply-deploy.md)
+for the full decision record (why rules stay raw maps, why `$ref` resolution
+is a single post-merge pass, the exact `extra_deny` reason text, and why
+`enabled: false` leaves prior files on disk) — not duplicated here.
+
 ### See also
 
 - [Collector](collector.md) — sibling hook in `profiles/base/`; `guard`'s `_input_hash`
   mirrors (does not import) `collector`'s, since the two scripts deploy independently
-- [Apply](apply.md) — does **not** deploy guard yet; deployment, `guard.yaml` →
-  `guard.json` rendering, and the `PreToolUse` hook entry are #28
+- [Apply](apply.md) — deploys guard since #28: `guard.yaml` → `guard.json`
+  rendering and the `PreToolUse`/`SubagentStop` hook entries, see
+  "Deployment" above
 - `cli/internal/score/` — reads `guard-events.jsonl` (§7 format), no wiki file
   yet (P1 in `PLAN.md`); see "Score and stats integration" above
 - [ADR-0004: `zprof-guard.py pre-tool` — frame, `guard.yaml`/`guard.json` format, stop-list §5.1, read-only roles](../adr/0004-zprof-guard-pre-tool-frame.md)
@@ -549,6 +672,7 @@ golden-fixture numbers) — not duplicated here.
 - [ADR-0006: guard — merge-гейт (`merge_preflight`) и PR-гейт (`pr_create_gate`), событие `allow_unverified`](../adr/0006-guard-merge-pr-gate.md)
 - [ADR-0007: guard — валидатор `return_format` на `SubagentStop`](../adr/0007-guard-subagent-stop-validator.md)
 - [ADR-0008: guard-события в `zprof score` (P7) и `zprof stats`](../adr/0008-guard-events-score-integration.md)
+- [ADR-0009: `zprof apply` деплоит guard — `guard.json`, хуки с `matcher`, `permissions.deny`](../adr/0009-guard-apply-deploy.md)
 - `docs/superpowers/specs/2026-09-27-guard-hooks-design.md` — full guard design (§2
   decisions, §5 rule tables, §6 subagent-stop validator, §7 telemetry/score
-  integration, §12 phase-2 deferred work)
+  integration, §8 apply deployment, §12 phase-2 deferred work)

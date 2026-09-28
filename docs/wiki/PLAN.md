@@ -65,3 +65,18 @@
   (`.agentlog/guard-events.jsonl`) that `guard.md` already owns, not a new
   top-level component. `INDEX.md`'s dependency graph got the matching edge (data
   contract, not a Go import — same pattern already used for collector → apply).
+- MAINTAIN run on `feat/guard-apply-deploy-28` / #28 (ADR-0009) closed the
+  six-issue milestone: `guard.md` moved `Status: in-progress` → `implemented`,
+  `Dependants` gained `apply`, and got a new "Deployment" section (the
+  three-layer merge, `$ref` resolution, render, `enabled` gating, hooks,
+  wiring — mirroring the pattern used for #27's "Score and stats integration").
+  `apply.md` was updated in place (not a new doc) — `guard.go` lives inside the
+  existing `cli/internal/apply` package, not a new top-level component: its
+  `DeployTelemetry` invariant, "DeployTelemetry and `--telemetry-only`" section,
+  and "Hooks" section all got surgical updates for the new `GuardLayers`
+  parameter and `ensureGuardSettings`, plus a corrected claim (the guard
+  renderer does *not* consume the merged `schema.json` the way `zprof score`
+  does — it reads `Base.TelemetrySchema` directly). `INDEX.md`: `guard` row to
+  `implemented`, the dependency graph's `guard`/`apply` nodes got the new
+  artifact-deploy edge (same pattern as collector → apply), Status Summary
+  `Implemented: 21` / `In progress: 0`.
