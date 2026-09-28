@@ -62,6 +62,46 @@ func TestBlindRetries_MutatingBashResetsOthers(t *testing.T) {
 	require.Equal(t, 0.0, computeP2(run, Defaults()).value)
 }
 
+// TestBlindRetries_SleepExemptDoesNotCount is the issue #53 red→green case:
+// three `sleep 180` timeouts in a row (async-child wait loop, task-runner.md
+// "Ожидание async-ребёнка") must not score as blind retries — a `sleep`
+// erroring on the Bash tool's own 120s default timeout is timeout hygiene,
+// not a repeated failed action. Before the #53 exemption this read 2.0
+// (same bug shape as TestBlindRetries_CountsRepeatsAfterErrorWithoutMutation,
+// which is exactly what a real `sleep`/`wait` streak looks like to the
+// un-exempted key-based counter).
+func TestBlindRetries_SleepExemptDoesNotCount(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h-sleep180", "sleep 180 && echo waited", true),
+		ev(2, "Bash", "h-sleep180", "sleep 180 && echo waited", true),
+		ev(3, "Bash", "h-sleep180", "sleep 180 && echo waited", true),
+	)
+	require.Equal(t, 0.0, computeP2(run, Defaults()).value)
+}
+
+// TestBlindRetries_NonExemptRepeatStillCountsAlongsideSleep guards against
+// a too-broad exemption: a real blind retry of a non-sleep command must
+// still be counted even when sleep/wait events are interleaved with it
+// (each sleep is itself skipped — see TestBlindRetries_SleepExemptDoesNotCount
+// — but skipping it must not also reset or otherwise disturb the unrelated
+// command's own key state).
+func TestBlindRetries_NonExemptRepeatStillCountsAlongsideSleep(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h-test", "swift test", true),
+		ev(2, "Bash", "h-sleep", "sleep 120", true),
+		ev(3, "Bash", "h-test", "swift test", true),
+	)
+	require.Equal(t, 1.0, computeP2(run, Defaults()).value)
+}
+
+func TestBlindRetries_RtkWrappedSleepIsExempt(t *testing.T) {
+	run := oneDispatchRun(
+		ev(1, "Bash", "h-sleep", "rtk proxy sleep 180", true),
+		ev(2, "Bash", "h-sleep", "rtk proxy sleep 180", true),
+	)
+	require.Equal(t, 0.0, computeP2(run, Defaults()).value)
+}
+
 func TestRereads_SkipsDispatchesWithFewerThanFourReads(t *testing.T) {
 	run := oneDispatchRun(
 		ev(1, "Read", "a", "/a", false), ev(2, "Read", "a", "/a", false), ev(3, "Read", "b", "/b", false),

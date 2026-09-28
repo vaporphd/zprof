@@ -24,8 +24,8 @@ _PATTERN_LINE = re.compile(r'^\s*-\s*"(?P<body>.*)"\s*$')
 _SECTION_HEADER = re.compile(r"^(?P<key>[A-Za-z_][A-Za-z0-9_]*):\s*(?P<value>.*?)\s*(#.*)?$")
 
 LIST_SECTIONS = ("core_fields", "tool_events", "redaction_patterns",
-                 "mutating_bash_patterns", "verdict_exempt_roles",
-                 "review_block_verdicts")
+                 "mutating_bash_patterns", "p2_exempt_patterns",
+                 "verdict_exempt_roles", "review_block_verdicts")
 
 
 def _parse_scalar(raw):
@@ -176,6 +176,16 @@ def test_schema():
     for cmd in ("cat > f.txt <<'EOF'", "sed -i 's/a/b/' f", "git commit -m x",
                 "rm -rf build", "xcodegen generate", "echo hi | tee out.log"):
         assert any(c.search(cmd) for c in compiled), f"mutating command not matched: {cmd}"
+
+    # P2-exempt patterns (issue #53): sleep/wait compile and match, do NOT
+    # match unrelated commands (including ones merely starting with the
+    # same letters, e.g. "sleepy-time.sh")
+    assert schema["p2_exempt_patterns"], "p2_exempt_patterns is empty"
+    p2_compiled = [re.compile(p) for p in schema["p2_exempt_patterns"]]
+    for cmd in ("sleep 180", "sleep 180 && echo waited", "  sleep 90", "wait", "wait $pid"):
+        assert any(c.search(cmd) for c in p2_compiled), f"sleep/wait command not matched: {cmd}"
+    for cmd in ("swift test", "git status", "echo waiting", "sleepy-time.sh"):
+        assert not any(c.search(cmd) for c in p2_compiled), f"non-sleep command matched as P2-exempt: {cmd}"
 
     # exempt roles — empty since #20 (ADR 0003): doctor guarantees verdict:
     # on every role, so P6/P7 no longer need to look away from any of them.

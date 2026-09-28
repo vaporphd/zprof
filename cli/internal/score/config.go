@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/vaporphd/zprof/internal/manifest"
 )
@@ -35,6 +36,15 @@ type Config struct {
 	ExemptRoles   map[string]bool
 	// ReviewBlockVerdicts: reviewer verdicts that send work back (P5).
 	ReviewBlockVerdicts map[string]bool
+	// P2Exempt: compiled patterns matched against a Bash target (after
+	// stripping one leading rtk wrapper prefix) that must not count toward
+	// P2 blind retries — sleep/wait loops used to poll an async child
+	// (issue #53). A timed-out `sleep` is Bash-tool timeout hygiene, not a
+	// blind retry of a failed command.
+	P2Exempt []*regexp.Regexp
+	// P2ExemptPatterns: the raw (pre-compile) source for P2Exempt, kept
+	// around only so WeightsHash can fold it in — see WeightsHash.
+	P2ExemptPatterns []string
 }
 
 var defaultMutatingBash = []string{
@@ -46,6 +56,27 @@ var defaultMutatingBash = []string{
 	`\bxcodegen\b`,
 	`\b(cargo|go|swift)\s+fmt\b`,
 	`\b(gofmt\s+-w|swiftformat|rustfmt)\b`,
+}
+
+// defaultP2Exempt mirrors telemetry.yaml `p2_exempt_patterns`; keep the two
+// in sync (issue #53).
+var defaultP2Exempt = []string{
+	`^\s*(sleep|wait)\b`,
+}
+
+// rtkPrefixes mirrors zprof-guard.py `_RTK_PREFIXES` (ADR D7 §4) so a
+// `rtk`-wrapped sleep/wait still matches P2Exempt.
+var rtkPrefixes = []string{"rtk proxy ", "rtk "}
+
+// stripRtkPrefix removes one leading rtk wrapper prefix, if present.
+func stripRtkPrefix(cmd string) string {
+	trimmed := strings.TrimLeft(cmd, " \t")
+	for _, p := range rtkPrefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return trimmed[len(p):]
+		}
+	}
+	return trimmed
 }
 
 // Defaults mirrors telemetry.yaml `score_defaults`; keep the two in sync.
@@ -69,6 +100,8 @@ func Defaults() Config {
 		},
 	}
 	c.MutatingBash = compilePatterns(defaultMutatingBash)
+	c.P2ExemptPatterns = defaultP2Exempt
+	c.P2Exempt = compilePatterns(defaultP2Exempt)
 	return c
 }
 
@@ -92,9 +125,28 @@ func (c Config) IsMutatingBash(command string) bool {
 	return false
 }
 
+// IsP2Exempt reports whether a tool event must be excluded from the P2
+// blind-retry counter — currently sleep/wait Bash commands used to poll an
+// async child (issue #53). The target is matched after stripping one
+// leading rtk wrapper prefix, so `rtk proxy sleep 180` exempts the same as
+// `sleep 180`.
+func (c Config) IsP2Exempt(tool, target string) bool {
+	if tool != "Bash" {
+		return false
+	}
+	cmd := stripRtkPrefix(target)
+	for _, re := range c.P2Exempt {
+		if re.MatchString(cmd) {
+			return true
+		}
+	}
+	return false
+}
+
 // schemaFile is the subset of .agentlog/schema.json (telemetry.yaml as JSON) we read.
 type schemaFile struct {
 	MutatingBashPatterns []string `json:"mutating_bash_patterns"`
+	P2ExemptPatterns     []string `json:"p2_exempt_patterns"`
 	VerdictExemptRoles   []string `json:"verdict_exempt_roles"`
 	ReviewBlockVerdicts  []string `json:"review_block_verdicts"`
 	ScoreDefaults        *struct {
@@ -116,6 +168,10 @@ func LoadConfig(projectDir, agentlogDir string) (Config, error) {
 		}
 		if len(s.MutatingBashPatterns) > 0 {
 			c.MutatingBash = compilePatterns(s.MutatingBashPatterns)
+		}
+		if len(s.P2ExemptPatterns) > 0 {
+			c.P2ExemptPatterns = s.P2ExemptPatterns
+			c.P2Exempt = compilePatterns(s.P2ExemptPatterns)
 		}
 		if len(s.VerdictExemptRoles) > 0 {
 			c.ExemptRoles = map[string]bool{}
@@ -179,12 +235,22 @@ func mergeThresholds(dst *Thresholds, src Thresholds) {
 
 // WeightsHash identifies the scoring parameters so historical rows stay comparable.
 // encoding/json sorts map keys, so the encoding is canonical.
+//
+// P2ExemptPatterns is folded in (issue #53): sleep/wait exemption changes
+// what P2 actually counts, not just its weight/saturation, so a
+// scores.jsonl row scored under a different exempt set must not be treated
+// as comparable to one scored under this one. This also means every row
+// written after this change carries a hash disjoint from every
+// pre-#53 row (the field is empty/absent there), which is the desired
+// "don't compare old P2 semantics to new" behavior without any special
+// pre/post migration logic.
 func (c Config) WeightsHash() string {
 	payload := struct {
-		Weights    map[string]float64 `json:"weights"`
-		Saturation map[string]float64 `json:"saturation"`
-		Thresholds Thresholds         `json:"thresholds"`
-	}{c.Weights, c.Saturation, c.Thresholds}
+		Weights          map[string]float64 `json:"weights"`
+		Saturation       map[string]float64 `json:"saturation"`
+		Thresholds       Thresholds         `json:"thresholds"`
+		P2ExemptPatterns []string           `json:"p2_exempt_patterns"`
+	}{c.Weights, c.Saturation, c.Thresholds, c.P2ExemptPatterns}
 	data, _ := json.Marshal(payload)
 	sum := sha1.Sum(data)
 	return hex.EncodeToString(sum[:])[:12]

@@ -84,6 +84,50 @@ func TestWeightsHash_StableAndSensitive(t *testing.T) {
 	require.NotEqual(t, a.WeightsHash(), c.WeightsHash())
 }
 
+func TestDefaults_P2ExemptMatchesSleepAndWaitOnly(t *testing.T) {
+	c := Defaults()
+	for _, cmd := range []string{"sleep 180", "sleep 180 && echo waited", "  sleep 90", "wait", "wait $pid"} {
+		require.True(t, c.IsP2Exempt("Bash", cmd), cmd)
+	}
+	for _, cmd := range []string{"swift test", "git status", "echo waiting", "sleepy-time.sh"} {
+		require.False(t, c.IsP2Exempt("Bash", cmd), cmd)
+	}
+	// Only Bash targets are shell commands; a non-Bash tool never matches
+	// even if its target happens to start with "sleep".
+	require.False(t, c.IsP2Exempt("Read", "sleep 180"))
+}
+
+func TestIsP2Exempt_RtkPrefixStripped(t *testing.T) {
+	c := Defaults()
+	require.True(t, c.IsP2Exempt("Bash", "rtk proxy sleep 180"))
+	require.True(t, c.IsP2Exempt("Bash", "rtk sleep 120"))
+	require.False(t, c.IsP2Exempt("Bash", "rtk proxy git status"))
+}
+
+func TestLoadConfig_P2ExemptPatternsFromSchema(t *testing.T) {
+	agentlog := filepath.Join(t.TempDir(), ".agentlog")
+	require.NoError(t, os.MkdirAll(agentlog, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(agentlog, "schema.json"),
+		[]byte(`{"p2_exempt_patterns": ["^\\s*poll\\b"]}`), 0o644))
+	c, err := LoadConfig(t.TempDir(), agentlog)
+	require.NoError(t, err)
+	require.True(t, c.IsP2Exempt("Bash", "poll status"))
+	require.False(t, c.IsP2Exempt("Bash", "sleep 180"), "schema.json list replaces, not extends, the default")
+
+	require.NoError(t, os.WriteFile(filepath.Join(agentlog, "schema.json"), []byte(`{}`), 0o644))
+	c, err = LoadConfig(t.TempDir(), agentlog)
+	require.NoError(t, err)
+	require.Equal(t, Defaults().P2ExemptPatterns, c.P2ExemptPatterns, "empty list keeps defaults")
+}
+
+func TestWeightsHash_SensitiveToP2ExemptPatterns(t *testing.T) {
+	a := Defaults()
+	b := Defaults()
+	b.P2ExemptPatterns = append([]string{}, b.P2ExemptPatterns...)
+	b.P2ExemptPatterns = append(b.P2ExemptPatterns, "^\\s*poll\\b")
+	require.NotEqual(t, a.WeightsHash(), b.WeightsHash())
+}
+
 func TestLoadConfig_ReviewBlockVerdictsFromSchema(t *testing.T) {
 	agentlog := filepath.Join(t.TempDir(), ".agentlog")
 	require.NoError(t, os.MkdirAll(agentlog, 0o755))
