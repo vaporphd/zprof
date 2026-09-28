@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-28 · Head: `d60e4a3d714f11fe6ab1cea7c4e0eebdbacabbf2`
+Generated: 2026-09-29 · Head: `3fb75f6a6735edb3bbc23305c6cfc6486290c6bc`
 
 ## Components
 
@@ -54,7 +54,9 @@ fsutil
 │   ├── detect → [manifest]
 │   └── doctor → [agents, managed, manifest, models, overlay, verdicts]
 │       (+ reads guard's deployed .claude/guard.json/settings.local.json as
-│        data, not a Go import — #29)
+│        data, not a Go import — #29; falls back to a manifest-independent
+│        check subset when .zprof.yaml is absent but telemetry/guard is
+│        deployed on disk, instead of erroring — #64, ADR-0001)
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
 │                                        guard-events.jsonl as data, not Go imports)
