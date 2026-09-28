@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -88,10 +89,19 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
 // callers get a full report even when the manifest itself is invalid.
+//
+// A project that has no .zprof.yaml at all (fs.ErrNotExist, as opposed to a
+// present-but-broken file) but did deploy telemetry/guard via `zprof apply
+// --telemetry-only` — zprof's own repo checkout is exactly this shape, see
+// ADR 0001 / issue #22 — falls back to diagnoseTelemetryOnly instead of the
+// single LevelError below (issue #64).
 func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	mfPath := filepath.Join(projectDir, ".zprof.yaml")
 	proj, err := manifest.LoadProject(mfPath)
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) && telemetryDeployed(projectDir) {
+			return diagnoseTelemetryOnly(projectDir), nil
+		}
 		return []Issue{{
 			Level:   LevelError,
 			Message: fmt.Sprintf("failed to parse .zprof.yaml: %v", err),
@@ -122,6 +132,45 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkGuardDeployment(projectDir, proj)...)
 	out = append(out, checkRoleResolution(projectDir)...)
 	return out, nil
+}
+
+// telemetryDeployed reports whether apply's --telemetry-only path has
+// written either collector script into .claude/ — the marker Diagnose uses
+// to tell "no manifest yet, but there's something on disk to check" apart
+// from "no zprof deployment here at all" (issue #64).
+func telemetryDeployed(projectDir string) bool {
+	for _, name := range []string{"zprof-collect.py", "zprof-guard.py"} {
+		if _, err := os.Stat(filepath.Join(projectDir, ".claude", name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// diagnoseTelemetryOnly runs the subset of Diagnose's checks that need no
+// .zprof.yaml at all, for a project whose telemetry/guard was deployed via
+// `zprof apply --telemetry-only` (or predates a manifest entirely) but never
+// got one written. Every check gated on proj (overlay/agent-roster/audit/
+// runner-budget checks) is skipped outright rather than fed a synthetic
+// manifest, since there is no overlay selection or roster to validate
+// against. checkGuardDeployment is the one exception: it takes an empty
+// *manifest.ProjectManifest{} so guard.enabled defaults to on (ADR 0009
+// §8.3) instead of panicking on a nil proj.Guard dereference.
+func diagnoseTelemetryOnly(projectDir string) []Issue {
+	out := []Issue{{
+		Level:   LevelInfo,
+		Message: "no .zprof.yaml — manifest checks skipped (telemetry-only project)",
+	}}
+	out = append(out, checkRunsGitignored(projectDir)...)
+	out = append(out, checkRunLogs(projectDir)...)
+	out = append(out, checkAgentlogGitignored(projectDir)...)
+	out = append(out, checkAgentlogNotTracked(projectDir)...)
+	out = append(out, checkTelemetryHooks(projectDir)...)
+	out = append(out, checkPython3Available()...)
+	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
+	out = append(out, checkGuardDeployment(projectDir, &manifest.ProjectManifest{})...)
+	out = append(out, checkRoleResolution(projectDir)...)
+	return out
 }
 
 // checkAgentFrontmatter parses the YAML frontmatter of every applied

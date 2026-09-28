@@ -98,6 +98,109 @@ func TestDiagnoseInvalidManifestReportsIssueNotError(t *testing.T) {
 	require.True(t, findIssue(issues, LevelError, "failed to parse .zprof.yaml"))
 }
 
+// --- Diagnose(): telemetry-only mode without .zprof.yaml (issue #64) ------
+
+// telemetryOnlyInfoMsg is the exact info-level text AC1 specifies for the
+// no-manifest-but-telemetry-deployed branch.
+const telemetryOnlyInfoMsg = "no .zprof.yaml — manifest checks skipped (telemetry-only project)"
+
+// TestDiagnoseTelemetryOnlyMode covers the branching Diagnose must do on a
+// manifest.LoadProject failure: physically absent (fs.ErrNotExist) with
+// either collector script deployed falls back to the telemetry-only subset;
+// physically absent with nothing deployed keeps the pre-existing single
+// LevelError; and a present-but-broken manifest (not ErrNotExist) is
+// unaffected by telemetry deployment either way.
+func TestDiagnoseTelemetryOnlyMode(t *testing.T) {
+	cases := []struct {
+		name          string
+		setup         func(t *testing.T, proj string)
+		wantSingleErr bool
+	}{
+		{
+			name: "collector deployed without manifest",
+			setup: func(t *testing.T, proj string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+		},
+		{
+			name: "guard deployed without manifest, no collector",
+			setup: func(t *testing.T, proj string) {
+				require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+		},
+		{
+			name:          "nothing at all",
+			setup:         func(t *testing.T, proj string) {},
+			wantSingleErr: true,
+		},
+		{
+			name: "broken manifest with telemetry deployed stays an error, not telemetry-only",
+			setup: func(t *testing.T, proj string) {
+				require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"),
+					[]byte("overlays: [this is not valid yaml: :\n"), 0o644))
+				require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+			},
+			wantSingleErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proj := t.TempDir()
+			tc.setup(t, proj)
+			t.Setenv("HOME", t.TempDir())
+			repo := t.TempDir()
+
+			issues, err := Diagnose(proj, repo)
+			require.NoError(t, err)
+
+			if tc.wantSingleErr {
+				require.Len(t, issues, 1)
+				require.Equal(t, LevelError, issues[0].Level)
+				require.Contains(t, issues[0].Message, "failed to parse .zprof.yaml")
+				return
+			}
+
+			require.False(t, hasLevel(issues, LevelError))
+			require.True(t, findIssue(issues, LevelInfo, telemetryOnlyInfoMsg))
+		})
+	}
+}
+
+// TestDiagnoseTelemetryOnlySkipsManifestGatedChecks proves the telemetry-only
+// branch both runs the guard-deployment checks — via the zero-value
+// &manifest.ProjectManifest{} it feeds checkGuardDeployment, so guard
+// defaults to enabled per ADR 0009 §8.3 — and skips every check gated on a
+// real manifest, in particular checkTaskRunner: this fixture deliberately
+// leaves .claude/agents/task-runner.md out, which checkTaskRunner would
+// report as a LevelError had it run.
+func TestDiagnoseTelemetryOnlySkipsManifestGatedChecks(t *testing.T) {
+	proj := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-guard.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	// Present but empty: had checkTaskRunner run against it, it would
+	// report task-runner.md as missing.
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude", "agents"), 0o755))
+
+	t.Setenv("HOME", t.TempDir())
+	repo := t.TempDir()
+
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+
+	require.False(t, hasLevel(issues, LevelError))
+	require.False(t, findIssue(issues, LevelError, "task-runner"))
+	require.True(t, findIssue(issues, LevelInfo, telemetryOnlyInfoMsg))
+	// Guard checks are visible: both hook events are missing (no
+	// settings.local.json deployed) and guard.json itself is missing.
+	require.True(t, findIssue(issues, LevelWarn, "guard hooks missing for PreToolUse, SubagentStop"))
+	require.True(t, findIssue(issues, LevelWarn, "guard.json is missing"))
+}
+
 func TestDiagnoseAgentMissingModelField(t *testing.T) {
 	proj := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(proj, ".zprof.yaml"), []byte("overlays: []\n"), 0o644))
