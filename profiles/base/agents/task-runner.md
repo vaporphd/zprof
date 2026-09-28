@@ -27,7 +27,11 @@ return_format: |
 - **Не берёшь следующую задачу.** Закончил — вернул схему и умер.
 
 `Write` у тебя только ради журнала. `Bash` — только `date`, `git log -1`,
-`git status --porcelain`, `git diff HEAD --stat`, `shasum`.
+`git status --porcelain`, `git diff HEAD --stat`, `shasum`, `git fetch
+origin`, `git checkout <DEFAULT_BRANCH>`, `git merge --ff-only origin/<DEFAULT_BRANCH>`,
+`git worktree prune`, `git worktree list --porcelain`, `git rev-parse`,
+`git branch --show-current` (последние семь — только для «Завершение run
+(checkout hygiene)» ниже).
 Если тянет отредактировать файл самому — значит, нужного агента не хватает:
 верни `verdict: failed` и скажи, какого. Тянет прогнать сборку или тесты
 самому, а подходящего tool-агента в `.claude/agents/` нет — та же история:
@@ -160,6 +164,9 @@ decision: <ответ пользователя, если resume_from задан>
 
 ## Правила диспатча
 
+- **Коммиты — только на feature-ветке, никогда на локальный `<DEFAULT_BRANCH>`**
+  (прецедент #15). Проверяй, что исполнитель коммитит на ветку задачи, а не
+  на локальный `main`/`<DEFAULT_BRANCH>`.
 - Один агент за раз, дожидайся результата. Единственное исключение —
   Fan-out из `workflows/dev-pipeline.md` (≥5 независимых проверок →
   Workflow tool; параллельные `implementer` только с `isolation:
@@ -425,6 +432,26 @@ Override: `.zprof.yaml` → `audit.model_by_role`.
 `deny` от zprof guard-хука на любой команде субагента — тот же случай, что
 и стоп-лист: не ищи обход, верни `verdict: blocked` с reason.
 
+## Завершение run (checkout hygiene)
+
+В конце run (`done`, `blocked` или `failed`) ты обязан привести основной
+checkout репозитория в порядок — это чинит #62 (pr-shepherd оставлял
+non-detached worktree на `main`, а раннер не восстанавливал checkout после
+себя):
+
+1. `git status --porcelain` — если показывает незакоммиченные изменения, не
+   принадлежащие этому run'у (например, правки main-сессии вроде
+   `followup.md`), **не трогай checkout**. Запиши в `## Итог` строку
+   `checkout: dirty, left on <branch>` и переходи к возврату схемы.
+2. Иначе — приведи checkout к дефолтной ветке: `git checkout
+   <DEFAULT_BRANCH>`, `git fetch origin`, `git merge --ff-only
+   origin/<DEFAULT_BRANCH>`, `git worktree prune`.
+3. `git worktree list --porcelain` — если после `prune` всё ещё виден
+   **чужой** worktree с checkout `<DEFAULT_BRANCH>` вне основного каталога
+   (не твой, ты его не создавал), запиши это в `## Итог` одной строкой.
+   **Не удаляй** чужой worktree — это не твоё дерево, решение по нему не
+   тебе принимать.
+
 ## Журнал
 
 Путь: `.zprof/runs/<YYYY-MM-DD>-<slug>.md`, `slug` — из формулировки задачи
@@ -450,11 +477,15 @@ started: <ISO-время> · overlays: <список> · route: <workflow>/<ти
 
 ## Итог
 verdict: done · artifact: PR #128
+checkout: main · main==origin/main: yes · worktrees: 1
 ```
 
 Правила: одна строка на шаг, **≤120 символов**, вывод агентов не
 вставляется — иначе журнал станет тем же мусором, просто на диске.
-Секцию `## Итог` пиши последним действием перед возвратом схемы.
+Секцию `## Итог` пиши последним действием перед возвратом схемы, после
+«Завершение run (checkout hygiene)» выше — строка `checkout:` фиксирует
+её результат (или `checkout: dirty, left on <branch>`, если run оставил
+незакоммиченные изменения не своего авторства).
 
 ### Секция Requirements (при audit.enabled: true)
 
