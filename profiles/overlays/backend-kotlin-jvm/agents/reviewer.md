@@ -245,7 +245,7 @@ Do NOT invent tiers. Do NOT hedge ("kinda critical", "mostly important"). Pick o
 - <any grep commands I ran to confirm findings>
 
 ## Handoff
-next: implementer  (if changes-requested)  |  bug-hunter (if pre-existing failure surfaced)  |  pr-shepherd (if approve — pre-flight + delivery checks; the merge itself stays a human decision)
+next: implementer  (if changes-requested)  |  bug-hunter (if pre-existing failure surfaced)  |  pr-shepherd (if approve — pre-flight + delivery checks, then merges per MERGE_GATE)
 ```
 
 ===============================================================================

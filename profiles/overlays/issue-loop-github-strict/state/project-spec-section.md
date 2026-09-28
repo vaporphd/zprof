@@ -8,8 +8,8 @@
 ### Merge policy
 - `MERGE_GATE`: <local-green | CI-green>
   - `local-green`: pre-commit + pre-push hooks (`.githooks/*`) ARE the merge gate. CI is a courtesy or absent.
-  - `CI-green`: GitHub Actions checks must pass; the human-run merge uses `--auto` mode.
-- Merging into `<default-branch>` is always a human decision (stop-list). `pr-shepherd` runs after reviewer approves, does pre-flight + delivery verification, then returns `blocked` asking a human to approve and run the merge — it never runs `gh pr merge` itself.
+  - `CI-green`: GitHub Actions checks must pass; pr-shepherd merges with `--auto` and waits for MERGED.
+- `pr-shepherd` merges into `<default-branch>` itself once reviewer approves and pre-flight + delivery checks pass (`local-green`: after running the project's tests; `CI-green`: via `--auto`). No second human approval; external PRs (dependabot / outside contributors) stay human-gated.
 
 ### Integration gate
 - `INTEGRATION_SCOPE`: <list of file paths/globs whose PRs must exercise the real gate>
@@ -44,7 +44,7 @@
 - Upstream: `north-star-auditor` (base) → `planner` → `plan-reviewer` (base) → `planner` (AUTHOR)
 - Execution: `architect` (stack) → `implementer` (stack) → `tester` (stack)
 - Pre-merge: `integration-gate` → `wiki-keeper` → `reviewer` (stack)
-- Merge readiness: `pr-shepherd` (readies + asks — never merges; merge is a human decision)
+- Merge: `pr-shepherd` (pre-flight + delivery → merge → post-merge verify + stamp)
 - Post-merge: `spec-maintainer` → `docs-writer`
 - Infrastructure: `ci-devops`
 - Support: `bug-hunter` / `refactor-agent` / `explorer` (stack) — dispatched on demand

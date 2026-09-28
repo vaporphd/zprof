@@ -27,5 +27,5 @@ pipeline:
       backlog empty   → planner (DRAFT) → plan-reviewer (base gate) → planner (AUTHOR, gh issue create)
       issue picked    → task-runner dispatches architect (if ADR-trigger=yes) → implementer
       PR opened       → integration-gate (if in INTEGRATION_SCOPE) → wiki-keeper → reviewer
-      approved        → pr-shepherd (pre-flight + delivery checks) → blocked: merge approval → human merges
+      approved        → pr-shepherd (pre-flight + delivery checks → merge per MERGE_GATE → post-merge verify + stamp)
       post-merge      → spec-maintainer (docs/PROJECT_SPEC.md) + docs-writer (README/CLAUDE.md/followup.md/lessons.md)
