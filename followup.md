@@ -6,6 +6,6 @@
 - Итого за 2026-09-27…29: 25 issues закрыто через PR #32–#70, все merge — pr-shepherd сам; 6 run'ов прерваны лимитами и подняты resume_from без потерь.
 
 ## Next
-- В работе: #67 (guard: readonly_mutation не учитывает allow_write_prefixes). Затем #59.
+- #67 done (guard readonly_mutation scratch-path fix), PR pending pr-shepherd. Затем #59.
 - Вопросы Alex: деплой-копии (#59) — трекать или `git rm --cached`; NORTH_STAR.md для zprof (#60); #17 ruleset на main; старые remote-ветки PR #3–#9; разбор стоимости (busy-poll теперь виден в карточке).
-- Local main = origin/main (9a841b1). Untracked docs/*, thoughts/, tasks/plan-issue-*.md, .claude/zprof-guard.py, guard.json не трогать.
+- Local main = origin/main (4885d73). Guard активен и для main: стоп-лист-литералы в тексте Bash (JSON/heredoc) → хук отклонит вызов; такие тексты — через Write. Untracked docs/*, thoughts/, tasks/plan-issue-*.md, .claude/zprof-guard.py, guard.json не трогать.

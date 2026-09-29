@@ -14,6 +14,11 @@ readonly_roles: [auditor, auditor-deep, explorer, architect, reviewer, bug-hunte
 merge_roles: [pr-shepherd]
 allow_write_prefixes: ["$CLAUDE_PROJECT_DIR", "~/.claude/projects/*/memory/", "~/.claude/plans/",
                        "/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*"]
+# Отдельный, более узкий список для readonly_scratch_only (#67 P1-2): только
+# эфемерный scratch, без $CLAUDE_PROJECT_DIR и без персистентных
+# пользовательских каталогов (~/.claude/projects/*/memory/, ~/.claude/plans/)
+# — те остаются исключительно в allow_write_prefixes для write_outside_repo.
+readonly_scratch_prefixes: ["/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*"]
 permissions_deny:                      # страховка на случай отсутствия скрипта
   - "Bash(git push --force*)"
   - "Bash(git push -f*)"
@@ -108,11 +113,12 @@ rules:
     tools: [Edit, Write, MultiEdit, NotebookEdit]
     context: write_outside_repo      # match отсутствует — условие целиком в evaluator'е
     reason: "запись вне репозитория запрещена стоп-листом"
-  # --- §5.4 read-only роли — активно в #23 ---
+  # --- §5.4 read-only роли — активно в #23; path-aware с #67 ---
   - id: readonly_mutation
     tools: [Bash]
     roles: $readonly_roles
     match: $mutating_bash_patterns   # подставляет apply из telemetry.yaml
+    context: readonly_scratch_only   # #67: readonly_scratch_prefixes-scratch не мутация репозитория
     reason: "роль read-only: мутирующая команда запрещена контрактом"
   # --- §5.5 merge-гейт — merge_role активен в #23 (движок общий, у правила нет context; ADR D3);
   # merge_preflight активно с #25 (ADR-0006) ---
