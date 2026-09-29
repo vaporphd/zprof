@@ -95,9 +95,14 @@ rules:
       - '\bgit\s+commit\b.*\s--amend\b'
     context: head_on_remote
     reason: "amend опубликованного коммита запрещён стоп-листом"
-  # Keep this rule's `(list|show)` exclusion in sync with telemetry.yaml
-  # `mutating_bash_patterns`' own `git stash` entry (issue #75) -- both read
-  # "git stash list/show is read-only", just for different rules/contexts.
+  # Keep this rule's `(list|show)` exclusion semantically in sync with
+  # telemetry.yaml `mutating_bash_patterns`' own `git stash` entry (issue
+  # #75) -- both read "git stash list/show is read-only", just for
+  # different rules/contexts. Syntax differs since #79: this file is
+  # Python-only (`re`, lookahead OK) and keeps `(?!\s+(list|show))`, while
+  # telemetry.yaml's copy was rewritten lookaround-free because Go RE2
+  # (cli/internal/score/config.go) can't parse lookahead and silently
+  # dropped the pattern instead of erroring.
   - id: stash_in_worktree
     tools: [Bash]
     match:

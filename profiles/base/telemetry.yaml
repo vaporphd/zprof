@@ -101,16 +101,30 @@ mutating_bash_patterns:
   # the existing `mv|cp|rm` family's own `grep -n rm README.md`, out of
   # scope here, #73).
   - "(?:^|[^\\w.-])ln(?:$|[^\\w.-])"
-  # Trailing `(?![\w-])` instead of a plain `\b`: a bare `\b` matches between
-  # a letter and `-`, so `git merge-base`/`commit-tree`/`checkout-index`
-  # matched as `merge`/`commit`/`checkout` and denied a read-only role's
-  # legitimate read-only plumbing command (issue #75). `stash` is split into
-  # its own pattern below (space-separated subcommands, not hyphenated —
-  # mirrors guard.yaml `stash_in_worktree`, #75).
-  - "\\bgit\\s+(commit|checkout|reset|apply|cherry-pick|merge|rebase)(?![\\w-])"
-  # `git stash list`/`git stash show` are read-only; keep this negative
-  # lookahead in sync with guard.yaml's own `stash_in_worktree` pattern.
-  - "\\bgit\\s+stash\\b(?!\\s+(list|show))"
+  # Trailing `(?:$|[^\w-])` instead of a plain `\b`: a bare `\b` matches
+  # between a letter and `-`, so `git merge-base`/`commit-tree`/
+  # `checkout-index` matched as `merge`/`commit`/`checkout` and denied a
+  # read-only role's legitimate read-only plumbing command (issue #75).
+  # `stash` is split into its own pattern below (space-separated
+  # subcommands, not hyphenated — mirrors guard.yaml `stash_in_worktree`,
+  # #75). This form was originally written with a negative lookahead
+  # (`(?!...)`), which Go RE2 (`cli/internal/score/config.go`) cannot
+  # parse; `compilePatterns` silently dropped it at compile time with no
+  # error, so `zprof score` stopped counting any git-mutation command at
+  # all (issue #79). Rewritten here with the same lookaround-free
+  # char-class trick as the `ln` pattern above — checked against both
+  # Python `re` (telemetry_test.py) and Go RE2
+  # (cli/internal/score/re2_compat_test.go).
+  - "\\bgit\\s+(commit|checkout|reset|apply|cherry-pick|merge|rebase)(?:$|[^\\w-])"
+  # `git stash list`/`git stash show` are read-only and must not match;
+  # every other `git stash` invocation must — bare, a real mutating
+  # subcommand (push/pop/apply/drop/clear/save/branch/create/store), or any
+  # flag. Same #79 RE2-lookahead-drop rewrite as the pattern above —
+  # enumerates git stash's fixed, finite subcommand vocabulary instead of a
+  # negative lookahead. Semantically (not syntactically — RE2 has no
+  # lookaround) equivalent to guard.yaml's own `stash_in_worktree` pattern,
+  # which keeps its lookahead since it's Python-only (`re`, not RE2).
+  - "\\bgit\\s+stash(?:\\s+(?:push|pop|apply|drop|clear|save|branch|create|store)\\b|\\s+-|\\s*[^\\w\\s-]|\\s*$)"
   - "\\bxcodegen\\b"
   - "\\b(cargo|go|swift)\\s+fmt\\b"
   - "\\b(gofmt\\s+-w|swiftformat|rustfmt)\\b"
