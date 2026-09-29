@@ -70,10 +70,17 @@ Key invariants:
     `cli/internal/apply/guard.go`, #28, ADR-0009) — see "Deployment" below
     (`zprof-guard.py:2-13, 156-168`; `guard.yaml:1-9`).
   - Deny events and the deny reason never contain the full command/content — `target`
-    is the first two whitespace tokens of the normalized command or a file basename;
-    `input_hash` is a 12-char sha1, mirroring (not importing) `zprof-collect.py`'s
-    `_input_hash` byte-for-byte since the two scripts deploy separately
-    (`zprof-guard.py:602-635`, ADR-0004 D9).
+    (`_target`, `zprof-guard.py:1064-1101`) tokenizes a Bash command with `shlex.split`
+    (not a naive whitespace split, so a quoted value with embedded spaces stays one
+    token), skips leading `NAME=value` env-var assignments (P1-1, #23), then masks the
+    value of any remaining `=`-bearing token among the first two picked — covering
+    `env`/`export`-prefixed assignments and `--flag=value` args anywhere in those two
+    tokens — via `_mask_assignment` (#47, `zprof-guard.py:1048-1061`); an unbalanced
+    quote makes `shlex.split` raise `ValueError`, which is caught and treated as "no
+    target" rather than falling back to the naive split that used to leak secret
+    fragments. For non-Bash tools `target` is a file basename. `input_hash` is a
+    12-char sha1, mirroring (not importing) `zprof-collect.py`'s `_input_hash`
+    byte-for-byte since the two scripts deploy separately (ADR-0004 D9).
   - `subagent-stop` mode (ADR-0007, #26) is a second, independent `main()` branch —
     it never calls `load_config()`, never touches `CONTEXTS`, and does not require
     `.claude/guard.json` to exist at all, unlike every rule described above

@@ -1048,20 +1048,50 @@ def _input_hash(tool_input) -> str:
 _ENV_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=\S*$")
 
 
-def _target(tool_name: str, tool_input: dict, command: str | None) -> str | None:
-    """First two whitespace tokens of the command, or basename of file/notebook path.
+def _mask_assignment(token: str) -> str:
+    """Mask the value half of an `=`-bearing token, keep the name/flag.
 
-    Leading `NAME=value` shell env-var assignments (e.g. `GH_TOKEN=ghp_xxx gh
-    release create`) are skipped before picking the two tokens — the journal
-    must never record a secret verbatim (review P1-1).
+    `NAME=value` -> `NAME=***`, `--flag=value` -> `--flag=***`. A token with
+    no `=` is returned unchanged. Used on whatever ends up in `target` so an
+    assignment that is not the *leading* token (following `env`/`export`, or
+    a `--flag=value` CLI argument) can never carry a secret value into the
+    journal (review P2, #47).
+    """
+    left, sep, _value = token.partition("=")
+    return left + sep + "***" if sep else token
+
+
+def _target(tool_name: str, tool_input: dict, command: str | None) -> str | None:
+    """First two shell tokens of the command, or basename of file/notebook path.
+
+    Bash commands are tokenized with `shlex.split` (POSIX quoting rules)
+    rather than a naive `str.split()`, so a quoted value containing
+    whitespace (`GH_TOKEN="a b" mytool ...`) becomes a single token instead
+    of spilling secret fragments across several (review P2, #47). Leading
+    `NAME=value` shell env-var assignments (e.g. `GH_TOKEN=ghp_xxx gh
+    release create`) are skipped before picking the two tokens (review P1-1,
+    #23). Among the two tokens actually picked, any token that still
+    contains `=` — an assignment that followed `env`/`export` instead of
+    being leading, or a `--flag=value` argument — has its value masked via
+    `_mask_assignment`, so a secret can never survive into `target`
+    regardless of position (#47). Unbalanced shell quoting makes
+    `shlex.split` raise `ValueError`; that is caught here and treated as "no
+    target" rather than propagating or falling back to `str.split()` — this
+    runs while building the event for an already-decided deny in
+    `pre_tool()`, outside `_safe_write_event`'s try/except, so it must never
+    raise (see `_safe_write_event` docstring).
     """
     if tool_name == "Bash":
         if not command:
             return None
-        tokens = command.split()
+        try:
+            tokens = shlex.split(command)
+        except ValueError:
+            return None
         while tokens and _ENV_ASSIGNMENT_RE.match(tokens[0]):
             tokens = tokens[1:]
-        return " ".join(tokens[:2]) if tokens else None
+        picked = [_mask_assignment(tok) for tok in tokens[:2]]
+        return " ".join(picked) if picked else None
     if tool_name in ("Edit", "Write", "MultiEdit"):
         fp = tool_input.get("file_path")
         return os.path.basename(fp) if isinstance(fp, str) and fp else None
