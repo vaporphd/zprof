@@ -1303,3 +1303,131 @@ def test_readonly_scratch_only_fail_closed_on_internal_exception(tmp_path, monke
     assert out is not None
     assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
         "zprof guard [readonly_mutation]:")
+
+
+# --- additional scratch-path coverage (independent verification, #67) ------
+#
+# These probe cases raised during independent review of a49e7b3: `..`
+# traversal through realpath, multiple chained mutating segments with mixed
+# outcomes, and tokenizer whitespace variants. All confirmed correct against
+# the shipped `_readonly_scratch_only` -- added here as permanent regression
+# coverage, not because a defect was found.
+
+def test_readonly_scratch_only_dotdot_traversal_escaping_scratch_denies(tmp_path):
+    """`..` inside a scratch-looking operand that actually resolves outside
+    every `allow_write_prefixes` scratch entry must still deny --
+    `os.path.realpath` collapses `..` textually (even through a nonexistent
+    directory) before the prefix match runs, so this can never be used to
+    smuggle a repo-internal (or arbitrary filesystem) write past the check."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/../../etc/evil"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:")
+
+
+def test_readonly_scratch_only_dotdot_traversal_staying_in_scratch_allows(tmp_path):
+    """Conversely, a `..` that resolves back inside the same scratch prefix
+    is fine -- proves the deny above is driven by the *resolved* real path,
+    not a blanket "any .. denies" rule."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/../claude-x/repro"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
+
+
+def test_readonly_scratch_only_dotdot_traversal_to_real_project_dir_denies(tmp_path):
+    """The exact escape shape raised in review: a scratch-prefixed `mkdir`
+    whose `..` chain lands inside this very repo's path must still deny --
+    not just "some path outside scratch", specifically a path that looks
+    like it could collide with `$CLAUDE_PROJECT_DIR`."""
+    _write_config(tmp_path, build_guard_config())
+    repo_root = str(BASE_DIR.parent.parent.resolve())  # profiles/base -> profiles -> repo root
+    payload = _payload(
+        "Bash",
+        _bash(f"mkdir -p /tmp/claude-x/../..{repo_root}/cli/evil"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:")
+
+
+def test_readonly_scratch_only_second_segment_repo_internal_denies(tmp_path):
+    """Two `;`-chained mutating segments where only the *first* is a scratch
+    path must still deny on the second -- the evaluator must not short-circuit
+    "allow" after the first approved segment and stop checking."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/a; mkdir -p cli/b"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:")
+
+
+def test_readonly_scratch_only_all_segments_scratch_allows(tmp_path):
+    """The positive mirror of the above: every chained segment resolving
+    under scratch allows the whole command."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/a; mkdir -p /tmp/claude-x/b"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
+
+
+@pytest.mark.parametrize("command", [
+    "mkdir  -p   /tmp/claude-x/a",      # repeated interior spaces
+    "mkdir\t-p\t/tmp/claude-x/a",       # tabs instead of spaces
+    "  mkdir -p /tmp/claude-x/a  ",     # leading/trailing whitespace
+])
+def test_readonly_scratch_only_whitespace_variants_allow(tmp_path, command):
+    """shlex's default whitespace set (` \\t\\r\\n`) treats tabs and repeated
+    spaces exactly like single spaces -- the tokenizer must not mis-split
+    these into a different (and differently-judged) argv shape."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="bug-hunter", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("role", READONLY_ROLES)
+def test_readonly_scratch_only_applies_to_every_readonly_role(tmp_path, role):
+    """The scratch-awareness fix must cover ALL `readonly_roles` from
+    guard.yaml, not just the roles exercised elsewhere in this file
+    (bug-hunter, reviewer) -- scratch allows and repo-internal still denies
+    for each of them."""
+    _write_config(tmp_path, build_guard_config())
+    allow_payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/repro"), role=role, cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(allow_payload) is None, role
+
+    deny_payload = _payload(
+        "Bash", _bash("mkdir -p cli/x"), role=role, cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(deny_payload)
+    assert out is not None, role
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:"), role
+
+
+def test_readonly_scratch_only_pr_shepherd_unaffected(tmp_path):
+    """`pr-shepherd` is deliberately absent from `readonly_roles` (guard.yaml
+    §5.4 comment) -- `readonly_mutation`'s `roles` filter must exclude it
+    before `_readonly_scratch_only` ever runs, so its own repo-internal
+    mutations (which it needs to do its job) are never touched by this rule."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p cli/x"), role="pr-shepherd", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
