@@ -1792,3 +1792,55 @@ def test_readonly_scratch_only_ln_target_directory_flag_scratch_to_scratch_allow
         role="bug-hunter", cwd=tmp_path,
     )
     assert zprof_guard.pre_tool(payload) is None
+
+
+# --- issue #73 reviewer I-1: glued/abbreviated `-t` bypass in `_ln_operands`
+#
+# `_ln_operands` only recognized `-t DIR` (space-separated) and
+# `--target-directory=DIR` -- any other `-`-prefixed token, including GNU
+# `ln`'s glued (`-tDIR`), short-cluster (`-stDIR`), and abbreviated long-flag
+# (`--target=DIR`) spellings of the same option, was silently dropped like
+# any other unrecognized flag, so the real write target escaped every
+# scratch check below it. Each test below uses an otherwise-scratch-safe
+# LINK_NAME/SOURCE operand so the denial can only be coming from the
+# ambiguous `-t`/`--t` token itself, not a relative-operand or other
+# unrelated rule.
+
+def test_readonly_scratch_only_ln_glued_target_flag_denies(tmp_path):
+    """`-tDIR` (value glued directly onto the flag, no space) must deny even
+    though the glued value itself resolves under scratch -- this evaluator
+    fails closed on the ambiguous/unparsed shape rather than trying to
+    extract and check the glued value."""
+    _readonly_deny(tmp_path, "ln -t/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_short_cluster_target_flag_denies(tmp_path):
+    """`-stDIR` (target letter glued inside a short-option cluster, e.g.
+    combined with `-s`/symbolic) must deny for the same reason as the glued
+    form above -- GNU short-option parsing would treat everything after `t`
+    as `-t`'s argument, so the value never surfaces as its own token here."""
+    _readonly_deny(tmp_path, "ln -st/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_abbreviated_target_flag_denies(tmp_path):
+    """`--target=DIR` (GNU getopt_long prefix-matched abbreviation of
+    `--target-directory=DIR`) must deny even though the value resolves under
+    scratch -- only the exact `--target-directory=` spelling is parsed;
+    every other `--t*` long flag fails closed."""
+    _readonly_deny(tmp_path, "ln --target=/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_target_flag_existing_forms_still_allow(tmp_path):
+    """AC3 regression guard: the two previously-supported forms -- separate
+    `-t DIR` and `--target-directory=DIR` -- must still allow a fully
+    scratch-to-scratch invocation; the new ambiguous-token handling above
+    must not widen to catch these exact, already-parsed shapes."""
+    _write_config(tmp_path, build_guard_config())
+    for command in (
+        "ln -t /tmp/claude-x/dir /tmp/claude-x/a",
+        "ln --target-directory=/tmp/claude-x/dir /tmp/claude-x/a",
+    ):
+        payload = _payload(
+            "Bash", _bash(command), role="bug-hunter", cwd=tmp_path,
+        )
+        assert zprof_guard.pre_tool(payload) is None, command
