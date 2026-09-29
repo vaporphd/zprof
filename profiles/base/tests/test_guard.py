@@ -1618,3 +1618,58 @@ def test_readonly_mutation_dollar_paren_append_to_runs_dir_still_denies(tmp_path
         'cd /tmp/claude-x; echo "$(date)" >> .zprof/runs/59.md',
         role="reviewer",
     )
+
+
+@pytest.mark.parametrize("command", [
+    # 2026-09-28T23:46:53Z, run #59: `git merge-base` denied as `merge`
+    # inside a longer `&&`-chained read-only command.
+    ('git log --oneline main..HEAD && git merge-base main HEAD && '
+     'git diff main...HEAD --stat && git status --porcelain && '
+     'gh issue view 62 2>&1 | head -80'),
+    # 2026-09-29T05:26:40Z, run #59: same regex bug, denied as `merge` from
+    # `git merge-base main chore/59-guard-deploy-copy` deep in a `;`-chained
+    # read-only verification command.
+    ('cmp .claude/zprof-collect.py profiles/base/zprof-collect.py && '
+     'echo COLLECT_SAME; git rev-parse 3d0074d:.claude/zprof-guard.py '
+     '3d0074d:profiles/base/zprof-guard.py main:profiles/base/zprof-guard.py; '
+     'git rev-parse 3d0074d:.claude/zprof-collect.py '
+     '3d0074d:profiles/base/zprof-collect.py; '
+     'git merge-base main chore/59-guard-deploy-copy; git rev-parse main; '
+     'git ls-files -s .claude/zprof-guard.py .claude/zprof-collect.py '
+     'profiles/base/zprof-guard.py'),
+])
+def test_readonly_mutation_full_reproduced_chains_from_run_59_allow(tmp_path, command):
+    """AC3/AC4 (#75): the exact full command chains reconstructed from
+    `.agentlog/guard-events.jsonl` (23:46 and 05:26 deny entries, run #59)
+    must allow end-to-end, not just the isolated `git merge-base ...`
+    fragment -- regression coverage for the real reviewer-deny reports, not
+    only the minimal unit case."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", [
+    "git diff HEAD 2> /dev/null",   # stderr sink, not stdout
+    "git stash list | head -2",     # piped, not a bare segment
+])
+def test_readonly_mutation_dev_null_and_stash_list_variant_shapes_allow(tmp_path, command):
+    """AC3 (#75) exact repro shapes from the issue: a stderr-only `/dev/null`
+    redirect, and a piped `git stash list`. Both must allow like their
+    simpler siblings already covered above."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", [
+    "git merge main",
+    "git commit -m x",
+    "echo x > README.md",
+])
+def test_readonly_mutation_baseline_deny_cases_unaffected_by_narrowing(tmp_path, command):
+    """AC6 (#75): none of the narrowing above widens the read-only contract
+    -- a genuinely mutating git subcommand, a bare mutating commit, and a
+    relative-path write inside the repo must all still deny for a
+    read-only role."""
+    _readonly_deny(tmp_path, command, role="reviewer")
