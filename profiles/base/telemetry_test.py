@@ -177,6 +177,19 @@ def test_schema():
                 "rm -rf build", "xcodegen generate", "echo hi | tee out.log"):
         assert any(c.search(cmd) for c in compiled), f"mutating command not matched: {cmd}"
 
+    # issue #79: the git commit-family and git stash patterns were rewritten
+    # off Perl-style negative lookahead (RE2-incompatible, silently dropped
+    # by Go `zprof score`) onto a lookaround-free char-class/enumeration
+    # form. re-assert the exact #75 semantics the rewrite had to preserve.
+    for cmd in ("git merge-base HEAD~1", "git commit-tree x", "git checkout-index -a",
+                "git stash list", "git stash show", "git stash show -p"):
+        assert not any(c.search(cmd) for c in compiled), f"read-only plumbing/stash-inspect command matched as mutating: {cmd}"
+    for cmd in ("git checkout foo", "git reset --hard", "git apply x.patch",
+                "git cherry-pick abc", "git merge foo", "git rebase foo",
+                "git stash", "git stash push", "git stash pop", "git stash apply",
+                "git stash drop", "git stash -u"):
+        assert any(c.search(cmd) for c in compiled), f"mutating git command not matched: {cmd}"
+
     # P2-exempt patterns (issue #53): sleep/wait compile and match, do NOT
     # match unrelated commands (including ones merely starting with the
     # same letters, e.g. "sleepy-time.sh")

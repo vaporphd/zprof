@@ -55,11 +55,13 @@ var defaultMutatingBash = []string{
 	// `ln` (symlink/hardlink) kept as its own pattern, not folded into the
 	// mv|cp|rm|touch|mkdir family above: `\bln\b` false-positives on `ls
 	// -ln`/`sed -n 1,5p ln.go`/`python3 x.py --ln`. A negative-lookahead
-	// form was also rejected: `compilePatterns` below silently drops any
-	// pattern `regexp.Compile` (RE2, no lookaround support) fails to parse
-	// instead of erroring, so a lookahead pattern would vanish from `zprof
-	// score` with no warning. This char-class form needs no lookaround and
-	// mirrors telemetry.yaml `mutating_bash_patterns` exactly (issue #73).
+	// form was also rejected: RE2 (no lookaround support) can't parse it.
+	// This char-class form needs no lookaround and mirrors telemetry.yaml
+	// `mutating_bash_patterns` exactly (issue #73). Note: `compilePatterns`
+	// used to silently drop any pattern it failed to compile instead of
+	// erroring — that gap is what let issue #79 (two RE2-incompatible
+	// lookahead patterns in telemetry.yaml) vanish from `zprof score`
+	// unnoticed; `compilePatterns`/`LoadConfig` now fail loud instead.
 	`(?:^|[^\w.-])ln(?:$|[^\w.-])`,
 	`\bgit\s+(commit|checkout|stash|reset|apply|cherry-pick|merge|rebase)\b`,
 	`\bxcodegen\b`,
@@ -108,18 +110,43 @@ func Defaults() Config {
 			"failed": true, "blocked": true,
 		},
 	}
-	c.MutatingBash = compilePatterns(defaultMutatingBash)
+	c.MutatingBash = mustCompilePatterns(defaultMutatingBash)
 	c.P2ExemptPatterns = defaultP2Exempt
-	c.P2Exempt = compilePatterns(defaultP2Exempt)
+	c.P2Exempt = mustCompilePatterns(defaultP2Exempt)
 	return c
 }
 
-func compilePatterns(pats []string) []*regexp.Regexp {
-	var out []*regexp.Regexp
-	for _, p := range pats {
-		if re, err := regexp.Compile(p); err == nil {
-			out = append(out, re)
+// compilePatterns compiles each pattern and returns an error naming the
+// first one regexp.Compile rejects, instead of silently dropping it from
+// the result. Silently dropping is what let issue #79 through: two
+// telemetry.yaml `mutating_bash_patterns` entries used a negative
+// lookahead, which Go's RE2 engine cannot parse (`ErrInvalidPerlOp`), and
+// the old version of this function just skipped them — `zprof score` kept
+// running, but stopped counting any git-mutation command at all, with no
+// error and no log line anywhere.
+func compilePatterns(pats []string) ([]*regexp.Regexp, error) {
+	out := make([]*regexp.Regexp, 0, len(pats))
+	for i, p := range pats {
+		re, err := regexp.Compile(p)
+		if err != nil {
+			return nil, fmt.Errorf("pattern[%d] %q: %w", i, p, err)
 		}
+		out = append(out, re)
+	}
+	return out, nil
+}
+
+// mustCompilePatterns compiles a hardcoded, compile-time-constant pattern
+// list (defaultMutatingBash, defaultP2Exempt) and panics if one fails to
+// compile — the same contract as regexp.MustCompile used elsewhere in this
+// codebase. Defaults() has no error return (it is the zero-config fallback
+// every caller relies on never failing) and these lists are under our own
+// control, covered by TestRe2Compat-style tests, so a panic here can only
+// mean a programming mistake, never a runtime/user-data problem.
+func mustCompilePatterns(pats []string) []*regexp.Regexp {
+	out, err := compilePatterns(pats)
+	if err != nil {
+		panic(fmt.Sprintf("score: default pattern list: %v", err))
 	}
 	return out
 }
@@ -176,11 +203,19 @@ func LoadConfig(projectDir, agentlogDir string) (Config, error) {
 			return c, fmt.Errorf("parse schema.json: %w", err)
 		}
 		if len(s.MutatingBashPatterns) > 0 {
-			c.MutatingBash = compilePatterns(s.MutatingBashPatterns)
+			re, err := compilePatterns(s.MutatingBashPatterns)
+			if err != nil {
+				return c, fmt.Errorf("compile mutating_bash_patterns: %w", err)
+			}
+			c.MutatingBash = re
 		}
 		if len(s.P2ExemptPatterns) > 0 {
+			re, err := compilePatterns(s.P2ExemptPatterns)
+			if err != nil {
+				return c, fmt.Errorf("compile p2_exempt_patterns: %w", err)
+			}
 			c.P2ExemptPatterns = s.P2ExemptPatterns
-			c.P2Exempt = compilePatterns(s.P2ExemptPatterns)
+			c.P2Exempt = re
 		}
 		if len(s.VerdictExemptRoles) > 0 {
 			c.ExemptRoles = map[string]bool{}

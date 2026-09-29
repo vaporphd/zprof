@@ -84,11 +84,24 @@ Key invariants:
     denied as their shorter mutating siblings (`merge`/`commit`/`checkout`),
     and `git stash list`/`git stash show` as the mutating `stash` — real
     reviewer-deny false positives reproduced from run #59's
-    `.agentlog/guard-events.jsonl`. Fixed by replacing the trailing `\b`
-    with `(?![\w-])` and splitting `stash` into its own pattern with the
-    same `(?!\s+(list|show))` exclusion `guard.yaml`'s `stash_in_worktree`
-    already used, keeping both files' `stash` exclusions in sync
-    (`telemetry.yaml:90-99`, `guard.yaml:98-104`). The same fix exempts
+    `.agentlog/guard-events.jsonl`. Originally (#75) fixed by replacing the
+    trailing `\b` with a `(?![\w-])` negative-lookahead exclusion and
+    splitting `stash` into its own pattern with the same
+    `(?!\s+(list|show))` exclusion `guard.yaml`'s `stash_in_worktree` uses —
+    but Go RE2 (`cli/internal/score/config.go`, used by `zprof score`, not
+    by `zprof-guard.py`) can't parse lookaround and `compilePatterns` used
+    to silently drop both patterns with no error, so `zprof score` quietly
+    stopped treating *any* git-mutation/`stash` command as mutating (issue
+    #79). `telemetry.yaml`'s two copies were rewritten lookaround-free — a
+    trailing `(?:$|[^\w-])` char class for the `commit`/`checkout`/…
+    family, an enumerated-subcommand alternation for `stash` — verified
+    equivalent under both Python `re` and Go RE2 (`telemetry.yaml:104-127`);
+    `compilePatterns`/`LoadConfig` also now return an error instead of
+    dropping a bad pattern silently. `guard.yaml`'s own `stash_in_worktree`
+    (`guard.yaml:106-111`) keeps the original `(?!\s+(list|show))` lookahead
+    unchanged — it's evaluated by Python's `re`, not Go RE2, so the two
+    files' `stash` exclusions are semantically but no longer syntactically
+    in sync. The same #75 fix exempts
     `/dev/null` as a redirect target inside `_readonly_scratch_only` above —
     a safe discard sink, deliberately *not* added to
     `readonly_scratch_prefixes` (which requires resolving strictly *beneath*
@@ -104,8 +117,11 @@ Key invariants:
     `(?:^|[^\w.-])ln(?:$|[^\w.-])` (kept separate from the `mv|cp|rm|touch|
     mkdir` family — a plain `\bln\b` false-positives on `ls -ln`/`sed -n
     1,5p ln.go`/`--ln`; a negative-lookahead form was rejected because Go
-    RE2, `cli/internal/score/config.go`, silently drops any pattern
-    containing lookaround at compile time instead of erroring), mirrored in
+    RE2, `cli/internal/score/config.go`, can't parse lookaround — at the
+    time (#73) `compilePatterns` silently dropped any pattern it couldn't
+    compile instead of erroring, a gap that #75's own lookahead patterns
+    later fell into unnoticed until issue #79 caught and fixed it, see the
+    `readonly_mutation` bullet above), mirrored in
     `defaultMutatingBash` for `zprof score`; and `ln` joined
     `_FILE_OP_COMMANDS` (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`/`ln`,
     `zprof-guard.py:1024`) with a dedicated `_ln_operands` extractor
