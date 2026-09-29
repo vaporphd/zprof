@@ -1718,3 +1718,77 @@ def test_readonly_scratch_only_ln_scratch_to_scratch_allows(tmp_path):
         role="bug-hunter", cwd=tmp_path,
     )
     assert zprof_guard.pre_tool(payload) is None
+
+
+@pytest.mark.parametrize("command", ["ls -ln /tmp", "readlink -f cli/target.py"])
+def test_readonly_scratch_only_ln_pattern_no_false_positive(tmp_path, command):
+    """#73: the new `(?:^|[^\\w.-])ln(?:$|[^\\w.-])` `mutating_bash_patterns`
+    entry must not match `ls -ln` (the `-ln` flag cluster) or `readlink`
+    (the `ln` substring inside a longer word) -- both are read-only commands
+    that never reach `readonly_mutation` at all (the whole-command `match`
+    gate never fires), so `pre_tool` must allow outright, independent of
+    `_readonly_scratch_only`/`_ln_operands` entirely."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="bug-hunter", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_scratch_only_ln_relative_target_via_cd_denies(tmp_path):
+    """#73 edge case: `cd /tmp/claude-x && ln -s ../../cli/target.py link`
+    -- the symlink TARGET is a relative path that would resolve (via the
+    link's own directory, once actually created) outside scratch onto a
+    repo file, even though the leading `cd` itself lands in scratch. This
+    evaluator does not special-case `cd`-relative resolution for any
+    command (#67 P1-1 out-of-scope decision): any non-absolute operand
+    denies outright rather than being resolved against a synthesized cwd,
+    so this still fails closed -- just via the relative-operand rule, not
+    a `cd`-aware target check."""
+    _readonly_deny(tmp_path, "cd /tmp/claude-x && ln -s ../../cli/target.py link")
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_denies(tmp_path):
+    """#73: GNU `ln --target-directory=DIR SOURCE` puts the write target in
+    the flag's value rather than the last positional -- `_ln_operands`
+    mirrors `_cp_destination`'s `-t`/`--target-directory=` parsing so this
+    flag form is not silently skipped. Here `SOURCE` (`cli/target.py`) is a
+    relative operand, so this denies via the same relative-operand rule as
+    the `cd`-relative case above;
+    `test_readonly_scratch_only_ln_target_directory_flag_non_scratch_denies`
+    below uses two absolute operands instead to confirm `--target-directory=`
+    is actually being extracted and checked, not just coincidentally denied
+    for an unrelated reason."""
+    _readonly_deny(tmp_path, "ln --target-directory=/tmp/claude-x cli/target.py")
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_non_scratch_denies(tmp_path):
+    """#73: discriminates 'extracted and checked' from 'silently skipped'.
+    SOURCE (`/tmp/claude-x/a`) is absolute and in scratch on its own, so if
+    `--target-directory=` were never parsed into an operand this command
+    would wrongly allow; `_ln_operands` does extract it, and `/etc` resolves
+    outside every `readonly_scratch_prefixes` entry, so this must deny with
+    the target's *resolved* path in the reason -- proof the flag's value
+    was actually inspected, not dropped as an unrecognized `-` token."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash",
+        _bash("ln --target-directory=/etc /tmp/claude-x/a"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("zprof guard [readonly_mutation]:")
+    assert "/etc" in reason
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_scratch_to_scratch_allows(tmp_path):
+    """#73 counterpart: both `--target-directory=DIR` and the positional
+    SOURCE are absolute scratch paths -- a legitimate scratch-only
+    `--target-directory=` invocation must still allow."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash",
+        _bash("ln --target-directory=/tmp/claude-x/dir /tmp/claude-x/a"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
