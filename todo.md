@@ -31,6 +31,7 @@
 - [x] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 - [x] fix(base): north-star-auditor при отсутствии NORTH_STAR.md — детерминированный skip, гейт условный (#60) — PR #71
 - [x] fix(base): раннер/pr-shepherd оставляют worktree main в scratchpad; checkout не на main после run (#62)
+- [x] fix(cli): zprof score — RE2 молча выбрасывает lookahead-паттерны из mutating_bash_patterns (после #75) (#79) — приоритет, измерения — PR #80
 
 ## Plan 2: guard
 - [x] fix(ci): ruff RUF059 ломает CI на main; запинить версию ruff (#56) — вне очереди, блокирует #28
