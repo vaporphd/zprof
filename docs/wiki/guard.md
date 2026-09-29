@@ -975,6 +975,63 @@ and Go E2E cases (`TestE2E_GuardDeploysAndEnforcesForcePush`'s new
 `exempt_roles.publish` assertion, and the new
 `TestE2E_GuardDeploysBackendPythonPipInstallRule`).
 
+### North-star gate diagnostics (`checkNorthStarGate`, #60)
+
+Also unrelated to guard's own artifacts — recorded here for the same reason
+as "Telemetry-only diagnostics"/"Checkout hygiene diagnostics" above: `zprof
+doctor` has no wiki file of its own yet (still P2, `PLAN.md`), and this file
+is already its documented home. `north-star-auditor` is a *gate*
+(`.claude/agents/gates/`, dispatched by `task-runner.md`'s `### Гейты
+(--with-gates)` section pre-dispatch), a separate mechanism from the
+`PreToolUse`/`SubagentStop` `guard.yaml` rules engine documented everywhere
+else in this file — the two never call into each other.
+
+Issue #60: bug-hunter traced the gate contract returning
+`misaligned`/`support-ok`/a silent self-skip from identical dispatches under
+the same precondition — `docs/NORTH_STAR.md` physically absent — pure prompt
+ambiguity, no branch existed for "nothing to check against". Three fixes
+landed together, none touching `zprof-guard.py`/`guard.yaml`:
+
+1. **Gate contract** (`.claude/agents/gates/north-star-auditor.md` /
+   `profiles/base/agents/gates/north-star-auditor.md`, byte-identical):
+   new rule 0, checked before any other classification — file absent →
+   `verdict: skip` always, never `misaligned` and never
+   `aligned`/`support-ok`; `next: planner` regardless, same as
+   `aligned`/`support-ok` (skip never blocks the chain). `misaligned` is
+   tightened in the same diff: it now requires a quotable passage from
+   `docs/NORTH_STAR.md`, not just "doesn't mention this".
+2. **task-runner** (`.claude/agents/task-runner.md` /
+   `profiles/base/agents/task-runner.md`, byte-identical, `### Гейты
+   (--with-gates)` section): checks whether `docs/NORTH_STAR.md` exists
+   *before* dispatching the gate at all; absent → the gate is never
+   invoked — task-runner logs `skip: docs/NORTH_STAR.md absent` in the run
+   log and goes straight to the route's first agent, cheaper than
+   dispatching opus only to get `skip` back.
+3. **`checkNorthStarGate`** (`cli/internal/doctor/diagnostics.go:1498-1512`)
+   is the read-only detector for the gap the first two fixes close: it warns
+   (`LevelInfo`, `"north-star gate has nothing to check; create
+   docs/NORTH_STAR.md or disable the gate"`) when the gate is "present" —
+   either `.claude/agents/gates/north-star-auditor.md` exists on disk, or
+   (when a manifest loaded) `proj.WithGates` is true — but
+   `docs/NORTH_STAR.md` does not, i.e. a deployed/requested gate that can
+   currently only ever return `skip`. Wired into both `Diagnose` and
+   `diagnoseTelemetryOnly` — the latter passes `proj == nil`, so
+   file-presence alone drives it there, no `WithGates` fallback without a
+   loaded manifest.
+
+`profiles/base/verdicts.yaml` gained a matching entry under
+`north-star-auditor`: `skip: {base: done, action: next}`, kept distinct from
+`support-ok` on purpose per bug-hunter's recommendation, so telemetry doesn't
+read "file absent" as "alignment confirmed".
+
+Test coverage: `TestCheckNorthStarGate` (5 subtests — gate absent; gate file
+present without/with `docs/NORTH_STAR.md`; `proj.WithGates` true/false
+without a gate file on disk) plus `TestDiagnoseNorthStarGateTelemetryOnly`
+(proves the check also fires through the `diagnoseTelemetryOnly` path —
+the same path zprof's own repo checkout runs through, which is how #60 was
+found live) — `go test ./internal/doctor/...` → 136 passed, 95.5% coverage
+(verified 2026-09-29, `fix-60-north-star-gate-skip`@`3b7d10e`).
+
 ### See also
 
 - [Collector](collector.md) — sibling hook in `profiles/base/`; `guard`'s `_input_hash`

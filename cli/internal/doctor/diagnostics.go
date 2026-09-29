@@ -88,6 +88,8 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  21. no worktree outside the main one holds the default branch checked
 //     out non-detached, and the main working tree itself is back on the
 //     default branch once no run is in flight (issue #62)
+//  22. the north-star-auditor gate, if deployed or requested, has a
+//     docs/NORTH_STAR.md to actually check against (issue #60)
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -135,6 +137,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkRunnerBudget(proj)...)
 	out = append(out, checkGuardDeployment(projectDir, proj)...)
 	out = append(out, checkRoleResolution(projectDir)...)
+	out = append(out, checkNorthStarGate(projectDir, proj)...)
 	return out, nil
 }
 
@@ -175,6 +178,7 @@ func diagnoseTelemetryOnly(projectDir string) []Issue {
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
 	out = append(out, checkGuardDeployment(projectDir, &manifest.ProjectManifest{})...)
 	out = append(out, checkRoleResolution(projectDir)...)
+	out = append(out, checkNorthStarGate(projectDir, nil)...)
 	return out
 }
 
@@ -1477,4 +1481,32 @@ func checkRoleResolution(projectDir string) []Issue {
 		}
 	}
 	return unverified
+}
+
+// checkNorthStarGate warns when the north-star-auditor gate is deployed (or
+// requested via --with-gates before ever running `zprof apply`) but has
+// nothing to check: docs/NORTH_STAR.md doesn't exist. The gate's own
+// contract now always returns `skip` in that situation and task-runner
+// stops dispatching it at all (issue #60) — this check exists so the gap
+// itself surfaces to a human instead of silently degrading every run into a
+// no-op gate.
+//
+// "Present" is resolved two ways: the gate agent file actually being on
+// disk under .claude/agents/gates/, or — when a manifest was loaded —
+// proj.WithGates being true. diagnoseTelemetryOnly has no manifest at all
+// (proj == nil), so file-presence alone drives the check there.
+func checkNorthStarGate(projectDir string, proj *manifest.ProjectManifest) []Issue {
+	gatePath := filepath.Join(projectDir, ".claude", "agents", "gates", "north-star-auditor.md")
+	_, statErr := os.Stat(gatePath)
+	present := statErr == nil || (proj != nil && proj.WithGates)
+	if !present {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(projectDir, "docs", "NORTH_STAR.md")); err == nil {
+		return nil
+	}
+	return []Issue{{
+		Level:   LevelInfo,
+		Message: "north-star gate has nothing to check; create docs/NORTH_STAR.md or disable the gate",
+	}}
 }

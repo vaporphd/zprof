@@ -183,3 +183,28 @@
   signal, not a Go import), refreshed Head SHA — no Status Summary change
   (`doctor` was already counted under "Undocumented", stays there; `guard`
   was already `implemented`, stays there).
+- MAINTAIN run on `fix-60-north-star-gate-skip` / #60 added a new
+  "North-star gate diagnostics" section to `guard.md` for
+  `checkNorthStarGate` (the new `zprof doctor` check that flags a
+  deployed/requested `north-star-auditor` gate with no `docs/NORTH_STAR.md`
+  to check against) — same "not yet written, still P2" call as #29/#64/#62's
+  doctor entries, for the same reason as #62's: `checkNorthStarGate` never
+  touches `guard.json`/hooks/deployment, it's a completely separate
+  mechanism (the `--with-gates` gate pipeline dispatched by
+  `task-runner.md`, not the `PreToolUse`/`SubagentStop` `guard.yaml` rules
+  engine). It landed in `guard.md` anyway purely on the established "this
+  file is already `zprof doctor`'s documented home" precedent, stated
+  explicitly in the new section (same as #62's). The section also covers
+  the two prompt-layer fixes that shipped in the same commit — the gate
+  contract's new rule 0 (`skip` verdict when the file is absent) and
+  task-runner's pre-dispatch existence check — since the Go-side diagnostic
+  only exists to catch the gap those two fixes intentionally leave silent
+  by default, and `verdicts.yaml`'s new `skip` token. No `apply.md` change:
+  nothing about `--with-gates` deployment or rendering changed, only the
+  gate's own prompt contract and a doctor check. `INDEX.md`: `doctor`'s
+  dependency-graph annotation gained a `#60` clause (north-star gate
+  presence + `docs/NORTH_STAR.md` absence as a data signal, not a Go
+  import), refreshed Head SHA — no Status Summary change (`doctor` stays
+  under "Undocumented"; `guard` stays `implemented`). Gate verified green
+  before this run: `go test ./internal/doctor/...` → 136 passed, 95.5%
+  coverage.
