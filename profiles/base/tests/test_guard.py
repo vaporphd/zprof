@@ -1830,6 +1830,18 @@ def test_readonly_scratch_only_ln_abbreviated_target_flag_denies(tmp_path):
     _readonly_deny(tmp_path, "ln --target=/tmp/claude-x/dir /tmp/claude-x/a")
 
 
+def test_readonly_scratch_only_ln_bare_target_directory_no_value_denies(tmp_path):
+    """`--target-directory` with no `=value` at all (GNU getopt_long would
+    then consume the *next* argv token as its value, space-separated) is
+    explicitly called out in `_ln_operands`'s docstring as one of the
+    ambiguous `--t*` shapes -- only the exact `--target-directory=` spelling
+    is parsed, so the bare flag falls into the same ambiguous bucket as
+    `--target=`/`--ta=` and fails closed on its own (non-absolute) token,
+    even though the following positional (`/tmp/claude-x/dir`) would
+    otherwise resolve under scratch on its own."""
+    _readonly_deny(tmp_path, "ln --target-directory /tmp/claude-x/dir /tmp/claude-x/a")
+
+
 def test_readonly_scratch_only_ln_target_flag_existing_forms_still_allow(tmp_path):
     """AC3 regression guard: the two previously-supported forms -- separate
     `-t DIR` and `--target-directory=DIR` -- must still allow a fully
