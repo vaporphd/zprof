@@ -1,12 +1,11 @@
 # Followup
 
 ## Status
-- 2026-09-27/29: Plan 1 закрыт кроме #17 (Alex). Plan 2 закрыт (#23–#31, #52, #56, #64, #47, #59, #67); хвост: #75 (ложный deny readonly_mutation у reviewer), #73 (`ln` bypass). Решения Alex: auto-merge везде; --delete-branch остаётся; required CI; guard fail-open, deny везде.
-- #59 done — PR #76: .claude/zprof-guard.py в git, guard.json в .gitignore. Score 87/100 Ideal · 9.2M · 2 dispatch · 14 min · busy-poll pr-shepherd 18.
-- Итого 2026-09-27…29: 30 issues закрыто через PR #32–#76, все merge — pr-shepherd сам; 7 run'ов прерваны лимитами, подняты resume_from; 3 ложных deny guard на read-only ролях (mkdir → #67 done; git log, cmp → #75).
+- 2026-09-27/29: Plan 1 закрыт кроме #17 (Alex). Plan 2 закрыт + хвост: #75 done — PR #77 (regex `\bgit\s+(commit|…)\b` матчил `merge-base`/`commit-tree`/`checkout-index`; → `(?![\w-])`, `stash list/show` вне мутаций, `/dev/null` безопасный sink); осталось #73 (`ln` bypass). Решения Alex: auto-merge везде; --delete-branch остаётся; required CI; guard fail-open, deny везде.
+- Smoke после #75 (роль reviewer): `git merge-base … 2>/dev/null`, `cmp … && echo`, `git log`, `git stash list` → allow. Score 70/100 · 41.2M · 8 dispatch · 39 min · −10 P7 20 (guard: 7) · −8 P3 implementer 11/29 · −6 P1 6%.
+- Итого 2026-09-27…29: 31 issue закрыт через PR #32–#77, все merge — pr-shepherd сам; 8 run'ов прерваны лимитами, подняты resume_from.
 
 ## Next
-- В работе: #75 (readonly_mutation: ложный deny на read-only команде reviewer). Затем #73.
-- Решения Alex: #17 ruleset на main; политика деплой-копий (сейчас трекаются по прецеденту); NORTH_STAR.md для zprof; старые remote-ветки PR #3–#9. Далее — cost review (P3/P4 implementer, длина guard-run'ов до 99 мин) и `zprof sync` в jarvis-in-hermes / apple-health-sync (получат guard, expert-panel, новые контракты).
-- Local main = origin/main (78996cf). Guard активен и для main: стоп-лист-литералы в тексте Bash → deny; такие тексты — через Write.
-- #75 готов: fix/test/docs на ветке `fix/75-guard-readonly-mutation-reviewer-deny` (HEAD a7f3290), reviewer approved, PR открыт — передано pr-shepherd.
+- #73 (readonly_mutation standalone `ln`): PR #78 gate-green, reviewer approve-with-fixes (находка закрыта) — готов к мержу. После него очередь пуста.
+- Решения Alex: #17 ruleset на main; политика деплой-копий; NORTH_STAR.md для zprof; старые remote-ветки PR #3–#9. Далее: cost review (P3 implementer стабильно 5–30 перечитываний; run'ы guard 30–99 мин), `zprof sync` в jarvis-in-hermes / apple-health-sync, повторная панель (`focus: [01, 02, 06]`) для «Динамики».
+- Local main = origin/main (38ffeca). Guard активен и для main: стоп-лист-литералы в тексте Bash → deny; такие тексты — через Write.

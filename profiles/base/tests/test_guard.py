@@ -1471,16 +1471,15 @@ def test_readonly_scratch_only_redirect_does_not_approve_whole_segment(tmp_path)
 def test_readonly_scratch_only_unrecognized_command_denies(tmp_path):
     """AC2 (#67 P0-2): an entirely unrecognized command with no redirect at
     all (not in `_FILE_OP_COMMANDS`, no `>`/`>>`) must deny outright rather
-    than being silently ignored -- closes the `ln`-style hardlink/symlink
-    bypass even though `ln` isn't in `$mutating_bash_patterns` either.
-    Chained after a scratch-safe `mkdir` so `readonly_mutation`'s own
-    `match` gate fires at all (a bare `ln ...` alone never matches
-    `$mutating_bash_patterns` and so never even reaches this evaluator --
-    that pattern-list gap is the separate, out-of-scope P2 the reviewer
-    flagged); the real-world bypass this closes is exactly this chained
-    shape, where the first segment's approval used to leave the second one
-    silently unchecked."""
-    _readonly_deny(tmp_path, "mkdir -p /tmp/claude-x/a && ln -s /tmp/claude-x/a cli/target.py")
+    than being silently ignored. Chained after a scratch-safe `mkdir` so
+    `readonly_mutation`'s own `match` gate fires at all; the real-world
+    bypass this closes is exactly this chained shape, where the first
+    segment's approval used to leave the second one silently unchecked.
+    (`ln` used to be the concrete unrecognized-command example here, but
+    #73 made it a recognized file-op with its own dedicated scratch check
+    -- see the standalone `ln` tests further below -- so this now uses a
+    command that's still genuinely unrecognized.)"""
+    _readonly_deny(tmp_path, "mkdir -p /tmp/claude-x/a && curl -o cli/target.py https://example.com/x")
 
 
 def test_readonly_scratch_only_cp_link_flag_denies_even_in_scratch(tmp_path):
@@ -1673,3 +1672,187 @@ def test_readonly_mutation_baseline_deny_cases_unaffected_by_narrowing(tmp_path,
     relative-path write inside the repo must all still deny for a
     read-only role."""
     _readonly_deny(tmp_path, command, role="reviewer")
+
+
+# --- issue #73: standalone `ln` (symlink/hardlink) bypass -------------------
+#
+# `ln` matched no `mutating_bash_patterns` entry at all, so a standalone `ln
+# -s /tmp/claude-x/link cli/target.py` never even reached `readonly_mutation`
+# -- unlike the chained `mkdir ... && ln ...` shape already covered by
+# `test_readonly_scratch_only_unrecognized_command_denies` (#67), which only
+# denied because the *preceding* `mkdir` made `match` fire at all. #73 adds a
+# dedicated `mutating_bash_patterns` entry for `ln` and teaches
+# `_readonly_scratch_only` to treat it as a recognized file-op (`_ln_operands`),
+# checking every operand -- TARGET and LINK_NAME alike -- against scratch.
+
+def test_readonly_scratch_only_standalone_ln_symlink_bypass_denies(tmp_path):
+    """The exact standalone repro from #73: a bare `ln -s` with no preceding
+    scratch-safe command now matches `mutating_bash_patterns` on its own and
+    denies -- the link name (`cli/target.py`) resolves inside the repo."""
+    _readonly_deny(tmp_path, "ln -s /tmp/claude-x/link cli/target.py")
+
+
+def test_readonly_scratch_only_standalone_ln_hardlink_bypass_denies(tmp_path):
+    """Hardlink variant of the same bypass (#73): no `-s`, same repo-internal
+    link name -- must deny identically."""
+    _readonly_deny(tmp_path, "ln /tmp/claude-x/a cli/target.py")
+
+
+def test_readonly_scratch_only_ln_reversed_operands_denies(tmp_path):
+    """#73: the operand order matters the other way too -- TARGET pointing
+    at a repo file, with the newly-created LINK_NAME safely in scratch, must
+    still deny. A symlink landing in scratch that aliases a repo file lets a
+    later write through the link mutate the repo, exactly like `cp`'s own
+    link-flag check (#67 AC3) -- so `ln` checks TARGET and LINK_NAME with
+    the same weight, not just the freshly-created path."""
+    _readonly_deny(tmp_path, "ln -sf cli/target.py /tmp/claude-x/link")
+
+
+def test_readonly_scratch_only_ln_scratch_to_scratch_allows(tmp_path):
+    """#73 counterpart: confirms the fix didn't over-tighten -- a symlink
+    with both TARGET and LINK_NAME under scratch is a legitimate read-only
+    workflow command and must still allow."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("ln -s /tmp/claude-x/a /tmp/claude-x/b"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
+
+
+@pytest.mark.parametrize("command", ["ls -ln /tmp", "readlink -f cli/target.py"])
+def test_readonly_scratch_only_ln_pattern_no_false_positive(tmp_path, command):
+    """#73: the new `(?:^|[^\\w.-])ln(?:$|[^\\w.-])` `mutating_bash_patterns`
+    entry must not match `ls -ln` (the `-ln` flag cluster) or `readlink`
+    (the `ln` substring inside a longer word) -- both are read-only commands
+    that never reach `readonly_mutation` at all (the whole-command `match`
+    gate never fires), so `pre_tool` must allow outright, independent of
+    `_readonly_scratch_only`/`_ln_operands` entirely."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="bug-hunter", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_scratch_only_ln_relative_target_via_cd_denies(tmp_path):
+    """#73 edge case: `cd /tmp/claude-x && ln -s ../../cli/target.py link`
+    -- the symlink TARGET is a relative path that would resolve (via the
+    link's own directory, once actually created) outside scratch onto a
+    repo file, even though the leading `cd` itself lands in scratch. This
+    evaluator does not special-case `cd`-relative resolution for any
+    command (#67 P1-1 out-of-scope decision): any non-absolute operand
+    denies outright rather than being resolved against a synthesized cwd,
+    so this still fails closed -- just via the relative-operand rule, not
+    a `cd`-aware target check."""
+    _readonly_deny(tmp_path, "cd /tmp/claude-x && ln -s ../../cli/target.py link")
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_denies(tmp_path):
+    """#73: GNU `ln --target-directory=DIR SOURCE` puts the write target in
+    the flag's value rather than the last positional -- `_ln_operands`
+    mirrors `_cp_destination`'s `-t`/`--target-directory=` parsing so this
+    flag form is not silently skipped. Here `SOURCE` (`cli/target.py`) is a
+    relative operand, so this denies via the same relative-operand rule as
+    the `cd`-relative case above;
+    `test_readonly_scratch_only_ln_target_directory_flag_non_scratch_denies`
+    below uses two absolute operands instead to confirm `--target-directory=`
+    is actually being extracted and checked, not just coincidentally denied
+    for an unrelated reason."""
+    _readonly_deny(tmp_path, "ln --target-directory=/tmp/claude-x cli/target.py")
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_non_scratch_denies(tmp_path):
+    """#73: discriminates 'extracted and checked' from 'silently skipped'.
+    SOURCE (`/tmp/claude-x/a`) is absolute and in scratch on its own, so if
+    `--target-directory=` were never parsed into an operand this command
+    would wrongly allow; `_ln_operands` does extract it, and `/etc` resolves
+    outside every `readonly_scratch_prefixes` entry, so this must deny with
+    the target's *resolved* path in the reason -- proof the flag's value
+    was actually inspected, not dropped as an unrecognized `-` token."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash",
+        _bash("ln --target-directory=/etc /tmp/claude-x/a"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
+    assert reason.startswith("zprof guard [readonly_mutation]:")
+    assert "/etc" in reason
+
+
+def test_readonly_scratch_only_ln_target_directory_flag_scratch_to_scratch_allows(tmp_path):
+    """#73 counterpart: both `--target-directory=DIR` and the positional
+    SOURCE are absolute scratch paths -- a legitimate scratch-only
+    `--target-directory=` invocation must still allow."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash",
+        _bash("ln --target-directory=/tmp/claude-x/dir /tmp/claude-x/a"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
+
+
+# --- issue #73 reviewer I-1: glued/abbreviated `-t` bypass in `_ln_operands`
+#
+# `_ln_operands` only recognized `-t DIR` (space-separated) and
+# `--target-directory=DIR` -- any other `-`-prefixed token, including GNU
+# `ln`'s glued (`-tDIR`), short-cluster (`-stDIR`), and abbreviated long-flag
+# (`--target=DIR`) spellings of the same option, was silently dropped like
+# any other unrecognized flag, so the real write target escaped every
+# scratch check below it. Each test below uses an otherwise-scratch-safe
+# LINK_NAME/SOURCE operand so the denial can only be coming from the
+# ambiguous `-t`/`--t` token itself, not a relative-operand or other
+# unrelated rule.
+
+def test_readonly_scratch_only_ln_glued_target_flag_denies(tmp_path):
+    """`-tDIR` (value glued directly onto the flag, no space) must deny even
+    though the glued value itself resolves under scratch -- this evaluator
+    fails closed on the ambiguous/unparsed shape rather than trying to
+    extract and check the glued value."""
+    _readonly_deny(tmp_path, "ln -t/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_short_cluster_target_flag_denies(tmp_path):
+    """`-stDIR` (target letter glued inside a short-option cluster, e.g.
+    combined with `-s`/symbolic) must deny for the same reason as the glued
+    form above -- GNU short-option parsing would treat everything after `t`
+    as `-t`'s argument, so the value never surfaces as its own token here."""
+    _readonly_deny(tmp_path, "ln -st/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_abbreviated_target_flag_denies(tmp_path):
+    """`--target=DIR` (GNU getopt_long prefix-matched abbreviation of
+    `--target-directory=DIR`) must deny even though the value resolves under
+    scratch -- only the exact `--target-directory=` spelling is parsed;
+    every other `--t*` long flag fails closed."""
+    _readonly_deny(tmp_path, "ln --target=/tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_bare_target_directory_no_value_denies(tmp_path):
+    """`--target-directory` with no `=value` at all (GNU getopt_long would
+    then consume the *next* argv token as its value, space-separated) is
+    explicitly called out in `_ln_operands`'s docstring as one of the
+    ambiguous `--t*` shapes -- only the exact `--target-directory=` spelling
+    is parsed, so the bare flag falls into the same ambiguous bucket as
+    `--target=`/`--ta=` and fails closed on its own (non-absolute) token,
+    even though the following positional (`/tmp/claude-x/dir`) would
+    otherwise resolve under scratch on its own."""
+    _readonly_deny(tmp_path, "ln --target-directory /tmp/claude-x/dir /tmp/claude-x/a")
+
+
+def test_readonly_scratch_only_ln_target_flag_existing_forms_still_allow(tmp_path):
+    """AC3 regression guard: the two previously-supported forms -- separate
+    `-t DIR` and `--target-directory=DIR` -- must still allow a fully
+    scratch-to-scratch invocation; the new ambiguous-token handling above
+    must not widen to catch these exact, already-parsed shapes."""
+    _write_config(tmp_path, build_guard_config())
+    for command in (
+        "ln -t /tmp/claude-x/dir /tmp/claude-x/a",
+        "ln --target-directory=/tmp/claude-x/dir /tmp/claude-x/a",
+    ):
+        payload = _payload(
+            "Bash", _bash(command), role="bug-hunter", cwd=tmp_path,
+        )
+        assert zprof_guard.pre_tool(payload) is None, command

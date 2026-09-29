@@ -52,6 +52,15 @@ var defaultMutatingBash = []string{
 	`\bsed\s+-i\b`,
 	`\btee\b`,
 	`\b(mv|cp|rm|touch|mkdir)\b`,
+	// `ln` (symlink/hardlink) kept as its own pattern, not folded into the
+	// mv|cp|rm|touch|mkdir family above: `\bln\b` false-positives on `ls
+	// -ln`/`sed -n 1,5p ln.go`/`python3 x.py --ln`. A negative-lookahead
+	// form was also rejected: `compilePatterns` below silently drops any
+	// pattern `regexp.Compile` (RE2, no lookaround support) fails to parse
+	// instead of erroring, so a lookahead pattern would vanish from `zprof
+	// score` with no warning. This char-class form needs no lookaround and
+	// mirrors telemetry.yaml `mutating_bash_patterns` exactly (issue #73).
+	`(?:^|[^\w.-])ln(?:$|[^\w.-])`,
 	`\bgit\s+(commit|checkout|stash|reset|apply|cherry-pick|merge|rebase)\b`,
 	`\bxcodegen\b`,
 	`\b(cargo|go|swift)\s+fmt\b`,

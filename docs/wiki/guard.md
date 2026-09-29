@@ -49,15 +49,15 @@ Key invariants:
     extracted path operand containing `$`/`~`/`*`/`?`/`[`. Per remaining
     segment: a segment is approved (excluded from the residual match
     re-check) only when its leading command is a recognized file-op
-    (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`) — a redirect-bearing segment whose
-    leading command is *not* one of those six still exposes its non-redirect
-    tokens to the residual check, and a segment that is neither a recognized
-    file-op, redirect-bearing, nor the leading `cd` denies outright
-    (deny-by-default, closing a chained-`ln`-style bypass; a fully standalone
-    `ln` that never matches `readonly_mutation`'s own pattern at all is a
-    separate, tracked, non-blocking gap, #73). `cp` additionally denies
-    outright on any link-creating flag (`-l`/`-s`/`--link`/`--symbolic-link`,
-    or a short-flag cluster containing `l`/`s`) regardless of destination.
+    (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`/`ln`, #73 added `ln`) — a
+    redirect-bearing segment whose leading command is *not* one of those
+    seven still exposes its non-redirect tokens to the residual check, and a
+    segment that is neither a recognized file-op, redirect-bearing, nor the
+    leading `cd` denies outright (deny-by-default, closing a chained-`ln`-
+    style bypass; standalone `ln` closed separately, see the dedicated #73
+    bullet below). `cp` additionally denies outright on any link-creating
+    flag (`-l`/`-s`/`--link`/`--symbolic-link`, or a short-flag cluster
+    containing `l`/`s`) regardless of destination.
     Every extracted operand must be `os.path.isabs` (relative denies) and
     resolve, via `os.path.realpath`, strictly *beneath* — never exactly onto
     — a `readonly_scratch_prefixes` entry (`rm -rf /tmp/claude-501` denies).
@@ -94,7 +94,35 @@ Key invariants:
     `readonly_scratch_prefixes` (which requires resolving strictly *beneath*
     a prefix, a check `/dev/null` itself can never satisfy); a genuinely
     mutating command redirected to `/dev/null` still denies on its residual
-    `$mutating_bash_patterns` match (#75; `zprof-guard.py:1278-1297`).
+    `$mutating_bash_patterns` match (#75; `zprof-guard.py:1356-1375`).
+  - A fully standalone `ln` (symlink/hardlink) matched no
+    `$mutating_bash_patterns` entry at all and carried no path awareness in
+    `readonly_scratch_only` — a read-only role could `ln -s
+    cli/internal/score/config.go /tmp/claude-x/link` and mutate the repo
+    file through the alias, bypassing the guard entirely (#73). Closed on
+    two layers: `telemetry.yaml` gained a dedicated char-class pattern,
+    `(?:^|[^\w.-])ln(?:$|[^\w.-])` (kept separate from the `mv|cp|rm|touch|
+    mkdir` family — a plain `\bln\b` false-positives on `ls -ln`/`sed -n
+    1,5p ln.go`/`--ln`; a negative-lookahead form was rejected because Go
+    RE2, `cli/internal/score/config.go`, silently drops any pattern
+    containing lookaround at compile time instead of erroring), mirrored in
+    `defaultMutatingBash` for `zprof score`; and `ln` joined
+    `_FILE_OP_COMMANDS` (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`/`ln`,
+    `zprof-guard.py:1024`) with a dedicated `_ln_operands` extractor
+    (`zprof-guard.py:1093-1160`) feeding the same per-operand scratch check
+    the other five file-ops already use. Unlike `cp` (only its write
+    destination is checked, since the source is merely read), `_ln_operands`
+    collects *every* positional — TARGET *and* LINK_NAME, plus a `-t DIR`/
+    `--target-directory=DIR` — because `ln` makes TARGET and LINK_NAME alias
+    the same inode; a write through either resolved path later mutates the
+    same file, so both must resolve strictly beneath
+    `readonly_scratch_prefixes` or the whole invocation denies
+    (`zprof-guard.py:1339-1340`). Known, intentional gap: a relative symlink
+    target reached only through a prior `cd` into scratch (`cd
+    /tmp/claude-x && ln -s ../../cli/target.py link`) still fail-closed
+    denies — `_ln_operands` doesn't resolve relative operands through a
+    cwd-shifted context, the same design choice `readonly_scratch_only`
+    already makes for every other file-op (#67 P1-1).
   - `merge_preflight` (#25) is also fail-open, but through a third mechanism,
     distinct from both #24 patterns: any `gh` failure (non-zero exit, timeout,
     bad JSON, unexpected shape) calls `_note_unverified`, not
@@ -445,7 +473,7 @@ cannot be purely read-only; `merge_roles` is `[pr-shepherd]` alone.
 ### Context evaluators (`CONTEXTS`, #24/#25/#67)
 
 `CONTEXTS` (`zprof-guard.py:29-35`) is populated near the bottom of the module
-(`zprof-guard.py:1305-1313`) with seven evaluators, each backing one or more
+(`zprof-guard.py:1403-1411`) with seven evaluators, each backing one or more
 `guard.yaml` rules (ADR-0005, ADR-0006; `readonly_scratch_only` follows the
 ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 
@@ -455,7 +483,7 @@ ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 | `linked_worktree` | `stash_in_worktree` | `git rev-parse --git-dir --git-common-dir`, both resolved relative to the command's working dir (not the guard process's cwd) via `os.path.realpath`, differ (`zprof-guard.py:370-393`) |
 | `write_outside_repo` | `write_outside_repo` | the realpath'd `file_path`/`notebook_path` target matches none of `allow_write_prefixes` (glob-aware, `$VAR`/`~` expanded) and isn't inside a linked worktree of this repo (`git rev-parse --git-common-dir`, run from the nearest existing ancestor dir, resolves to `$CLAUDE_PROJECT_DIR/.git`) (`zprof-guard.py:463-508`) |
 | `branch_pr_merged` | `remote_ref_delete_unmerged` (`roles: [pr-shepherd]`) | a parsed `git push --delete`/`:<ref>` names exactly one branch, and `gh pr list --head <name> --state merged --json number` returns no merged PR (`zprof-guard.py:515-581`) |
-| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every segment is a recognized file-op (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, no link-creating `cp` flag, every operand an absolute path resolving strictly beneath a dedicated `readonly_scratch_prefixes` entry), the literal leading `cd`, or a redirect-bearing segment whose target clears the same check (`/dev/null` always clears it as a safe discard sink, #75 — see the AI Context bullet above) — and, after removing only the fully-approved (file-op) segments, no leftover text still matches `$mutating_bash_patterns`. A segment that's neither a file-op, redirect-bearing, nor the leading `cd`, or any operator outside an explicit allow-list, denies outright regardless of path — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1093-1302`) |
+| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every segment is a recognized file-op (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`/`ln`, no link-creating `cp` flag, every operand an absolute path resolving strictly beneath a dedicated `readonly_scratch_prefixes` entry — `ln` checks both TARGET and LINK_NAME/`-t DIR` via `_ln_operands`, #73), the literal leading `cd`, or a redirect-bearing segment whose target clears the same check (`/dev/null` always clears it as a safe discard sink, #75 — see the AI Context bullet above) — and, after removing only the fully-approved (file-op) segments, no leftover text still matches `$mutating_bash_patterns`. A segment that's neither a file-op, redirect-bearing, nor the leading `cd`, or any operator outside an explicit allow-list, denies outright regardless of path — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1163-1400`) |
 
 All external calls go through `_run` (`zprof-guard.py:291-317`) — a `subprocess.run`
 wrapper with a timeout (`_GIT_TIMEOUT` 3s, `_GH_TIMEOUT` 10s) and

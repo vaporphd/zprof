@@ -87,6 +87,20 @@ mutating_bash_patterns:
   - "\\bsed\\s+-i\\b"
   - "\\btee\\b"
   - "\\b(mv|cp|rm|touch|mkdir)\\b"
+  # `ln` (symlink/hardlink) kept as its own pattern, not folded into the
+  # mv|cp|rm|touch|mkdir family above: `\bln\b` (the issue #73's suggested
+  # direction) false-positives on `ls -ln`, `sed -n 1,5p ln.go`, `python3
+  # x.py --ln` -- a bare `\b` matches between a letter and any non-word char
+  # including `-`/`.`. A negative-lookahead form (`ln(?!...)`) was also
+  # tried and rejected: Go RE2 (`cli/internal/score/config.go`) silently
+  # drops any pattern containing lookaround at compile time instead of
+  # erroring, so the pattern would vanish from `zprof score` without
+  # warning. This char-class form matches standalone `ln`/`/bin/ln`/`echo x;
+  # ln a b` while sparing `ls -ln`/`readlink`/`ln.go`/`--ln` (residual
+  # false-positive on e.g. `grep -n ln README.md` accepted -- same class as
+  # the existing `mv|cp|rm` family's own `grep -n rm README.md`, out of
+  # scope here, #73).
+  - "(?:^|[^\\w.-])ln(?:$|[^\\w.-])"
   # Trailing `(?![\w-])` instead of a plain `\b`: a bare `\b` matches between
   # a letter and `-`, so `git merge-base`/`commit-tree`/`checkout-index`
   # matched as `merge`/`commit`/`checkout` and denied a read-only role's

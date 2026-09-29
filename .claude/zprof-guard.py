@@ -1021,7 +1021,7 @@ _DANGEROUS_CONSTRUCT_RE = re.compile(
 _SEGMENT_SEPARATOR_TOKENS = frozenset({";", "&&", "||", "|"})
 _ALLOWED_OPERATOR_TOKENS = _SEGMENT_SEPARATOR_TOKENS | {">", ">>"}
 _CD_LIKE_COMMANDS = frozenset({"cd", "pushd", "popd"})
-_FILE_OP_COMMANDS = frozenset({"mkdir", "touch", "mv", "cp", "rm", "tee"})
+_FILE_OP_COMMANDS = frozenset({"mkdir", "touch", "mv", "cp", "rm", "tee", "ln"})
 _UNSAFE_OPERAND_CHARS = frozenset("$~*?[")
 _CP_LINK_LONG_FLAGS = frozenset({"--link", "--symbolic-link"})
 
@@ -1090,6 +1090,76 @@ def _cp_has_link_flag(args: list[str]) -> bool:
     return False
 
 
+def _ln_operands(args: list[str]) -> list[str]:
+    """`ln`'s full operand set: every positional (TARGET(s) plus the
+    LINK_NAME/destination directory) plus `-t DIR`/`--target-directory=DIR`
+    (`-t`/`--target-directory=` parsing mirrors `_cp_destination`). Unlike
+    `cp`, where only the write destination is checked because the source is
+    merely read, `ln` makes TARGET and LINK_NAME alias each other -- a write
+    through either resolved path later mutates the same inode/target, so
+    every operand must resolve under scratch or the whole invocation denies
+    (#73). Standalone `ln` matched no `mutating_bash_patterns` entry at all
+    before #73 (no path awareness, no denial whatsoever); this list feeds
+    the same per-operand scratch check the other `_FILE_OP_COMMANDS` already
+    use below, including the same relative-operand and unsafe-char denials
+    -- no separate resolution-from-link-dirname special case is added since
+    no other command in this evaluator has one to mirror.
+
+    GNU `ln` also accepts the `-t DIR` value glued onto the flag itself
+    (`-tDIR`), inside a short-option cluster (`-stDIR`), or via an
+    abbreviated/alternate long-flag spelling (`--target=DIR`, `--ta=DIR`,
+    getopt_long prefix matching) -- none of those shapes match the two
+    exact forms parsed above, so the loop used to silently drop them like
+    any other unrecognized flag, letting the real destination escape every
+    scratch check below (#73 follow-up, reviewer I-1). Rather than
+    replicating GNU getopt's short-cluster/long-prefix matching exactly,
+    any token shaped like one of these ambiguous/unrecognized `-t`/`--t`
+    forms is fed back in as its own operand instead of being dropped: it
+    never starts with `/`, so the per-operand `os.path.isabs` check below
+    denies the whole invocation unconditionally -- fail-closed on the
+    unparsed form rather than guessing its exact semantics."""
+    target_dir = None
+    positionals: list[str] = []
+    ambiguous: list[str] = []
+    i = 0
+    n = len(args)
+    while i < n:
+        tok = args[i]
+        if tok == "-t" and i + 1 < n:
+            target_dir = args[i + 1]
+            i += 2
+            continue
+        if tok.startswith("--target-directory="):
+            target_dir = tok[len("--target-directory="):]
+            i += 1
+            continue
+        if tok.startswith("--t"):
+            # Any other `--t*` long flag: an abbreviated/alternate spelling
+            # of `--target-directory=` (`--target=`, `--ta=`, ...) or a
+            # bare `--target-directory` with no `=value` -- ambiguous
+            # either way, fail closed.
+            ambiguous.append(tok)
+            i += 1
+            continue
+        if tok.startswith("-") and not tok.startswith("--") and tok != "-t" and "t" in tok[1:]:
+            # A short-option cluster with the target letter glued into the
+            # same token (`-tDIR`, `-stDIR`, ...): GNU short-option parsing
+            # treats everything after `t` as `-t`'s argument once the
+            # cluster reaches it, so the target value never surfaces as its
+            # own token here -- fail closed instead of guessing.
+            ambiguous.append(tok)
+            i += 1
+            continue
+        if not tok.startswith("-"):
+            positionals.append(tok)
+        i += 1
+    operands = list(positionals)
+    if target_dir is not None:
+        operands.append(target_dir)
+    operands.extend(ambiguous)
+    return operands
+
+
 def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str | None":
     """`readonly_scratch_only` (rule `readonly_mutation`, ADR-0005 context
     evaluators, issue #67; hardened against reviewer-found fail-open gaps).
@@ -1100,22 +1170,27 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
     exactly like a repo-mutating one (#31/#67). This evaluator narrows that
     to a strict allow-list, fail-closed on anything it doesn't recognize: the
     rule stands down only when every non-empty segment is either (a) a
-    recognized file-op command (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`) whose
-    every extracted operand is an absolute path resolving strictly *beneath*
-    a `readonly_scratch_prefixes` entry, (b) the literal leading `cd`
-    (segment 0, token 0 -- nothing else about it is inspected), or (c) a
-    segment with no recognized file-op command that still carries a bare
-    `>`/`>>` redirect, whose target is checked the same way (plus one
-    exemption: `/dev/null` always stands down as a safe discard sink, #75)
-    while its non-redirect tokens stay visible to the residual
-    `rule["match"]` re-check (so e.g. `git commit -m x > /tmp/claude-x/log`
-    still denies on the `git commit` residual even though the redirect
-    target is scratch). Any other segment -- an entirely unrecognized
-    command with no redirect at all (`ln -s ... cli/target.py`), a `cp`
-    flag that creates a link instead of copying, a `cd`/`pushd`/`popd`
-    anywhere but that one leading position, a relative operand, or a shell
-    operator this evaluator doesn't explicitly allow (subshell `(`/`)`,
-    backgrounding `&`, `|&`, `&>`, `>|`, ...) -- denies outright.
+    recognized file-op command (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`/`ln`)
+    whose every extracted operand is an absolute path resolving strictly
+    *beneath* a `readonly_scratch_prefixes` entry -- `ln` checks BOTH
+    TARGET and LINK_NAME/`-t DIR` this way (`_ln_operands`), unlike `cp`
+    which only checks its write destination, because a symlink/hardlink
+    aliases whichever path becomes TARGET into wherever LINK_NAME lives and
+    a write through either resolved path later mutates the same file (#73)
+    --, (b) the literal leading `cd` (segment 0, token 0 -- nothing else
+    about it is inspected), or (c) a segment with no recognized file-op
+    command that still carries a bare `>`/`>>` redirect, whose target is
+    checked the same way (plus one exemption: `/dev/null` always stands
+    down as a safe discard sink, #75) while its non-redirect tokens stay
+    visible to the residual `rule["match"]` re-check (so e.g. `git commit -m
+    x > /tmp/claude-x/log` still denies on the `git commit` residual even
+    though the redirect target is scratch). Any other segment -- an
+    entirely unrecognized command with no redirect at all (`curl -o
+    cli/target.py ...`), a `cp` flag that creates a link instead of
+    copying, a `cd`/`pushd`/`popd` anywhere but that one leading position, a
+    relative operand, or a shell operator this evaluator doesn't explicitly
+    allow (subshell `(`/`)`, backgrounding `&`, `|&`, `&>`, `>|`, ...) --
+    denies outright.
 
     `readonly_scratch_prefixes` (guard.yaml) is deliberately narrower than
     `allow_write_prefixes`: no `$CLAUDE_PROJECT_DIR`, no persistent
@@ -1261,6 +1336,8 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
                     if _cp_has_link_flag(command_args):
                         return True  # #67 AC3: link/symlink flag -- deny regardless of destination
                     operands = _cp_destination(command_args)
+                elif name == "ln":
+                    operands = _ln_operands(command_args)
                 else:
                     operands = [a for a in command_args if not a.startswith("-")]
 
