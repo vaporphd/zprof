@@ -47,5 +47,5 @@
 - [x] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23 — PR #72
 - [x] fix(base): guard — readonly_mutation не учитывает allow_write_prefixes для мутирующих Bash (#67) — follow-up к #31 — PR #74
 - [x] chore(base): деплой-копия guard в zprof — трекать .claude/zprof-guard.py, игнорировать guard.json (#59) — follow-up к #28
-- [x] fix(base): guard — readonly_mutation не видит standalone `ln` (symlink/hardlink bypass) (#73) — follow-up к #67 — PR N
+- [x] fix(base): guard — readonly_mutation не видит standalone `ln` (symlink/hardlink bypass) (#73) — follow-up к #67 — PR #78
 - [x] fix(base): guard — readonly_mutation ложный deny на read-only команде reviewer (run #59) (#75) — follow-up к #67 — PR N
