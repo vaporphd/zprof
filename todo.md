@@ -44,5 +44,5 @@
 - [x] feat(base): guard — строка доктрины, контракты pr-shepherd/task-runner, overlay guard.yaml (#30) — depends: #28 — PR #65
 - [x] fix(cli): zprof doctor без .zprof.yaml — режим telemetry-only (#64) — перед #31
 - [x] test(base): shakedown — ноль ложных deny guard на штатном маршруте (#31) — depends: #24, #25, #26, #27, #28, #29, #30
-- [ ] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23
+- [x] fix(base): guard — target ещё может утечь секрет через env/export/quoted value (#47) — follow-up к #23 — PR N
 - [ ] fix(base): guard — readonly_mutation не учитывает allow_write_prefixes для мутирующих Bash (#67) — follow-up к #31
