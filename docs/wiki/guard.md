@@ -26,7 +26,7 @@ Key invariants:
     `merge_preflight`, `pr_create_gate` (#25) plus `readonly_scratch_only` (#67)
     — covering §5.2/§5.3/§5.4/§5.5/§5.6. A `context` name still not registered
     makes the rule never fire (not deny, not skip-with-warning) (ADR-0004 D4,
-    ADR-0005; `zprof-guard.py:29-35, 1222-1230`).
+    ADR-0005; `zprof-guard.py:29-35, 1305-1313`).
   - Three of the four #24 evaluators (`head_on_remote`, `linked_worktree`,
     `write_outside_repo`) are fail-open: a `git` call that errors or times out is
     recorded as a `context_error` journal event (`decision: null`) and the evaluator
@@ -35,26 +35,49 @@ Key invariants:
     never emits `context_error`, because an uncaught exception here would otherwise
     escape into `main()`'s outer fail-open handler and *allow* an irreversible remote
     branch deletion (ADR-0005 E2/E6; `zprof-guard.py:330-338, 515, 579-581`).
-  - `readonly_mutation`'s `context: readonly_scratch_only` (#67) is the guard's
-    second fail-closed evaluator, mirroring `branch_pr_merged`'s ADR-0005 E6
-    pattern (`try/except Exception: return True`) rather than the #24 fail-open
-    default: it tokenizes the raw `tool_input["command"]` (not the
-    whitespace-normalized `call["command"]`), denies outright on a dangerous
-    construct (`$(`, backticks, `<(`/`>(`, a heredoc `<<`, `eval`/`xargs`/`sh
-    -c`/`bash -c`), a non-leading `cd`, unbalanced shell quoting, or any
-    extracted path operand containing `$`/`~`/`*`/`?`/`[`, and otherwise only
-    stands the `readonly_mutation` rule down (`return None`) when every
-    `mkdir`/`touch`/`mv`/`cp`/`rm`/`tee` argument and bare `>`/`>>` redirect
-    target resolves under an `allow_write_prefixes` entry other than
-    `$CLAUDE_PROJECT_DIR` **and** no leftover text (after removing those
-    approved segments) still matches the rule's own `$mutating_bash_patterns`
-    — so `mkdir -p /tmp/claude-x/a && git stash` still denies. It never calls
+  - `readonly_mutation`'s `context: readonly_scratch_only` (#67, hardened
+    against reviewer-found fail-open gaps in a second round on the same
+    issue) is the guard's second fail-closed evaluator, mirroring
+    `branch_pr_merged`'s ADR-0005 E6 pattern (`try/except Exception: return
+    True`) rather than the #24 fail-open default: it tokenizes the raw
+    `tool_input["command"]` (not the whitespace-normalized `call["command"]`),
+    denies outright on a dangerous construct (`$(`, backticks, `<(`/`>(`, a
+    heredoc `<<`, `eval`/`xargs`/`sh -c`/`bash -c`), any shell operator not on
+    an explicit allow-list (`;`, `&&`, `||`, `|`, `>`, `>>` — a subshell
+    `(`/`)`, `&`, `|&`, `&>`, `>|` all deny), a `cd`/`pushd`/`popd` anywhere
+    but the first token of the first segment, unbalanced shell quoting, or any
+    extracted path operand containing `$`/`~`/`*`/`?`/`[`. Per remaining
+    segment: a segment is approved (excluded from the residual match
+    re-check) only when its leading command is a recognized file-op
+    (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`) — a redirect-bearing segment whose
+    leading command is *not* one of those six still exposes its non-redirect
+    tokens to the residual check, and a segment that is neither a recognized
+    file-op, redirect-bearing, nor the leading `cd` denies outright
+    (deny-by-default, closing a chained-`ln`-style bypass; a fully standalone
+    `ln` that never matches `readonly_mutation`'s own pattern at all is a
+    separate, tracked, non-blocking gap, #73). `cp` additionally denies
+    outright on any link-creating flag (`-l`/`-s`/`--link`/`--symbolic-link`,
+    or a short-flag cluster containing `l`/`s`) regardless of destination.
+    Every extracted operand must be `os.path.isabs` (relative denies) and
+    resolve, via `os.path.realpath`, strictly *beneath* — never exactly onto
+    — a `readonly_scratch_prefixes` entry (`rm -rf /tmp/claude-501` denies).
+    `readonly_scratch_prefixes` is a dedicated, narrower `guard.yaml` key, not
+    `allow_write_prefixes` minus `$CLAUDE_PROJECT_DIR`: it covers only the
+    ephemeral scratch temp-dir globs and deliberately excludes both
+    `$CLAUDE_PROJECT_DIR` and the persistent `~/.claude/projects/*/memory/`/
+    `~/.claude/plans/` entries `allow_write_prefixes` still carries for
+    `write_outside_repo`; a missing/malformed `readonly_scratch_prefixes`
+    fails closed. Only once every segment clears these checks does removing
+    the approved segments and re-running the rule's own
+    `$mutating_bash_patterns` against what's left decide the outcome — so
+    `mkdir -p /tmp/claude-x/a && git stash` still denies. It never calls
     `_run`/`git`, so it never emits `context_error`. The git-mutation pattern
     family inside `$mutating_bash_patterns` (`git commit`/`checkout`/`stash`/
     `reset`/`apply`/`cherry-pick`/`merge`/`rebase`, …) has no recognized
     file-op/redirect target at all, so it always falls through to the deny
     path unchanged — only the six file-op commands plus redirects gained path
-    awareness, not the whole rule (`zprof-guard.py:1060-1219`).
+    awareness, not the whole rule (`zprof-guard.py:1093-1302`, helpers
+    `:1018-1091` and `:447-485, 615-634`).
   - `merge_preflight` (#25) is also fail-open, but through a third mechanism,
     distinct from both #24 patterns: any `gh` failure (non-zero exit, timeout,
     bad JSON, unexpected shape) calls `_note_unverified`, not
@@ -258,11 +281,28 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   `..second_segment_repo_internal_denies` for a chained `;`-separated
   command, `..whitespace_variants_allow`, and
   `..applies_to_every_readonly_role`/`..pr_shepherd_unaffected` widening
-  role coverage from spot checks to all 12 `readonly_roles`) — `python3 -m
-  pytest profiles/base/tests/test_guard.py -q` → 180 passed, the four
-  guard test files together → 342 passed, `profiles/base/tests/` as a
-  whole → 576 passed (verified 2026-09-29,
-  `fix/guard-readonly-mutation-scratch-67`@`6d84333`).
+  role coverage from spot checks to all 12 `readonly_roles`). A second,
+  security-hardening round on the same issue (`2a5ea9b`) closes the
+  fail-open gaps a reviewer found in that first pass — the redirect/
+  unrecognized-command residual-match gap, the standalone-link-command
+  deny-by-default, the `cp` link-flag deny, the absolute-operand
+  requirement, the operator allow-list, the leading-`cd`-only rule, the
+  dedicated `readonly_scratch_prefixes` key, and the strictly-beneath-prefix
+  check (see the AI Context bullet and "Context evaluators" above for the
+  mechanism) — and adds 9 more test functions:
+  `..redirect_does_not_approve_whole_segment`,
+  `..unrecognized_command_denies`, `..cp_link_flag_denies_even_in_scratch`,
+  `..relative_operand_after_leading_cd_denies`,
+  `..subshell_and_background_operators_deny` (parametrized),
+  `..excludes_persistent_claude_plans_dir`,
+  `..persistent_dirs_not_in_scratch_prefixes`, `..exact_prefix_root_denies`,
+  `..beneath_prefix_root_still_allows` — plus tightening the one pre-existing
+  allow-case (`echo hi | tee ...`) that the stricter posture now correctly
+  denies (an unrecognized `echo` segment with no redirect of its own). `python3
+  -m pytest profiles/base/tests/test_guard.py -q` → 190 passed, the four guard
+  test files together → 352 passed, `profiles/base/tests/` as a whole → 586
+  passed (verified 2026-09-29,
+  `fix/guard-readonly-mutation-scratch-67`@`2a5ea9b`).
 
 ---
 
@@ -354,9 +394,10 @@ against a per-tool "subject" — normalized Bash command, or `file_path`/`notebo
 for Edit/Write/MultiEdit/NotebookEdit), `context` (name of a `CONTEXTS` evaluator),
 `roles`/`not_roles` (role allow/deny lists), `reason` (Russian, no trailing period or
 "don't work around" suffix — the script appends that). Top level: `version` (must be
-`1`), `readonly_roles`, `merge_roles`, `allow_write_prefixes`, `permissions_deny`
-(a `settings.local.json` belt-and-suspenders list, not read by this script),
-`exempt_roles` (map `rule_id → [roles]`, empty in #23), `rules`.
+`1`), `readonly_roles`, `merge_roles`, `allow_write_prefixes`, `readonly_scratch_prefixes`
+(#67 — a dedicated, narrower list for `readonly_scratch_only` alone, see below),
+`permissions_deny` (a `settings.local.json` belt-and-suspenders list, not read by this
+script), `exempt_roles` (map `rule_id → [roles]`, empty in #23), `rules`.
 
 `guard.yaml` is *implementer-authored source*, not what the script reads: `$readonly_roles`,
 `$merge_roles`, `$mutating_bash_patterns` are bare scalars that `zprof apply` (#28) must
@@ -375,7 +416,7 @@ cannot be purely read-only; `merge_roles` is `[pr-shepherd]` alone.
 ### Context evaluators (`CONTEXTS`, #24/#25/#67)
 
 `CONTEXTS` (`zprof-guard.py:29-35`) is populated near the bottom of the module
-(`zprof-guard.py:1222-1230`) with seven evaluators, each backing one or more
+(`zprof-guard.py:1305-1313`) with seven evaluators, each backing one or more
 `guard.yaml` rules (ADR-0005, ADR-0006; `readonly_scratch_only` follows the
 ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 
@@ -385,7 +426,7 @@ ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 | `linked_worktree` | `stash_in_worktree` | `git rev-parse --git-dir --git-common-dir`, both resolved relative to the command's working dir (not the guard process's cwd) via `os.path.realpath`, differ (`zprof-guard.py:370-393`) |
 | `write_outside_repo` | `write_outside_repo` | the realpath'd `file_path`/`notebook_path` target matches none of `allow_write_prefixes` (glob-aware, `$VAR`/`~` expanded) and isn't inside a linked worktree of this repo (`git rev-parse --git-common-dir`, run from the nearest existing ancestor dir, resolves to `$CLAUDE_PROJECT_DIR/.git`) (`zprof-guard.py:463-508`) |
 | `branch_pr_merged` | `remote_ref_delete_unmerged` (`roles: [pr-shepherd]`) | a parsed `git push --delete`/`:<ref>` names exactly one branch, and `gh pr list --head <name> --state merged --json number` returns no merged PR (`zprof-guard.py:515-581`) |
-| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every `mkdir`/`touch`/`mv`/`cp`/`rm`/`tee` operand and bare `>`/`>>` redirect target resolves under an `allow_write_prefixes` entry other than `$CLAUDE_PROJECT_DIR`, and no leftover text still matches `$mutating_bash_patterns` once those approved segments are removed — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1060-1219`) |
+| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every segment is a recognized file-op (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, no link-creating `cp` flag, every operand an absolute path resolving strictly beneath a dedicated `readonly_scratch_prefixes` entry), the literal leading `cd`, or a redirect-bearing segment whose target clears the same check — and, after removing only the fully-approved (file-op) segments, no leftover text still matches `$mutating_bash_patterns`. A segment that's neither a file-op, redirect-bearing, nor the leading `cd`, or any operator outside an explicit allow-list, denies outright regardless of path — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1093-1302`) |
 
 All external calls go through `_run` (`zprof-guard.py:291-317`) — a `subprocess.run`
 wrapper with a timeout (`_GIT_TIMEOUT` 3s, `_GH_TIMEOUT` 10s) and
@@ -403,10 +444,11 @@ an unrelated tool call). `branch_pr_merged` and `readonly_scratch_only` are the 
 fail-closed evaluators (ADR-0005 E6 for the former; the latter mirrors that precedent
 for #67): both wrap their entire body in `try/except Exception: return True`, and
 neither calls `_note_context_error` — any failure (unparseable command, non-zero/timeout
-`gh` for `branch_pr_merged`; unbalanced quoting, a non-list `allow_write_prefixes`, or
-any other internal error for `readonly_scratch_only`) denies rather than silently
-allowing an irreversible remote branch deletion, or a read-only role's mutating command,
-respectively (`zprof-guard.py:515, 579-581`; `zprof-guard.py:1218-1219`).
+`gh` for `branch_pr_merged`; unbalanced quoting, an unrecognized operator, a relative or
+unsafe-char operand, a non-list `readonly_scratch_prefixes`, or any other internal error
+for `readonly_scratch_only`) denies rather than silently allowing an irreversible remote
+branch deletion, or a read-only role's mutating command, respectively (`zprof-guard.py:515,
+579-581`; `zprof-guard.py:1301-1302`).
 
 **`context_error` journal event.** `pre_tool()` flushes `call["context_errors"]` to
 `.agentlog/guard-events.jsonl` in a `finally` block after `evaluate_rules` (so a later
