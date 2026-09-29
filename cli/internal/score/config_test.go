@@ -30,10 +30,10 @@ func TestDefaults_WeightsSumTo100(t *testing.T) {
 
 func TestDefaults_MutatingBashExcludesBuildAndTest(t *testing.T) {
 	c := Defaults()
-	for _, cmd := range []string{"swift test --package-path Packages/Core", "cargo build --release", "go test ./...", "pytest -q", "make test", "git status", "cat foo.txt"} {
+	for _, cmd := range []string{"swift test --package-path Packages/Core", "cargo build --release", "go test ./...", "pytest -q", "make test", "git status", "cat foo.txt", "ls -ln"} {
 		require.False(t, c.IsMutatingBash(cmd), cmd)
 	}
-	for _, cmd := range []string{"cat > f.txt <<'EOF'", "sed -i 's/a/b/' f", "git commit -m x", "rm -rf build", "xcodegen generate", "echo hi | tee out.log"} {
+	for _, cmd := range []string{"cat > f.txt <<'EOF'", "sed -i 's/a/b/' f", "git commit -m x", "rm -rf build", "xcodegen generate", "echo hi | tee out.log", "ln -s a b"} {
 		require.True(t, c.IsMutatingBash(cmd), cmd)
 	}
 }

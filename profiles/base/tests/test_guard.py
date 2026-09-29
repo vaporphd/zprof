@@ -1471,16 +1471,15 @@ def test_readonly_scratch_only_redirect_does_not_approve_whole_segment(tmp_path)
 def test_readonly_scratch_only_unrecognized_command_denies(tmp_path):
     """AC2 (#67 P0-2): an entirely unrecognized command with no redirect at
     all (not in `_FILE_OP_COMMANDS`, no `>`/`>>`) must deny outright rather
-    than being silently ignored -- closes the `ln`-style hardlink/symlink
-    bypass even though `ln` isn't in `$mutating_bash_patterns` either.
-    Chained after a scratch-safe `mkdir` so `readonly_mutation`'s own
-    `match` gate fires at all (a bare `ln ...` alone never matches
-    `$mutating_bash_patterns` and so never even reaches this evaluator --
-    that pattern-list gap is the separate, out-of-scope P2 the reviewer
-    flagged); the real-world bypass this closes is exactly this chained
-    shape, where the first segment's approval used to leave the second one
-    silently unchecked."""
-    _readonly_deny(tmp_path, "mkdir -p /tmp/claude-x/a && ln -s /tmp/claude-x/a cli/target.py")
+    than being silently ignored. Chained after a scratch-safe `mkdir` so
+    `readonly_mutation`'s own `match` gate fires at all; the real-world
+    bypass this closes is exactly this chained shape, where the first
+    segment's approval used to leave the second one silently unchecked.
+    (`ln` used to be the concrete unrecognized-command example here, but
+    #73 made it a recognized file-op with its own dedicated scratch check
+    -- see the standalone `ln` tests further below -- so this now uses a
+    command that's still genuinely unrecognized.)"""
+    _readonly_deny(tmp_path, "mkdir -p /tmp/claude-x/a && curl -o cli/target.py https://example.com/x")
 
 
 def test_readonly_scratch_only_cp_link_flag_denies_even_in_scratch(tmp_path):
@@ -1673,3 +1672,49 @@ def test_readonly_mutation_baseline_deny_cases_unaffected_by_narrowing(tmp_path,
     relative-path write inside the repo must all still deny for a
     read-only role."""
     _readonly_deny(tmp_path, command, role="reviewer")
+
+
+# --- issue #73: standalone `ln` (symlink/hardlink) bypass -------------------
+#
+# `ln` matched no `mutating_bash_patterns` entry at all, so a standalone `ln
+# -s /tmp/claude-x/link cli/target.py` never even reached `readonly_mutation`
+# -- unlike the chained `mkdir ... && ln ...` shape already covered by
+# `test_readonly_scratch_only_unrecognized_command_denies` (#67), which only
+# denied because the *preceding* `mkdir` made `match` fire at all. #73 adds a
+# dedicated `mutating_bash_patterns` entry for `ln` and teaches
+# `_readonly_scratch_only` to treat it as a recognized file-op (`_ln_operands`),
+# checking every operand -- TARGET and LINK_NAME alike -- against scratch.
+
+def test_readonly_scratch_only_standalone_ln_symlink_bypass_denies(tmp_path):
+    """The exact standalone repro from #73: a bare `ln -s` with no preceding
+    scratch-safe command now matches `mutating_bash_patterns` on its own and
+    denies -- the link name (`cli/target.py`) resolves inside the repo."""
+    _readonly_deny(tmp_path, "ln -s /tmp/claude-x/link cli/target.py")
+
+
+def test_readonly_scratch_only_standalone_ln_hardlink_bypass_denies(tmp_path):
+    """Hardlink variant of the same bypass (#73): no `-s`, same repo-internal
+    link name -- must deny identically."""
+    _readonly_deny(tmp_path, "ln /tmp/claude-x/a cli/target.py")
+
+
+def test_readonly_scratch_only_ln_reversed_operands_denies(tmp_path):
+    """#73: the operand order matters the other way too -- TARGET pointing
+    at a repo file, with the newly-created LINK_NAME safely in scratch, must
+    still deny. A symlink landing in scratch that aliases a repo file lets a
+    later write through the link mutate the repo, exactly like `cp`'s own
+    link-flag check (#67 AC3) -- so `ln` checks TARGET and LINK_NAME with
+    the same weight, not just the freshly-created path."""
+    _readonly_deny(tmp_path, "ln -sf cli/target.py /tmp/claude-x/link")
+
+
+def test_readonly_scratch_only_ln_scratch_to_scratch_allows(tmp_path):
+    """#73 counterpart: confirms the fix didn't over-tighten -- a symlink
+    with both TARGET and LINK_NAME under scratch is a legitimate read-only
+    workflow command and must still allow."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("ln -s /tmp/claude-x/a /tmp/claude-x/b"),
+        role="bug-hunter", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
