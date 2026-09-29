@@ -21,11 +21,12 @@ Key invariants:
   - Rule evaluation order is fixed and cheap-first: `tools` → `roles` → `not_roles` →
     `exempt_roles` → `match` → `context`; first firing rule in list order wins, no rule
     ever produces `allow` (`zprof-guard.py:207-265`).
-  - `CONTEXTS` is populated with six evaluators as of #25 — `head_on_remote`,
+  - `CONTEXTS` is populated with seven evaluators as of #67 — `head_on_remote`,
     `linked_worktree`, `write_outside_repo`, `branch_pr_merged` (#24) plus
-    `merge_preflight`, `pr_create_gate` (#25) — covering §5.2/§5.3/§5.5/§5.6. A
-    `context` name still not registered makes the rule never fire (not deny, not
-    skip-with-warning) (ADR-0004 D4, ADR-0005; `zprof-guard.py:29-35, 1012-1019`).
+    `merge_preflight`, `pr_create_gate` (#25) plus `readonly_scratch_only` (#67)
+    — covering §5.2/§5.3/§5.4/§5.5/§5.6. A `context` name still not registered
+    makes the rule never fire (not deny, not skip-with-warning) (ADR-0004 D4,
+    ADR-0005; `zprof-guard.py:29-35, 1222-1230`).
   - Three of the four #24 evaluators (`head_on_remote`, `linked_worktree`,
     `write_outside_repo`) are fail-open: a `git` call that errors or times out is
     recorded as a `context_error` journal event (`decision: null`) and the evaluator
@@ -34,6 +35,26 @@ Key invariants:
     never emits `context_error`, because an uncaught exception here would otherwise
     escape into `main()`'s outer fail-open handler and *allow* an irreversible remote
     branch deletion (ADR-0005 E2/E6; `zprof-guard.py:330-338, 515, 579-581`).
+  - `readonly_mutation`'s `context: readonly_scratch_only` (#67) is the guard's
+    second fail-closed evaluator, mirroring `branch_pr_merged`'s ADR-0005 E6
+    pattern (`try/except Exception: return True`) rather than the #24 fail-open
+    default: it tokenizes the raw `tool_input["command"]` (not the
+    whitespace-normalized `call["command"]`), denies outright on a dangerous
+    construct (`$(`, backticks, `<(`/`>(`, a heredoc `<<`, `eval`/`xargs`/`sh
+    -c`/`bash -c`), a non-leading `cd`, unbalanced shell quoting, or any
+    extracted path operand containing `$`/`~`/`*`/`?`/`[`, and otherwise only
+    stands the `readonly_mutation` rule down (`return None`) when every
+    `mkdir`/`touch`/`mv`/`cp`/`rm`/`tee` argument and bare `>`/`>>` redirect
+    target resolves under an `allow_write_prefixes` entry other than
+    `$CLAUDE_PROJECT_DIR` **and** no leftover text (after removing those
+    approved segments) still matches the rule's own `$mutating_bash_patterns`
+    — so `mkdir -p /tmp/claude-x/a && git stash` still denies. It never calls
+    `_run`/`git`, so it never emits `context_error`. The git-mutation pattern
+    family inside `$mutating_bash_patterns` (`git commit`/`checkout`/`stash`/
+    `reset`/`apply`/`cherry-pick`/`merge`/`rebase`, …) has no recognized
+    file-op/redirect target at all, so it always falls through to the deny
+    path unchanged — only the six file-op commands plus redirects gained path
+    awareness, not the whole rule (`zprof-guard.py:1060-1219`).
   - `merge_preflight` (#25) is also fail-open, but through a third mechanism,
     distinct from both #24 patterns: any `gh` failure (non-zero exit, timeout,
     bad JSON, unexpected shape) calls `_note_unverified`, not
@@ -225,7 +246,23 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   `TestDiagnoseTelemetryOnlySkipsManifestGatedChecks` (asserts
   `checkTaskRunner` does *not* run against a fixture that would otherwise
   fail it, and that guard's checks still fire off the zero-value manifest)
-  in `cli/internal/doctor/diagnostics_test.go:113-186`.
+  in `cli/internal/doctor/diagnostics_test.go:113-186`. #67's
+  `readonly_scratch_only` evaluator adds 13 test functions to
+  `test_guard.py` across two commits — `a49e7b3` (allow/deny table cases,
+  the git-mutation-family-unaffected check, a fail-closed
+  `monkeypatch`-forced-exception case) and `6d84333` (independent
+  regression coverage: `..dotdot_traversal_escaping_scratch_denies`,
+  `..dotdot_traversal_staying_in_scratch_allows`,
+  `..dotdot_traversal_to_real_project_dir_denies` — `os.path.realpath`
+  collapsing `..` correctly in both directions —
+  `..second_segment_repo_internal_denies` for a chained `;`-separated
+  command, `..whitespace_variants_allow`, and
+  `..applies_to_every_readonly_role`/`..pr_shepherd_unaffected` widening
+  role coverage from spot checks to all 12 `readonly_roles`) — `python3 -m
+  pytest profiles/base/tests/test_guard.py -q` → 180 passed, the four
+  guard test files together → 342 passed, `profiles/base/tests/` as a
+  whole → 576 passed (verified 2026-09-29,
+  `fix/guard-readonly-mutation-scratch-67`@`6d84333`).
 
 ---
 
@@ -269,7 +306,7 @@ registered by ADR-0006. The subagent-stop `return_format` validator from #26 is
 | Group (spec §) | Rules | Status |
 |---|---|---|
 | §5.1 stop-list, no context | `force_push`, `admin_merge`, `no_verify_commit`, `no_verify_other`, `branch_force_delete`, `remote_ref_delete`, `tag_delete`, `publish`, `curl_pipe_sh` | **active** (#23) — plain `tools` + `match` regex, no `context`; `remote_ref_delete` additionally carries `not_roles: [pr-shepherd]` since #24 |
-| §5.4 read-only roles | `readonly_mutation` | **active** (#23) — `roles: $readonly_roles` + `match: $mutating_bash_patterns` |
+| §5.4 read-only roles | `readonly_mutation` | **active** (#23) — `roles: $readonly_roles` + `match: $mutating_bash_patterns`; path-aware since #67 via `context: readonly_scratch_only` |
 | §5.5 merge gate | `merge_role` | **active** (#23) — `not_roles: $merge_roles`, no `context` needed (the rule engine is generic; see ADR-0004 D3 "conscious deviation") |
 | §5.2 contextual stop-list | `rebase_published`, `amend_published`, `stash_in_worktree`, `remote_ref_delete_unmerged` | **active** (#24) — `context: head_on_remote`/`linked_worktree`/`branch_pr_merged` now registered ([#24](../../plan-2.md), ADR-0005) |
 | §5.3 write outside repo | `write_outside_repo` | **active** (#24) — `context: write_outside_repo` now registered ([#24](../../plan-2.md), ADR-0005) |
@@ -335,11 +372,12 @@ condition, not a supported input (see invariant above).
 `pr-shepherd` is deliberately excluded (ADR-0004 D6) — it stamps merge commits, so it
 cannot be purely read-only; `merge_roles` is `[pr-shepherd]` alone.
 
-### Context evaluators (`CONTEXTS`, #24/#25)
+### Context evaluators (`CONTEXTS`, #24/#25/#67)
 
 `CONTEXTS` (`zprof-guard.py:29-35`) is populated near the bottom of the module
-(`zprof-guard.py:1012-1019`) with six evaluators, each backing one or more
-`guard.yaml` rules (ADR-0005, ADR-0006):
+(`zprof-guard.py:1222-1230`) with seven evaluators, each backing one or more
+`guard.yaml` rules (ADR-0005, ADR-0006; `readonly_scratch_only` follows the
+ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 
 | Evaluator | Rule(s) | Fires when |
 |---|---|---|
@@ -347,22 +385,28 @@ cannot be purely read-only; `merge_roles` is `[pr-shepherd]` alone.
 | `linked_worktree` | `stash_in_worktree` | `git rev-parse --git-dir --git-common-dir`, both resolved relative to the command's working dir (not the guard process's cwd) via `os.path.realpath`, differ (`zprof-guard.py:370-393`) |
 | `write_outside_repo` | `write_outside_repo` | the realpath'd `file_path`/`notebook_path` target matches none of `allow_write_prefixes` (glob-aware, `$VAR`/`~` expanded) and isn't inside a linked worktree of this repo (`git rev-parse --git-common-dir`, run from the nearest existing ancestor dir, resolves to `$CLAUDE_PROJECT_DIR/.git`) (`zprof-guard.py:463-508`) |
 | `branch_pr_merged` | `remote_ref_delete_unmerged` (`roles: [pr-shepherd]`) | a parsed `git push --delete`/`:<ref>` names exactly one branch, and `gh pr list --head <name> --state merged --json number` returns no merged PR (`zprof-guard.py:515-581`) |
+| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every `mkdir`/`touch`/`mv`/`cp`/`rm`/`tee` operand and bare `>`/`>>` redirect target resolves under an `allow_write_prefixes` entry other than `$CLAUDE_PROJECT_DIR`, and no leftover text still matches `$mutating_bash_patterns` once those approved segments are removed — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1060-1219`) |
 
 All external calls go through `_run` (`zprof-guard.py:291-317`) — a `subprocess.run`
 wrapper with a timeout (`_GIT_TIMEOUT` 3s, `_GH_TIMEOUT` 10s) and
 `GIT_TERMINAL_PROMPT=0`/`GH_PROMPT_DISABLED=1`/`GIT_OPTIONAL_LOCKS=0` to prevent
 interactive hangs, that never raises: `(0, stdout)` on success, `(returncode, "")` on
-a non-zero exit, `(None, ExceptionClassName)` on timeout/`OSError`.
+a non-zero exit, `(None, ExceptionClassName)` on timeout/`OSError`. `readonly_scratch_only`
+never calls `_run` at all — no `git`/`gh` involved, only local `shlex` tokenizing and
+`os.path.realpath` — so it can never produce a `context_error` either way.
 
 **Fail-open vs. fail-closed.** `head_on_remote`, `linked_worktree` and
 `write_outside_repo` are fail-open: a `_run` error calls `_note_context_error`
 (`zprof-guard.py:330-338`), which accumulates a diagnostic on `call["context_errors"]`,
 and the evaluator returns `False` (does not fire — a broken evaluator must not block
-an unrelated tool call). `branch_pr_merged` is the one fail-closed evaluator
-(ADR-0005 E6): its entire body runs inside `try/except Exception: return True`, and it
-never calls `_note_context_error` — any failure (unparseable command, non-zero/timeout
-`gh`, malformed JSON, ambiguous/zero delete targets) denies rather than silently
-allowing an irreversible remote branch deletion (`zprof-guard.py:515, 579-581`).
+an unrelated tool call). `branch_pr_merged` and `readonly_scratch_only` are the two
+fail-closed evaluators (ADR-0005 E6 for the former; the latter mirrors that precedent
+for #67): both wrap their entire body in `try/except Exception: return True`, and
+neither calls `_note_context_error` — any failure (unparseable command, non-zero/timeout
+`gh` for `branch_pr_merged`; unbalanced quoting, a non-list `allow_write_prefixes`, or
+any other internal error for `readonly_scratch_only`) denies rather than silently
+allowing an irreversible remote branch deletion, or a read-only role's mutating command,
+respectively (`zprof-guard.py:515, 579-581`; `zprof-guard.py:1218-1219`).
 
 **`context_error` journal event.** `pre_tool()` flushes `call["context_errors"]` to
 `.agentlog/guard-events.jsonl` in a `finally` block after `evaluate_rules` (so a later
