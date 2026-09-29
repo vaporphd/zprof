@@ -157,6 +157,7 @@ def build_guard_config() -> dict:
             {"id": "readonly_mutation", "tools": ["Bash"],
              "roles": list(READONLY_ROLES),
              "match": list(MUTATING_BASH_PATTERNS),
+             "context": "readonly_scratch_only",
              "reason": "роль read-only: мутирующая команда запрещена контрактом"},
             {"id": "merge_role", "tools": ["Bash"],
              "match": [r'\bgh\s+pr\s+merge\b', r'\bgh\s+api\b.*/pulls/\d+/merge\b'],
@@ -1224,31 +1225,81 @@ def test_happy_path_pr_shepherd_merge_allows_with_clean_preflight(tmp_path, monk
     assert zprof_guard.pre_tool(payload) is None
 
 
-# --- confirmed false positive (issue #31 -> follow-up issue #67) ----------
+# --- fixed false positive (issue #31 -> #67) --------------------------------
 #
-# `readonly_mutation` (guard.yaml:112-116) matches `$mutating_bash_patterns`
-# (telemetry.yaml:85-93) on the full normalized command with no `context`,
-# so — unlike `write_outside_repo` (guard.yaml:107-110, evaluator
-# `_write_outside_repo` in zprof-guard.py:488-527) — it has no
-# `allow_write_prefixes` awareness. A read-only role creating a scratch
-# directory under an explicitly allowed prefix (`/tmp/claude-*`,
-# guard.yaml:15-16) is denied anyway, because `mkdir` alone trips
-# `\b(mv|cp|rm|touch|mkdir)\b` regardless of target path.
-#
-# This test documents CURRENT (buggy) behavior — it is green because the
-# assertion is "still denies today", not "should be allowed". Fix tracked
-# in issue #67; do not change this test to `assert out is None` without
-# also closing that issue.
-def test_readonly_mutation_mkdir_in_allow_write_prefix_denies_current_behavior(tmp_path):
+# `readonly_mutation` (guard.yaml:112-118) now carries `context:
+# readonly_scratch_only` (evaluator `_readonly_scratch_only` in
+# zprof-guard.py), which narrows the whole-command `$mutating_bash_patterns`
+# match down to real repo mutations: a read-only role's `mkdir`/`touch`/
+# `mv`/`cp`/`rm`/`tee`/redirect whose every path operand resolves under an
+# `allow_write_prefixes` scratch entry (never `$CLAUDE_PROJECT_DIR`) is now
+# allowed; anything else (repo-internal targets, the git-mutation family,
+# unparseable/dangerous constructs) still denies exactly as before.
+def test_readonly_mutation_mkdir_in_allow_write_prefix_allows(tmp_path):
     _write_config(tmp_path, build_guard_config())
     payload = _payload("Bash", _bash("mkdir -p /tmp/claude-sess123/repro"),
                         role="bug-hunter", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None
+
+
+READONLY_SCRATCH_ALLOW_CASES = [
+    "mkdir -p /tmp/claude-x/repro",
+    "cat foo > /tmp/claude-x/bar",             # bare redirect, not one of the six commands
+    "echo hi | tee /tmp/claude-x/log",         # pipe segment split; only the tee side writes
+]
+
+READONLY_SCRATCH_DENY_CASES = [
+    "mkdir -p cli/x",                            # repo-internal path
+    "mkdir -p /tmp/claude-x/a && git stash",     # residual git-mutation match after removal
+    "mkdir $HOME/x",                             # $-bearing operand, unsafe regardless of prefix
+    "cp /tmp/claude-x/a README.md",              # destination is repo-internal
+    "mv README.md /tmp/claude-x/",               # source repo-internal even though dest is scratch
+    'mkdir "/tmp/claude-x/unterminated',         # malformed shell quoting -- parse failure denies
+]
+
+
+@pytest.mark.parametrize("command", READONLY_SCRATCH_ALLOW_CASES)
+def test_readonly_scratch_only_allows_scratch_only_commands(tmp_path, command):
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="bug-hunter", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", READONLY_SCRATCH_DENY_CASES)
+def test_readonly_scratch_only_denies_non_scratch_commands(tmp_path, command):
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="bug-hunter", cwd=tmp_path)
     out = zprof_guard.pre_tool(payload)
-    assert out is not None, (
-        "mkdir under an allow_write_prefix scratch path is currently denied "
-        "for read-only roles (false positive, issue #67) -- if this now "
-        "allows, readonly_mutation gained path-awareness: update this test "
-        "and close #67 instead of deleting the assertion"
-    )
-    reason = out["hookSpecificOutput"]["permissionDecisionReason"]
-    assert reason.startswith("zprof guard [readonly_mutation]:")
+    assert out is not None, command
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:"), command
+
+
+def test_readonly_scratch_only_git_family_unaffected_for_reviewer(tmp_path):
+    """AC3: the git-mutation family inside `readonly_mutation` is explicitly
+    out of scope for #67's path extraction -- it must still always deny,
+    unaffected by the new evaluator."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash("git checkout -b x"), role="reviewer", cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:")
+
+
+def test_readonly_scratch_only_fail_closed_on_internal_exception(tmp_path, monkeypatch):
+    """Fail-closed (ADR-0005 E6 precedent, mirrored by `_readonly_scratch_only`'s
+    own `try/except Exception: return True`): an exception raised by a helper
+    it calls must still deny -- never silently allow -- even for a command
+    that would otherwise be a clean scratch-only allow."""
+    _write_config(tmp_path, build_guard_config())
+
+    def _boom(prefix, root):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(zprof_guard, "_prefix_segments", _boom)
+    payload = _payload("Bash", _bash("mkdir -p /tmp/claude-x/repro"), role="bug-hunter", cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:")

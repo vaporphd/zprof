@@ -108,11 +108,12 @@ rules:
     tools: [Edit, Write, MultiEdit, NotebookEdit]
     context: write_outside_repo      # match отсутствует — условие целиком в evaluator'е
     reason: "запись вне репозитория запрещена стоп-листом"
-  # --- §5.4 read-only роли — активно в #23 ---
+  # --- §5.4 read-only роли — активно в #23; path-aware с #67 ---
   - id: readonly_mutation
     tools: [Bash]
     roles: $readonly_roles
     match: $mutating_bash_patterns   # подставляет apply из telemetry.yaml
+    context: readonly_scratch_only   # #67: allow_write_prefixes-scratch не мутация репозитория
     reason: "роль read-only: мутирующая команда запрещена контрактом"
   # --- §5.5 merge-гейт — merge_role активен в #23 (движок общий, у правила нет context; ADR D3);
   # merge_preflight активно с #25 (ADR-0006) ---

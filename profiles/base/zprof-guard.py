@@ -1011,11 +1011,220 @@ def _pr_create_gate(call: dict, rule: dict, config: dict) -> "bool | str":
     return False
 
 
+# ---------------------------------------------------------------------------
+# `readonly_mutation` scratch-awareness (ADR-0005 context evaluators, #67)
+# ---------------------------------------------------------------------------
+
+_DANGEROUS_CONSTRUCT_RE = re.compile(
+    r'\$\(|`|<\(|>\(|<<|\beval\b|\bxargs\b|\bsh\s+-c\b|\bbash\s+-c\b'
+)
+_SEGMENT_SEPARATOR_TOKENS = frozenset({";", "&&", "||", "|"})
+_FILE_OP_COMMANDS = frozenset({"mkdir", "touch", "mv", "cp", "rm", "tee"})
+_UNSAFE_OPERAND_CHARS = frozenset("$~*?[")
+
+
+def _has_unsafe_operand_chars(token: str) -> bool:
+    """True if `token` contains a shell-expansion char shlex never expands
+    (`$~*?[`) -- such an operand could resolve to a path this evaluator never
+    actually checked, so it must deny outright regardless of prefix logic (#67)."""
+    return any(c in _UNSAFE_OPERAND_CHARS for c in token)
+
+
+def _cp_destination(args: list[str]) -> list[str]:
+    """`cp`'s write target(s): `-t DIR`/`--target-directory=DIR`, else the
+    last positional (`cp a b c dst` -- only `dst` is written; sources are
+    read-only, spec table for #67). Empty when there is no destination at all
+    (a malformed/argument-less `cp`)."""
+    target_dir = None
+    positionals: list[str] = []
+    i = 0
+    n = len(args)
+    while i < n:
+        tok = args[i]
+        if tok == "-t" and i + 1 < n:
+            target_dir = args[i + 1]
+            i += 2
+            continue
+        if tok.startswith("--target-directory="):
+            target_dir = tok[len("--target-directory="):]
+            i += 1
+            continue
+        if not tok.startswith("-"):
+            positionals.append(tok)
+        i += 1
+    if target_dir is not None:
+        return [target_dir]
+    return [positionals[-1]] if positionals else []
+
+
+def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str | None":
+    """`readonly_scratch_only` (rule `readonly_mutation`, ADR-0005 context
+    evaluators, issue #67).
+
+    `readonly_mutation` matches the whole-command `$mutating_bash_patterns`
+    family with no path awareness at all, so a read-only role's legitimate
+    scratch-directory command (`mkdir -p /tmp/claude-.../repro`) is denied
+    exactly like a repo-mutating one (#31/#67). This evaluator narrows that:
+    it lets the rule stand down only when every path operand of every
+    recognized file-op segment (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, plus a
+    bare `>`/`>>` redirect target) resolves under an `allow_write_prefixes`
+    entry other than `$CLAUDE_PROJECT_DIR` -- scratch, never repo-internal --
+    *and* nothing else in the command (notably the git-mutation pattern
+    family) still matches the rule's own `match` regexes once those approved
+    segments are conceptually removed.
+
+    Tokenizes the RAW `tool_input["command"]` (not the whitespace-collapsed
+    `call["command"]`) with the same `shlex.shlex(..., punctuation_chars=True)`
+    dialect as `_shell_tokens`, so shell operators (`;`, `&&`, `||`, `|`, `>`,
+    `>>`) surface as their own tokens -- `_target()`'s `shlex.split` is the
+    wrong shape here (it discards operators and keeps only two tokens, for
+    journal logging).
+
+    Denies outright (`True`, default `rule["reason"]`) on: a dangerous
+    construct anywhere in the command (`$(`, backtick, `<(`, `>(`, `eval`,
+    `xargs`, `sh -c`, `bash -c`, a heredoc marker `<<`); a `cd` in any
+    segment but the first (refuses to reason about a shifting cwd); unbalanced
+    shell quoting (`shlex` raising `ValueError` -- unlike `_target()`'s
+    journal-only use, "can't parse" must deny here, not "no target"); an
+    extracted operand containing `$`, `~`, `*`, `?` or `[` (shell-expanded,
+    shlex never expands it -- could smuggle a path past the prefix check);
+    or a command where nothing recognized fired at all (the git-mutation
+    family is explicitly out of scope for #67's path extraction -- it always
+    denies here, unchanged). Returns a `str` reason naming the resolved path
+    only for the "resolved outside scratch" deny (`_check_rule`'s
+    string-return contract); every other deny branch returns `True` so the
+    rule's own `reason` is used instead.
+
+    Wrapped in `try/except Exception: return True` -- fail-closed, mirrors
+    `_branch_pr_merged` (ADR-0005 E6): a bug here must deny a mutating
+    command for a read-only role, never fall through to `main()`'s outer
+    fail-open `except`.
+    """
+    try:
+        raw = call.get("tool_input", {}).get("command")
+        if not isinstance(raw, str) or not raw:
+            return True
+
+        cmd = raw.lstrip()
+        for prefix in _RTK_PREFIXES:
+            if cmd.startswith(prefix):
+                cmd = cmd[len(prefix):]
+                break
+
+        if _DANGEROUS_CONSTRUCT_RE.search(cmd):
+            return True
+
+        # Unquoted newlines are ordinary whitespace to shlex and simply
+        # vanish (no token at all) instead of becoming a separator token the
+        # way `;` does -- fold them in textually first so a multi-line
+        # command can't smuggle a second statement past the segment split.
+        cmd = cmd.replace("\r\n", "\n").replace("\n", ";")
+
+        try:
+            tokens = _shell_tokens(cmd)
+        except ValueError:
+            return True
+
+        segments: list[list[str]] = [[]]
+        for tok in tokens:
+            if tok in _SEGMENT_SEPARATOR_TOKENS:
+                segments.append([])
+            else:
+                segments[-1].append(tok)
+
+        for seg in segments[1:]:
+            if seg and seg[0] == "cd":
+                return True  # non-leading `cd` -- out of scope, deny (spec: simplest correct)
+
+        root = call.get("cwd") or call["root"]
+        prefixes = config.get("allow_write_prefixes")
+        if not isinstance(prefixes, list) or not all(isinstance(p, str) for p in prefixes):
+            return True
+        scratch_prefixes = [
+            p for p in prefixes
+            if p != "$CLAUDE_PROJECT_DIR" and not p.startswith("$CLAUDE_PROJECT_DIR/")
+        ]
+
+        def _under_scratch(real_path: str) -> bool:
+            rsegs = real_path.split("/")
+            for prefix in scratch_prefixes:
+                expanded = _prefix_segments(prefix, call["root"])
+                if expanded is None:
+                    continue
+                head_segs, tail = expanded
+                if _prefix_matches(head_segs, tail, rsegs):
+                    return True
+            return False
+
+        approved: set[int] = set()
+        recognized_any = False
+
+        for idx, seg in enumerate(segments):
+            if not seg:
+                continue
+            name = os.path.basename(seg[0])
+
+            redirect_targets: list[str] = []
+            skip: set[int] = set()
+            for i, tok in enumerate(seg):
+                if tok in (">", ">>") and i + 1 < len(seg):
+                    redirect_targets.append(seg[i + 1])
+                    skip.add(i)
+                    skip.add(i + 1)
+            command_args = [tok for i, tok in enumerate(seg) if i > 0 and i not in skip]
+
+            is_recognized = False
+            operands: list[str] = []
+            if name in _FILE_OP_COMMANDS:
+                is_recognized = True
+                if name == "cp":
+                    operands = _cp_destination(command_args)
+                else:
+                    operands = [a for a in command_args if not a.startswith("-")]
+            if redirect_targets:
+                is_recognized = True
+                operands = operands + redirect_targets
+
+            if not is_recognized:
+                continue
+            recognized_any = True
+
+            for operand in operands:
+                if _has_unsafe_operand_chars(operand):
+                    return True
+                path = operand if os.path.isabs(operand) else os.path.join(root, operand)
+                real = os.path.realpath(path)
+                if not _under_scratch(real):
+                    return (
+                        "роль read-only: мутирующая команда запрещена контрактом "
+                        f"(цель вне scratch: {real})"
+                    )
+
+            approved.add(idx)
+
+        if not recognized_any:
+            return True  # only the git-mutation family (or something unrecognized) fired
+
+        remaining = " ".join(
+            tok for idx, seg in enumerate(segments) if idx not in approved for tok in seg
+        )
+        match = rule.get("match")
+        if isinstance(match, list) and any(
+            isinstance(p, str) and re.search(p, remaining) for p in match
+        ):
+            return True
+
+        return None
+    except Exception:
+        return True
+
+
 CONTEXTS.update({
     "head_on_remote": _head_on_remote,
     "linked_worktree": _linked_worktree,
     "write_outside_repo": _write_outside_repo,
     "branch_pr_merged": _branch_pr_merged,
+    "readonly_scratch_only": _readonly_scratch_only,
     "merge_preflight": _merge_preflight,
     "pr_create_gate": _pr_create_gate,
 })
