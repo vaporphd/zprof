@@ -897,6 +897,60 @@ def test_deny_event_target_does_not_leak_leading_env_assignment_secret(tmp_path)
 
 
 # ---------------------------------------------------------------------------
+# #47 (follow-up to #23, P2): a non-leading assignment-shaped token — one
+# that follows `env`/`export`, or a `--flag=value` CLI argument — and a
+# quoted value with internal whitespace must not leak a secret fragment
+# into `target` either.
+# ---------------------------------------------------------------------------
+
+def test_target_masks_env_prefixed_assignment():
+    target = zprof_guard._target("Bash", {}, "env GH_TOKEN=ghp_x mytool sub arg")
+    assert "ghp_x" not in target
+    assert "env" in target
+    assert "GH_TOKEN=***" in target
+
+
+def test_target_masks_export_prefixed_assignment():
+    target = zprof_guard._target("Bash", {}, "export GH_TOKEN=ghp_x && mytool sub")
+    assert "ghp_x" not in target
+    assert "export" in target
+    assert "GH_TOKEN=***" in target
+
+
+def test_target_masks_flag_style_assignment():
+    target = zprof_guard._target("Bash", {}, "mytool --token=ghp_x sub")
+    assert "ghp_x" not in target
+    assert "mytool" in target
+    assert "--token=***" in target
+
+
+def test_target_quoted_value_with_space_does_not_leak():
+    target = zprof_guard._target("Bash", {}, 'GH_TOKEN="a b" mytool sub arg')
+    assert target is not None
+    assert "a b" not in target
+    assert "mytool" in target
+
+
+def test_target_quoted_value_with_multiple_spaces_does_not_leak_and_keeps_command():
+    target = zprof_guard._target("Bash", {}, 'GH_TOKEN="a  b  c" mytool sub')
+    assert target is not None
+    for fragment in ("a  b  c", "a b", "b c"):
+        assert fragment not in target
+    assert "mytool" in target
+
+
+def test_target_quoted_assignment_only_no_command_has_no_secret_fragment():
+    target = zprof_guard._target("Bash", {}, 'GH_TOKEN="a b"')
+    if target is not None:
+        assert "a b" not in target
+
+
+def test_target_unbalanced_quote_does_not_raise_and_has_no_secret_fragment():
+    target = zprof_guard._target("Bash", {}, 'GH_TOKEN="a b mytool')
+    assert target is None or "a b" not in target
+
+
+# ---------------------------------------------------------------------------
 # load_config: version/shape validation beyond malformed JSON
 # ---------------------------------------------------------------------------
 
