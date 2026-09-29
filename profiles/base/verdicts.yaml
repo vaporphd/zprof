@@ -97,6 +97,7 @@ roles:
     aligned:    {base: done,    action: next}
     support-ok: {base: done,    action: next}
     misaligned: {base: blocked, action: escalate}
+    skip:       {base: done,    action: next}   # docs/NORTH_STAR.md absent — issue #60, distinct from support-ok
   plan-reviewer:
     approved:         {base: done,   action: next}
     changes-required: {base: failed, action: "loop:planner"}

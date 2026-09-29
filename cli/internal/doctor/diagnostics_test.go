@@ -2065,3 +2065,90 @@ func TestDiagnoseIncludesGuardAndRoleResolutionChecks(t *testing.T) {
 	require.True(t, findIssue(issues, LevelWarn, "guard.json"))
 	require.True(t, findIssue(issues, LevelInfo, "role resolution unverified"))
 }
+
+// --- checkNorthStarGate: gate has nothing to check without docs/NORTH_STAR.md (issue #60) ---
+
+const northStarGateInfoMsg = "north-star gate has nothing to check; create docs/NORTH_STAR.md or disable the gate"
+
+func writeNorthStarGateFile(t *testing.T, projectDir string) {
+	t.Helper()
+	gatesDir := filepath.Join(projectDir, ".claude", "agents", "gates")
+	require.NoError(t, os.MkdirAll(gatesDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(gatesDir, "north-star-auditor.md"),
+		[]byte("---\nname: north-star-auditor\n---\n"), 0o644))
+}
+
+func TestCheckNorthStarGate(t *testing.T) {
+	cases := []struct {
+		name      string
+		setup     func(t *testing.T, projectDir string)
+		proj      *manifest.ProjectManifest
+		wantEmpty bool
+	}{
+		{
+			name:      "gate absent, no manifest — no issue",
+			setup:     func(t *testing.T, projectDir string) {},
+			wantEmpty: true,
+		},
+		{
+			name: "gate file present, docs/NORTH_STAR.md absent — info issue",
+			setup: func(t *testing.T, projectDir string) {
+				writeNorthStarGateFile(t, projectDir)
+			},
+			wantEmpty: false,
+		},
+		{
+			name: "gate file present, docs/NORTH_STAR.md present — no issue",
+			setup: func(t *testing.T, projectDir string) {
+				writeNorthStarGateFile(t, projectDir)
+				require.NoError(t, os.MkdirAll(filepath.Join(projectDir, "docs"), 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(projectDir, "docs", "NORTH_STAR.md"), []byte("# North Star\n"), 0o644))
+			},
+			wantEmpty: true,
+		},
+		{
+			name:      "no gate file, but manifest requests --with-gates and docs/NORTH_STAR.md absent — info issue",
+			setup:     func(t *testing.T, projectDir string) {},
+			proj:      &manifest.ProjectManifest{WithGates: true},
+			wantEmpty: false,
+		},
+		{
+			name:      "no gate file, manifest without --with-gates — no issue",
+			setup:     func(t *testing.T, projectDir string) {},
+			proj:      &manifest.ProjectManifest{},
+			wantEmpty: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proj := t.TempDir()
+			tc.setup(t, proj)
+			issues := checkNorthStarGate(proj, tc.proj)
+			if tc.wantEmpty {
+				require.Empty(t, issues)
+				return
+			}
+			require.Len(t, issues, 1)
+			require.Equal(t, LevelInfo, issues[0].Level)
+			require.Equal(t, northStarGateInfoMsg, issues[0].Message)
+		})
+	}
+}
+
+// TestDiagnoseNorthStarGateTelemetryOnly proves the check also fires through
+// the telemetry-only path (diagnoseTelemetryOnly, issue #64) — zprof's own
+// repo checkout runs through exactly this path, no .zprof.yaml, which is how
+// issue #60 was discovered live in zprof's own dev loop.
+func TestDiagnoseNorthStarGateTelemetryOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	proj := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(proj, ".claude"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(proj, ".claude", "zprof-collect.py"), []byte("#!/usr/bin/env python3\n"), 0o755))
+	writeNorthStarGateFile(t, proj)
+
+	repo := t.TempDir()
+	issues, err := Diagnose(proj, repo)
+	require.NoError(t, err)
+	require.True(t, findIssue(issues, LevelInfo, northStarGateInfoMsg))
+}
