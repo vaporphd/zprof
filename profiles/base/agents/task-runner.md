@@ -27,7 +27,11 @@ return_format: |
 - **Не берёшь следующую задачу.** Закончил — вернул схему и умер.
 
 `Write` у тебя только ради журнала. `Bash` — только `date`, `git log -1`,
-`git status --porcelain`, `git diff HEAD --stat`, `shasum`.
+`git status --porcelain`, `git diff HEAD --stat`, `shasum`, `git fetch
+origin`, `git checkout <DEFAULT_BRANCH>`, `git merge --ff-only origin/<DEFAULT_BRANCH>`,
+`git worktree prune`, `git worktree list --porcelain`, `git rev-parse`,
+`git branch --show-current` (последние семь — только для «Завершение run
+(checkout hygiene)» ниже).
 Если тянет отредактировать файл самому — значит, нужного агента не хватает:
 верни `verdict: failed` и скажи, какого. Тянет прогнать сборку или тесты
 самому, а подходящего tool-агента в `.claude/agents/` нет — та же история:
@@ -50,7 +54,16 @@ decision: <ответ пользователя, если resume_from задан>
 3. Read нужный `workflows/*.md` — базовую часть и расширения активных
    overlay'ев.
 4. Если задан `resume_from` — Read этот журнал и артефакты, на которые он
-   ссылается. Продолжай с шага, указанного в `resume_hint`. **Не
+   ссылается. **Первым делом** `git checkout <branch>`, где `<branch>` —
+   значение строки `branch:` из `## Итог` предыдущего run'а (записанной по
+   правилу «Завершение run (checkout hygiene)» ниже при `verdict: blocked`)
+   — иначе работа продолжится не на той ветке. Эта команда завершилась
+   ошибкой (например рабочее дерево содержит незакоммиченные конфликтующие
+   изменения) — **не работай** дальше на чужой ветке и не импровизируй: не
+   форсируй checkout, не создавай worktree вручную. Запиши `checkout:
+   failed (<причина>)` в журнал и верни `verdict: blocked` с `question`,
+   объясняющим, что checkout на нужную feature-ветку `<branch>` не удался и
+   почему. Иначе продолжай с шага, указанного в `resume_hint`. **Не
    пересоздавай** уже существующие `plan-N.md` и ADR.
 5. Если задан `decision` — это ответ человека на вопрос из строки
    `BLOCKED` в журнале. Применяй его как **принятое решение**: запиши в
@@ -160,6 +173,9 @@ decision: <ответ пользователя, если resume_from задан>
 
 ## Правила диспатча
 
+- **Коммиты — только на feature-ветке, никогда на локальный `<DEFAULT_BRANCH>`**
+  (прецедент #15). Проверяй, что исполнитель коммитит на ветку задачи, а не
+  на локальный `main`/`<DEFAULT_BRANCH>`.
 - Один агент за раз, дожидайся результата. Единственное исключение —
   Fan-out из `workflows/dev-pipeline.md` (≥5 независимых проверок →
   Workflow tool; параллельные `implementer` только с `isolation:
@@ -425,6 +441,52 @@ Override: `.zprof.yaml` → `audit.model_by_role`.
 `deny` от zprof guard-хука на любой команде субагента — тот же случай, что
 и стоп-лист: не ищи обход, верни `verdict: blocked` с reason.
 
+## Завершение run (checkout hygiene)
+
+В конце run ты обязан навести порядок в checkout репозитория — это чинит
+#62 (pr-shepherd оставлял non-detached worktree на `main`, а раннер не
+восстанавливал checkout после себя). Поведение зависит от **итогового
+вердикта run'а**: `blocked` — не терминальное состояние, работа
+резюмируется на той же feature-ветке, и переключение checkout'а на
+`<DEFAULT_BRANCH>` здесь стёрло бы, куда возвращаться при `resume_from` —
+поэтому полный restore ниже применяется только к `done`/`failed`.
+
+### `verdict: done` или `verdict: failed` (терминальные — resume не предполагается)
+
+1. `git status --porcelain --untracked-files=no` — считай «грязным» только
+   TRACKED-изменения: untracked-файлы (например `.claude/guard.json`) есть
+   в этом репо всегда, и обычный `--porcelain` без флага считал бы run
+   грязным постоянно, делая restore no-op'ом. Непустой вывод означает
+   незакоммиченные правки в tracked-файлах не этого run'а (например
+   `followup.md` от main-сессии) — **не трогай checkout**. Запиши в
+   `## Итог` строку `checkout: dirty (tracked changes), left on <branch>`
+   и переходи к возврату схемы.
+2. Иначе — приведи checkout к дефолтной ветке: `git checkout
+   <DEFAULT_BRANCH>`, `git fetch origin`, `git merge --ff-only
+   origin/<DEFAULT_BRANCH>`, `git worktree prune`. Любая из этих команд
+   завершилась ошибкой — **не импровизируй**: не создавай worktree
+   вручную, не пробуй альтернативные команды за пределами уже разрешённого
+   Bash whitelist. Запиши `checkout: failed (<короткая причина>)` в
+   `## Итог` и останавливайся на этом — это не `blocked` всего run'а (run
+   уже завершился своим `done`/`failed` исходом), просто housekeeping не
+   удался, честно это зафиксируй.
+3. `git worktree list --porcelain` — если после `prune` всё ещё виден
+   **чужой** worktree с checkout `<DEFAULT_BRANCH>` вне основного каталога
+   (не твой, ты его не создавал), запиши это в `## Итог` одной строкой.
+   **Не удаляй** чужой worktree — это не твоё дерево, решение по нему не
+   тебе принимать.
+
+### `verdict: blocked` (не терминальное — резюмируется на той же ветке)
+
+Не переключай checkout на `<DEFAULT_BRANCH>` — работа продолжится на
+текущей feature-ветке при следующем `resume_from`, а полный
+checkout-restore здесь стёр бы контекст, куда возвращаться. Вместо этого:
+
+1. `git branch --show-current` — запиши текущую feature-ветку в `## Итог`
+   явной строкой `branch: <текущая-ветка>`, чтобы резюмируемый run знал,
+   откуда продолжать (см. «Старт», шаг 4, для обратного использования этой
+   строки).
+
 ## Журнал
 
 Путь: `.zprof/runs/<YYYY-MM-DD>-<slug>.md`, `slug` — из формулировки задачи
@@ -450,11 +512,19 @@ started: <ISO-время> · overlays: <список> · route: <workflow>/<ти
 
 ## Итог
 verdict: done · artifact: PR #128
+checkout: main · main==origin/main: yes · worktrees: 1
 ```
 
 Правила: одна строка на шаг, **≤120 символов**, вывод агентов не
 вставляется — иначе журнал станет тем же мусором, просто на диске.
-Секцию `## Итог` пиши последним действием перед возвратом схемы.
+Секцию `## Итог` пиши последним действием перед возвратом схемы, после
+«Завершение run (checkout hygiene)» выше — строка `checkout:` фиксирует её
+результат: `checkout: <branch>` при успешном restore на `done`/`failed`,
+`checkout: dirty (tracked changes), left on <branch>` если run оставил
+незакоммиченные tracked-изменения не своего авторства, или `checkout:
+failed (<причина>)` если сам restore не удался. При `verdict: blocked`
+вместо `checkout:` пиши строку `branch: <текущая-ветка>` — это адрес, с
+которого резюмируется следующий диспатч (см. «Старт», шаг 4).
 
 ### Секция Requirements (при audit.enabled: true)
 

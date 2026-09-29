@@ -85,6 +85,9 @@ var frontmatterRe = regexp.MustCompile(`\A---\r?\n((?s:.*?))\r?\n---\r?\n`)
 //  19. guard.enabled, guard hooks, guard.json and its permissions_deny are
 //     deployed consistently (ADR 0009)
 //  20. role resolution has at least one subagent meta.json on record
+//  21. no worktree outside the main one holds the default branch checked
+//     out non-detached, and the main working tree itself is back on the
+//     default branch once no run is in flight (issue #62)
 //
 // Diagnose only returns a non-nil error for unexpected I/O failures; a
 // broken .zprof.yaml is reported as an error Issue, not a Go error, so
@@ -124,6 +127,7 @@ func Diagnose(projectDir, repoDir string) ([]Issue, error) {
 	out = append(out, checkRunLogs(projectDir)...)
 	out = append(out, checkAgentlogGitignored(projectDir)...)
 	out = append(out, checkAgentlogNotTracked(projectDir)...)
+	out = append(out, checkGitCheckoutHygiene(projectDir)...)
 	out = append(out, checkTelemetryHooks(projectDir)...)
 	out = append(out, checkPython3Available()...)
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
@@ -165,6 +169,7 @@ func diagnoseTelemetryOnly(projectDir string) []Issue {
 	out = append(out, checkRunLogs(projectDir)...)
 	out = append(out, checkAgentlogGitignored(projectDir)...)
 	out = append(out, checkAgentlogNotTracked(projectDir)...)
+	out = append(out, checkGitCheckoutHygiene(projectDir)...)
 	out = append(out, checkTelemetryHooks(projectDir)...)
 	out = append(out, checkPython3Available()...)
 	out = append(out, checkAgentlogCleanVulnerability(projectDir)...)
@@ -942,6 +947,159 @@ func checkAgentlogNotTracked(projectDir string) []Issue {
 			"%d file(s) under .agentlog/ are tracked by git even though the directory should be gitignored — untrack them with `git rm -r --cached .agentlog` (they may contain transcripts or secrets): %s",
 			len(files), strings.Join(files, ", ")),
 	}}
+}
+
+// gitWorktreeEntry is one block of `git worktree list --porcelain` output:
+// the working tree's path, plus either the branch it has checked out
+// (`refs/heads/<name>`) or detached == true if it's on a bare commit.
+type gitWorktreeEntry struct {
+	path     string
+	branch   string
+	detached bool
+}
+
+// parseWorktreeListPorcelain parses `git worktree list --porcelain` output.
+// Blocks are separated by a blank line; the first block is always the main
+// working tree (the one `git status`/`git checkout` act on by default), the
+// rest are linked worktrees. Each block carries a `worktree <path>` line and
+// either a `branch refs/heads/<name>` line or a bare `detached` line.
+func parseWorktreeListPorcelain(s string) []gitWorktreeEntry {
+	var out []gitWorktreeEntry
+	var cur *gitWorktreeEntry
+	flush := func() {
+		if cur != nil {
+			out = append(out, *cur)
+			cur = nil
+		}
+	}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimRight(line, "\r")
+		switch {
+		case line == "":
+			flush()
+		case strings.HasPrefix(line, "worktree "):
+			flush()
+			cur = &gitWorktreeEntry{path: strings.TrimPrefix(line, "worktree ")}
+		case strings.HasPrefix(line, "branch "):
+			if cur != nil {
+				cur.branch = strings.TrimPrefix(line, "branch ")
+			}
+		case line == "detached":
+			if cur != nil {
+				cur.detached = true
+			}
+		}
+	}
+	flush()
+	return out
+}
+
+// gitDefaultBranch resolves the project's default branch via the local
+// record of origin's HEAD symref. Falls back to "main" when there's no
+// origin remote (or it was never fetched) rather than fail the check
+// outright — "main" is zprof's own convention and the common case, and a
+// wrong guess here only costs a possibly-noisy warning, not a false sense
+// of safety.
+func gitDefaultBranch(projectDir string) string {
+	out, err := exec.Command("git", "-C", projectDir, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").Output()
+	if err != nil {
+		return "main"
+	}
+	ref := strings.TrimSpace(string(out))
+	return strings.TrimPrefix(ref, "origin/")
+}
+
+// hasActiveGitRun reports whether the most recently modified run log under
+// .zprof/runs/ looks like a run still in progress — it exists and has no
+// `## Итог` section yet (task-runner writes that section as its last action
+// before returning a schema, per task-runner.md's "## Журнал"). No run logs
+// at all, or the newest one already has `## Итог`, means no active run.
+func hasActiveGitRun(projectDir string) bool {
+	matches, err := filepath.Glob(filepath.Join(projectDir, ".zprof", "runs", "*.md"))
+	if err != nil || len(matches) == 0 {
+		return false
+	}
+	var latest string
+	var latestMod time.Time
+	for _, m := range matches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		if latest == "" || info.ModTime().After(latestMod) {
+			latest = m
+			latestMod = info.ModTime()
+		}
+	}
+	if latest == "" {
+		return false
+	}
+	data, err := os.ReadFile(latest)
+	if err != nil {
+		return false
+	}
+	return !strings.Contains(string(data), "## Итог")
+}
+
+// checkGitCheckoutHygiene warns about the worktree-leak pattern issue #62
+// diagnosed: pr-shepherd's old post-merge verification ran a non-detached
+// `git worktree add` on the default branch and never cleaned it up, which
+// then permanently blocks `git checkout <default>` in the main working
+// tree ("fatal: '<default>' is already used by worktree").
+//
+// Two independent things are checked from one `git worktree list
+// --porcelain` call: (a) no *other* worktree has the default branch checked
+// out non-detached — that's the leak itself; (b) the *main* working tree is
+// itself back on the default branch, unless a run looks to be in flight
+// (hasActiveGitRun) — during a run the main checkout legitimately sits on a
+// feature branch.
+//
+// Silent whenever git itself can't answer — not a repo, git not installed,
+// or any other failure to run `git worktree list` — mirroring
+// checkAgentlogNotTracked's posture: nothing to diagnose without a working
+// git, and no other check owns reporting that here.
+func checkGitCheckoutHygiene(projectDir string) []Issue {
+	out, err := exec.Command("git", "-C", projectDir, "worktree", "list", "--porcelain").Output()
+	if err != nil {
+		return nil
+	}
+	worktrees := parseWorktreeListPorcelain(string(out))
+	if len(worktrees) == 0 {
+		return nil
+	}
+
+	defaultBranch := gitDefaultBranch(projectDir)
+	defaultRef := "refs/heads/" + defaultBranch
+
+	var issues []Issue
+	for _, wt := range worktrees[1:] {
+		if wt.branch == defaultRef {
+			issues = append(issues, Issue{
+				Level: LevelWarn,
+				Path:  wt.path,
+				Message: fmt.Sprintf(
+					"worktree at %q has default branch %q checked out non-detached — this blocks `git checkout %s` in the main working tree (issue #62); remove it (`git worktree remove %s`) or recreate it with `--detach`",
+					wt.path, defaultBranch, defaultBranch, wt.path),
+			})
+		}
+	}
+
+	main := worktrees[0]
+	if main.branch != defaultRef && !hasActiveGitRun(projectDir) {
+		current := main.branch
+		if current == "" {
+			current = "detached HEAD"
+		}
+		issues = append(issues, Issue{
+			Level: LevelWarn,
+			Path:  main.path,
+			Message: fmt.Sprintf(
+				"main working tree is on %q, not the default branch %q, and no run looks active — task-runner should restore checkout hygiene at the end of every run (issue #62)",
+				current, defaultBranch),
+		})
+	}
+
+	return issues
 }
 
 // telemetryHookEvents are the three Claude Code hook events zprof wires up

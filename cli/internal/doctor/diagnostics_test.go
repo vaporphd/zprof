@@ -997,6 +997,144 @@ func TestCheckAgentlogNotTrackedSilentWithoutGitRepo(t *testing.T) {
 	require.Empty(t, checkAgentlogNotTracked(dir))
 }
 
+// --- git checkout hygiene (issue #62) -------------------------------------
+
+// runGitCheckoutHygieneCmd runs a git subcommand against dir and fails the
+// test immediately on error — a thin wrapper to keep the fixtures below
+// readable; mirrors the exec.Command("git", "-C", dir, ...) calls used
+// throughout this file for .agentlog/ fixtures.
+func runGitCheckoutHygieneCmd(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	full := append([]string{"-C", dir}, args...)
+	out, err := exec.Command("git", full...).CombinedOutput()
+	require.NoErrorf(t, err, "git %v: %s", args, out)
+}
+
+// initGitCheckoutHygieneRepo creates a git repo at dir on branch "main" with
+// one commit, so a feature branch and worktrees can be created against a
+// real ref. gitDefaultBranch falls back to "main" for a repo with no origin
+// remote, which is exactly this fixture's shape.
+func initGitCheckoutHygieneRepo(t *testing.T, dir string) {
+	t.Helper()
+	runGitCheckoutHygieneCmd(t, dir, "init", "-q", "-b", "main")
+	runGitCheckoutHygieneCmd(t, dir, "-c", "user.email=t@t", "-c", "user.name=t",
+		"commit", "-q", "-m", "init", "--allow-empty")
+}
+
+func TestCheckGitCheckoutHygieneCleanRepoOnDefaultBranchIsSilent(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+
+	require.Empty(t, checkGitCheckoutHygiene(dir))
+}
+
+func TestCheckGitCheckoutHygieneWarnsOnNonDetachedWorktreeOnDefaultBranch(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGitCheckoutHygieneCmd(t, dir, "worktree", "add", wt, "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "non-detached"))
+	require.True(t, findIssue(issues, LevelWarn, wt))
+}
+
+func TestCheckGitCheckoutHygieneSilentOnDetachedWorktreeOnDefaultBranch(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	runGitCheckoutHygieneCmd(t, dir, "worktree", "add", "--detach", wt, "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.False(t, findIssue(issues, LevelWarn, "non-detached"))
+}
+
+func TestCheckGitCheckoutHygieneWarnsWhenMainNotOnDefaultBranchNoActiveRun(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+func TestCheckGitCheckoutHygieneSilentWhenMainNotOnDefaultBranchButRunActive(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".zprof", "runs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".zprof", "runs", "2026-09-29-x.md"),
+		[]byte("# task\nstarted: now\n\n| время | агент | verdict | artifact |\n"), 0o644))
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.False(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+// The main working tree itself can be in detached HEAD (e.g. a CI checkout,
+// or a user who ran `git checkout --detach`), not just a linked worktree —
+// main.branch is then empty, and checkGitCheckoutHygiene must render that as
+// "detached HEAD" in the warning rather than an empty, confusing quoted
+// string.
+func TestCheckGitCheckoutHygieneWarnsWithDetachedHEADLabelWhenMainItselfIsDetached(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "--detach", "main")
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, `main working tree is on "detached HEAD"`))
+}
+
+// A run log exists but is already complete (task-runner wrote `## Итог`
+// before returning its final schema) — hasActiveGitRun must tell this apart
+// from a run genuinely in flight, so stale run history left over from a
+// finished run must not silence the "main is on the wrong branch" warning.
+func TestCheckGitCheckoutHygieneWarnsWhenMainNotOnDefaultBranchAndRunLogIsCompleted(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "checkout", "-q", "-b", "feat")
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, ".zprof", "runs"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".zprof", "runs", "2026-09-29-x.md"),
+		[]byte("# task\nstarted: now\n\n## Итог\nverdict: done\n"), 0o644))
+
+	issues := checkGitCheckoutHygiene(dir)
+	require.True(t, findIssue(issues, LevelWarn, "main working tree is on"))
+}
+
+// gitDefaultBranch's fallback-to-"main" path is exercised implicitly by
+// every other fixture in this file (none of them configure an origin
+// remote). This is the mirror case: a repo whose refs/remotes/origin/HEAD
+// symref actually resolves — the way `git clone` sets it up — must report
+// that real branch name, exercising the TrimSpace/TrimPrefix parsing of
+// `git symbolic-ref`'s output rather than only its error path.
+func TestGitDefaultBranchResolvesFromOriginHEADSymref(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+	runGitCheckoutHygieneCmd(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+
+	require.Equal(t, "develop", gitDefaultBranch(dir))
+}
+
+// Direct unit test of the fallback itself: no origin remote configured at
+// all, so `git symbolic-ref` fails and gitDefaultBranch must guess "main"
+// rather than propagate the error.
+func TestGitDefaultBranchFallsBackToMainWithoutOriginRemote(t *testing.T) {
+	dir := t.TempDir()
+	initGitCheckoutHygieneRepo(t, dir)
+
+	require.Equal(t, "main", gitDefaultBranch(dir))
+}
+
+func TestCheckGitCheckoutHygieneSilentWithoutGitRepo(t *testing.T) {
+	dir := t.TempDir()
+	require.Empty(t, checkGitCheckoutHygiene(dir))
+}
+
 // --- telemetry hooks in settings.local.json (telemetry stage 1) ----------
 
 func telemetryHookJSON(events ...string) string {

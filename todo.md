@@ -30,7 +30,7 @@
 - [x] fix(base): коллектор не сшивает вложенные async-диспатчи task-runner с task-notification — P6/P7 завышены (#52) — после #28, приоритет — PR #61
 - [x] fix: task-runner ждёт async-детей через sleep 180; P2 не считает sleep слепым повтором (#53) — после #52
 - [ ] fix(base): north-star-auditor при отсутствии NORTH_STAR.md — детерминированный skip, гейт условный (#60)
-- [ ] fix(base): раннер/pr-shepherd оставляют worktree main в scratchpad; checkout не на main после run (#62)
+- [x] fix(base): раннер/pr-shepherd оставляют worktree main в scratchpad; checkout не на main после run (#62)
 
 ## Plan 2: guard
 - [x] fix(ci): ruff RUF059 ломает CI на main; запинить версию ruff (#56) — вне очереди, блокирует #28

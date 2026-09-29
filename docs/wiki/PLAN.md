@@ -143,3 +143,43 @@
   annotation gained the `p2_exempt_patterns`/schema.json clause, moved out
   of "Undocumented", refreshed Head SHA — no Status Summary count change
   otherwise (score was already `implemented`).
+- MAINTAIN run on `fix/worktree-checkout-hygiene-62` / #62 added a new
+  "Checkout hygiene diagnostics" section to `guard.md` for
+  `checkGitCheckoutHygiene` (the new `zprof doctor` check that warns on the
+  worktree-leak pattern #62 fixed) rather than writing `doctor.md` — same
+  "not yet written, still P2" call as #29/#64's doctor entries, but for a
+  different reason than either: #64's telemetry-only branching at least had
+  one genuinely guard-specific piece (`checkGuardDeployment`'s zero-value
+  manifest) to hang the placement on; `checkGitCheckoutHygiene` has **none**
+  — it never touches `guard.json`/hooks/deployment, it's pure git
+  worktree/branch state tied to the pr-shepherd/task-runner contract change
+  in the same issue. It landed in `guard.md` anyway purely on the
+  established "this file is already `zprof doctor`'s documented home"
+  precedent, stated explicitly in the new section rather than silently
+  implied. Flagging for whoever eventually promotes `doctor.md` out of P2:
+  at that point `guard.md`'s "Doctor checks" / "Telemetry-only diagnostics"
+  / "Checkout hygiene diagnostics" sections should probably migrate there
+  wholesale (guard.md is 900+ lines and covers a shrinking share of what
+  `zprof doctor` actually checks — 3 of doctor's ~22 checks are
+  guard-related, the rest, including #62's, aren't) — not attempted in this
+  run, out of scope for a single-issue sync.
+  This run also discovered and fixed **stale line-number citations**
+  unrelated to #62's actual behavior change: `db7e720` inserted 158 lines
+  into `diagnostics.go` ahead of `checkGuardHooks`/`checkGuardConfig`/
+  `checkPermissionsDeny`/`checkGuardDeployment`/`checkRoleResolution`,
+  silently invalidating every `diagnostics.go:<line>` citation in `guard.md`
+  pointing at or after that insertion point (AI Context invariants, the
+  "Doctor checks" table, "Telemetry-only diagnostics"). All were
+  recomputed against the current file and corrected in place; the
+  "Telemetry-only diagnostics" section's check count also got a genuine
+  content fix (9 → 10: `checkGitCheckoutHygiene` runs in
+  `diagnoseTelemetryOnly` too, per `db7e720`'s diff, and wasn't previously
+  mentioned there since it didn't exist yet). Also fixed in passing: the
+  "See also" section's `score` bullet still said "no wiki file yet"
+  although `score.md` was written for #53 — unrelated to #62 but adjacent
+  and trivially verifiable (`ls docs/wiki/score.md`).
+  `INDEX.md`: `doctor`'s dependency-graph annotation gained a `#62` clause
+  (git worktree/checkout hygiene, `.zprof/runs/*.md` `## Итог` as a data
+  signal, not a Go import), refreshed Head SHA — no Status Summary change
+  (`doctor` was already counted under "Undocumented", stays there; `guard`
+  was already `implemented`, stays there).
