@@ -1,6 +1,6 @@
 # Component Index
 
-Generated: 2026-09-29 · Head: `0800e5163b3548b52632768f8c79eabd27fcfbc9`
+Generated: 2026-09-29 · Head: `3b7d10e0a6a8553c57746d0fb77a0073ff908208`
 
 ## Components
 
@@ -61,7 +61,10 @@ fsutil
 │        --porcelain, reading task-runner's `.zprof/runs/*.md` `## Итог`
 │        marker as a heuristic data signal for "run still in flight", not a
 │        Go import — #62, unrelated to guard, see guard.md's "Checkout
-│        hygiene diagnostics")
+│        hygiene diagnostics"; also reads the north-star-auditor gate's
+│        deployed presence + docs/NORTH_STAR.md's absence as a data signal,
+│        not a Go import — #60, unrelated to guard.yaml/zprof-guard.py, see
+│        guard.md's "North-star gate diagnostics")
 ├── score → [fsutil, manifest, stats]  (+ reads collector's dispatches.jsonl/
 │                                        tool-events.jsonl and guard's
 │                                        guard-events.jsonl as data, not Go imports;
