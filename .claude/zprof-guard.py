@@ -1103,9 +1103,24 @@ def _ln_operands(args: list[str]) -> list[str]:
     the same per-operand scratch check the other `_FILE_OP_COMMANDS` already
     use below, including the same relative-operand and unsafe-char denials
     -- no separate resolution-from-link-dirname special case is added since
-    no other command in this evaluator has one to mirror."""
+    no other command in this evaluator has one to mirror.
+
+    GNU `ln` also accepts the `-t DIR` value glued onto the flag itself
+    (`-tDIR`), inside a short-option cluster (`-stDIR`), or via an
+    abbreviated/alternate long-flag spelling (`--target=DIR`, `--ta=DIR`,
+    getopt_long prefix matching) -- none of those shapes match the two
+    exact forms parsed above, so the loop used to silently drop them like
+    any other unrecognized flag, letting the real destination escape every
+    scratch check below (#73 follow-up, reviewer I-1). Rather than
+    replicating GNU getopt's short-cluster/long-prefix matching exactly,
+    any token shaped like one of these ambiguous/unrecognized `-t`/`--t`
+    forms is fed back in as its own operand instead of being dropped: it
+    never starts with `/`, so the per-operand `os.path.isabs` check below
+    denies the whole invocation unconditionally -- fail-closed on the
+    unparsed form rather than guessing its exact semantics."""
     target_dir = None
     positionals: list[str] = []
+    ambiguous: list[str] = []
     i = 0
     n = len(args)
     while i < n:
@@ -1118,12 +1133,30 @@ def _ln_operands(args: list[str]) -> list[str]:
             target_dir = tok[len("--target-directory="):]
             i += 1
             continue
+        if tok.startswith("--t"):
+            # Any other `--t*` long flag: an abbreviated/alternate spelling
+            # of `--target-directory=` (`--target=`, `--ta=`, ...) or a
+            # bare `--target-directory` with no `=value` -- ambiguous
+            # either way, fail closed.
+            ambiguous.append(tok)
+            i += 1
+            continue
+        if tok.startswith("-") and not tok.startswith("--") and tok != "-t" and "t" in tok[1:]:
+            # A short-option cluster with the target letter glued into the
+            # same token (`-tDIR`, `-stDIR`, ...): GNU short-option parsing
+            # treats everything after `t` as `-t`'s argument once the
+            # cluster reaches it, so the target value never surfaces as its
+            # own token here -- fail closed instead of guessing.
+            ambiguous.append(tok)
+            i += 1
+            continue
         if not tok.startswith("-"):
             positionals.append(tok)
         i += 1
     operands = list(positionals)
     if target_dir is not None:
         operands.append(target_dir)
+    operands.extend(ambiguous)
     return operands
 
 
