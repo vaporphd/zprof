@@ -95,6 +95,9 @@ rules:
       - '\bgit\s+commit\b.*\s--amend\b'
     context: head_on_remote
     reason: "amend опубликованного коммита запрещён стоп-листом"
+  # Keep this rule's `(list|show)` exclusion in sync with telemetry.yaml
+  # `mutating_bash_patterns`' own `git stash` entry (issue #75) -- both read
+  # "git stash list/show is read-only", just for different rules/contexts.
   - id: stash_in_worktree
     tools: [Bash]
     match:

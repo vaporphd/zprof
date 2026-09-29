@@ -87,7 +87,16 @@ mutating_bash_patterns:
   - "\\bsed\\s+-i\\b"
   - "\\btee\\b"
   - "\\b(mv|cp|rm|touch|mkdir)\\b"
-  - "\\bgit\\s+(commit|checkout|stash|reset|apply|cherry-pick|merge|rebase)\\b"
+  # Trailing `(?![\w-])` instead of a plain `\b`: a bare `\b` matches between
+  # a letter and `-`, so `git merge-base`/`commit-tree`/`checkout-index`
+  # matched as `merge`/`commit`/`checkout` and denied a read-only role's
+  # legitimate read-only plumbing command (issue #75). `stash` is split into
+  # its own pattern below (space-separated subcommands, not hyphenated —
+  # mirrors guard.yaml `stash_in_worktree`, #75).
+  - "\\bgit\\s+(commit|checkout|reset|apply|cherry-pick|merge|rebase)(?![\\w-])"
+  # `git stash list`/`git stash show` are read-only; keep this negative
+  # lookahead in sync with guard.yaml's own `stash_in_worktree` pattern.
+  - "\\bgit\\s+stash\\b(?!\\s+(list|show))"
   - "\\bxcodegen\\b"
   - "\\b(cargo|go|swift)\\s+fmt\\b"
   - "\\b(gofmt\\s+-w|swiftformat|rustfmt)\\b"

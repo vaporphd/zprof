@@ -1547,3 +1547,74 @@ def test_readonly_scratch_only_beneath_prefix_root_still_allows(tmp_path):
         "Bash", _bash("mkdir -p /tmp/claude-x/repro"), role="bug-hunter", cwd=tmp_path,
     )
     assert zprof_guard.pre_tool(payload) is None
+
+
+# --- issue #75: git-subcommand regex boundary + /dev/null redirect sink ----
+#
+# `readonly_mutation`'s git-subcommand pattern closed with a plain `\b`,
+# which matches between a letter and `-`: `git merge-base` was denied as
+# `merge`, `git commit-tree` as `commit`, `git checkout-index` as `checkout`
+# (real reviewer-deny false positives from run #59). `git stash list`/`git
+# stash show` had the same problem via the bare `stash` alternative. A
+# `/dev/null` redirect target was separately denied as "outside scratch"
+# even though it only discards.
+
+@pytest.mark.parametrize("command", [
+    "git merge-base main HEAD",
+    "git commit-tree abc123 -m x",
+    "git checkout-index -a",
+])
+def test_readonly_mutation_hyphenated_git_plumbing_not_matched_as_mutating(tmp_path, command):
+    """AC1 (#75): a hyphen-suffixed git plumbing subcommand must not be
+    matched as its shorter mutating sibling."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", ["git stash list", "git stash show"])
+def test_readonly_mutation_stash_list_show_not_matched_as_mutating(tmp_path, command):
+    """AC2 (#75): `git stash list`/`git stash show` are read-only -- must not
+    be matched as the mutating `git stash`, mirroring guard.yaml's own
+    `stash_in_worktree` exclusion."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_mutation_git_stash_pop_still_denies(tmp_path):
+    """AC2 counterpart (#75): the split-out `stash` pattern still catches a
+    genuinely mutating stash subcommand."""
+    _readonly_deny(tmp_path, "git stash pop", role="reviewer")
+
+
+@pytest.mark.parametrize("command", [
+    "cmp a b > /dev/null",
+    "git diff HEAD > /dev/null",
+])
+def test_readonly_mutation_dev_null_redirect_allowed(tmp_path, command):
+    """AC3 (#75): `/dev/null` is a safe discard sink for a read-only role's
+    own diagnostic redirect -- must not deny as "outside scratch", without
+    widening `readonly_scratch_prefixes` itself."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_mutation_dev_null_does_not_shield_residual_mutation(tmp_path):
+    """AC3 counterpart: a `/dev/null` redirect must not blanket-approve the
+    rest of the segment -- a genuinely mutating command redirected to
+    /dev/null still denies on its own residual `git commit` match."""
+    _readonly_deny(tmp_path, "git commit -m x > /dev/null", role="reviewer")
+
+
+def test_readonly_mutation_dollar_paren_append_to_runs_dir_still_denies(tmp_path):
+    """AC4 (#75): the 02:34 event's shape -- a `$(`-bearing command
+    appending to `.zprof/runs/...` -- must remain denied. Confirms none of
+    the narrowing above (git-subcommand lookahead, /dev/null exemption)
+    loosened the dangerous-construct check."""
+    _readonly_deny(
+        tmp_path,
+        'cd /tmp/claude-x; echo "$(date)" >> .zprof/runs/59.md',
+        role="reviewer",
+    )
