@@ -1019,8 +1019,11 @@ _DANGEROUS_CONSTRUCT_RE = re.compile(
     r'\$\(|`|<\(|>\(|<<|\beval\b|\bxargs\b|\bsh\s+-c\b|\bbash\s+-c\b'
 )
 _SEGMENT_SEPARATOR_TOKENS = frozenset({";", "&&", "||", "|"})
+_ALLOWED_OPERATOR_TOKENS = _SEGMENT_SEPARATOR_TOKENS | {">", ">>"}
+_CD_LIKE_COMMANDS = frozenset({"cd", "pushd", "popd"})
 _FILE_OP_COMMANDS = frozenset({"mkdir", "touch", "mv", "cp", "rm", "tee"})
 _UNSAFE_OPERAND_CHARS = frozenset("$~*?[")
+_CP_LINK_LONG_FLAGS = frozenset({"--link", "--symbolic-link"})
 
 
 def _has_unsafe_operand_chars(token: str) -> bool:
@@ -1057,40 +1060,96 @@ def _cp_destination(args: list[str]) -> list[str]:
     return [positionals[-1]] if positionals else []
 
 
+def _cp_has_link_flag(args: list[str]) -> bool:
+    """True if one of `cp`'s flags creates a hardlink/symlink instead of a
+    real copy (`-l`/`--link`, `-s`/`--symbolic-link`, or a short cluster
+    containing `l`/`s` such as `-rl`/`-sf`) -- a link landing in scratch can
+    alias a repo file, letting a later write through the link mutate it even
+    though `cp`'s own destination-path check saw only a scratch path (#67
+    P0-2/AC3). Skips `-t VALUE`/`--target-directory=VALUE` the same way
+    `_cp_destination` does, so that flag's own value is never mistaken for a
+    flag cluster."""
+    i = 0
+    n = len(args)
+    while i < n:
+        tok = args[i]
+        if tok == "-t" and i + 1 < n:
+            i += 2
+            continue
+        if tok.startswith("--target-directory="):
+            i += 1
+            continue
+        if tok in _CP_LINK_LONG_FLAGS:
+            return True
+        if tok.startswith("--"):
+            i += 1
+            continue
+        if tok.startswith("-") and len(tok) > 1 and any(c in "ls" for c in tok[1:]):
+            return True
+        i += 1
+    return False
+
+
 def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str | None":
     """`readonly_scratch_only` (rule `readonly_mutation`, ADR-0005 context
-    evaluators, issue #67).
+    evaluators, issue #67; hardened against reviewer-found fail-open gaps).
 
     `readonly_mutation` matches the whole-command `$mutating_bash_patterns`
     family with no path awareness at all, so a read-only role's legitimate
     scratch-directory command (`mkdir -p /tmp/claude-.../repro`) is denied
-    exactly like a repo-mutating one (#31/#67). This evaluator narrows that:
-    it lets the rule stand down only when every path operand of every
-    recognized file-op segment (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, plus a
-    bare `>`/`>>` redirect target) resolves under an `allow_write_prefixes`
-    entry other than `$CLAUDE_PROJECT_DIR` -- scratch, never repo-internal --
-    *and* nothing else in the command (notably the git-mutation pattern
-    family) still matches the rule's own `match` regexes once those approved
-    segments are conceptually removed.
+    exactly like a repo-mutating one (#31/#67). This evaluator narrows that
+    to a strict allow-list, fail-closed on anything it doesn't recognize: the
+    rule stands down only when every non-empty segment is either (a) a
+    recognized file-op command (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`) whose
+    every extracted operand is an absolute path resolving strictly *beneath*
+    a `readonly_scratch_prefixes` entry, (b) the literal leading `cd`
+    (segment 0, token 0 -- nothing else about it is inspected), or (c) a
+    segment with no recognized file-op command that still carries a bare
+    `>`/`>>` redirect, whose target is checked the same way while its
+    non-redirect tokens stay visible to the residual `rule["match"]`
+    re-check (so e.g. `git commit -m x > /tmp/claude-x/log` still denies on
+    the `git commit` residual even though the redirect target is scratch).
+    Any other segment -- an entirely unrecognized command with no redirect
+    at all (`ln -s ... cli/target.py`), a `cp` flag that creates a link
+    instead of copying, a `cd`/`pushd`/`popd` anywhere but that one leading
+    position, a relative operand, or a shell operator this evaluator doesn't
+    explicitly allow (subshell `(`/`)`, backgrounding `&`, `|&`, `&>`, `>|`,
+    ...) -- denies outright.
+
+    `readonly_scratch_prefixes` (guard.yaml) is deliberately narrower than
+    `allow_write_prefixes`: no `$CLAUDE_PROJECT_DIR`, no persistent
+    `~/.claude/projects/*/memory/`/`~/.claude/plans/` -- ephemeral tmpdirs
+    only (#67 P1-2). A target resolving to *exactly* a matched prefix root,
+    with no path segment beyond it (e.g. `rm -rf /tmp/claude-501`), also
+    denies -- only paths strictly beneath a prefix are scratch (#67 P2).
 
     Tokenizes the RAW `tool_input["command"]` (not the whitespace-collapsed
     `call["command"]`) with the same `shlex.shlex(..., punctuation_chars=True)`
     dialect as `_shell_tokens`, so shell operators (`;`, `&&`, `||`, `|`, `>`,
-    `>>`) surface as their own tokens -- `_target()`'s `shlex.split` is the
-    wrong shape here (it discards operators and keeps only two tokens, for
-    journal logging).
+    `>>`, `(`, `)`, `&`, ...) surface as their own tokens -- `_target()`'s
+    `shlex.split` is the wrong shape here (it discards operators and keeps
+    only two tokens, for journal logging).
 
     Denies outright (`True`, default `rule["reason"]`) on: a dangerous
     construct anywhere in the command (`$(`, backtick, `<(`, `>(`, `eval`,
-    `xargs`, `sh -c`, `bash -c`, a heredoc marker `<<`); a `cd` in any
-    segment but the first (refuses to reason about a shifting cwd); unbalanced
-    shell quoting (`shlex` raising `ValueError` -- unlike `_target()`'s
-    journal-only use, "can't parse" must deny here, not "no target"); an
-    extracted operand containing `$`, `~`, `*`, `?` or `[` (shell-expanded,
-    shlex never expands it -- could smuggle a path past the prefix check);
-    or a command where nothing recognized fired at all (the git-mutation
-    family is explicitly out of scope for #67's path extraction -- it always
-    denies here, unchanged). Returns a `str` reason naming the resolved path
+    `xargs`, `sh -c`, `bash -c`, a heredoc marker `<<`); any tokenized
+    operator not in this evaluator's explicit allow-list (`;`, `&&`, `||`,
+    `|`, `>`, `>>`) -- deny-by-default over an incomplete deny-list, so a
+    subshell, backgrounding, `|&`, `&>` or `>|` can't sneak a segment past
+    the split below; a `cd`/`pushd`/`popd` token anywhere except the very
+    first token of the very first segment (a subshell like `(cd ... && rm
+    ...)` is already caught by the operator check, but this also covers a
+    non-parenthesized `... & cd ...`-shaped chain); unbalanced shell quoting
+    (`shlex` raising `ValueError` -- unlike `_target()`'s journal-only use,
+    "can't parse" must deny here, not "no target"); a segment that is
+    neither a recognized file-op, redirect-bearing, nor the leading `cd`; a
+    `cp` link-creating flag; an extracted operand containing `$`, `~`, `*`,
+    `?` or `[` (shell-expanded, shlex never expands it -- could smuggle a
+    path past the prefix check); a relative extracted operand (a shifting
+    cwd, via `cd` or otherwise, must never be load-bearing for this
+    evaluator's path reasoning); or a resolved path outside
+    `readonly_scratch_prefixes`, including one that lands exactly on a
+    matched prefix root. Returns a `str` reason naming the resolved path
     only for the "resolved outside scratch" deny (`_check_rule`'s
     string-return contract); every other deny branch returns `True` so the
     rule's own `reason` is used instead.
@@ -1125,6 +1184,15 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
         except ValueError:
             return True
 
+        # A subshell `(`/`)`, backgrounding `&`, or any other operator this
+        # evaluator doesn't explicitly know (`|&`, `&>`, `>|`, ...) denies
+        # outright -- explicit allow-list, not an incomplete deny-list (#67 P1-1).
+        for tok in tokens:
+            if tok in _ALLOWED_OPERATOR_TOKENS:
+                continue
+            if _is_operator_token(tok):
+                return True
+
         segments: list[list[str]] = [[]]
         for tok in tokens:
             if tok in _SEGMENT_SEPARATOR_TOKENS:
@@ -1132,36 +1200,44 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
             else:
                 segments[-1].append(tok)
 
-        for seg in segments[1:]:
-            if seg and seg[0] == "cd":
-                return True  # non-leading `cd` -- out of scope, deny (spec: simplest correct)
+        # `cd`/`pushd`/`popd` forbidden anywhere except the very first token
+        # of the very first segment -- a shifting cwd is out of scope for
+        # this evaluator's path reasoning, wherever in the command it's
+        # spelled (#67 P1-1).
+        for si, seg in enumerate(segments):
+            for ti, tok in enumerate(seg):
+                if tok in _CD_LIKE_COMMANDS and not (si == 0 and ti == 0):
+                    return True
 
-        root = call.get("cwd") or call["root"]
-        prefixes = config.get("allow_write_prefixes")
+        prefixes = config.get("readonly_scratch_prefixes")
         if not isinstance(prefixes, list) or not all(isinstance(p, str) for p in prefixes):
             return True
-        scratch_prefixes = [
-            p for p in prefixes
-            if p != "$CLAUDE_PROJECT_DIR" and not p.startswith("$CLAUDE_PROJECT_DIR/")
-        ]
 
         def _under_scratch(real_path: str) -> bool:
             rsegs = real_path.split("/")
-            for prefix in scratch_prefixes:
+            for prefix in prefixes:
                 expanded = _prefix_segments(prefix, call["root"])
                 if expanded is None:
                     continue
                 head_segs, tail = expanded
-                if _prefix_matches(head_segs, tail, rsegs):
+                consumed = len(head_segs) + len(tail)
+                # Strictly beneath the prefix root, never the root itself
+                # (`rm -rf /tmp/claude-501` must not match, #67 P2).
+                if len(rsegs) > consumed and _prefix_matches(head_segs, tail, rsegs):
                     return True
             return False
 
         approved: set[int] = set()
-        recognized_any = False
+        seg_skip: dict[int, set[int]] = {}
 
         for idx, seg in enumerate(segments):
             if not seg:
                 continue
+
+            if idx == 0 and seg[0] == "cd":
+                approved.add(idx)  # literal leading `cd` -- the only exempt non-file-op segment
+                continue
+
             name = os.path.basename(seg[0])
 
             redirect_targets: list[str] = []
@@ -1171,43 +1247,50 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
                     redirect_targets.append(seg[i + 1])
                     skip.add(i)
                     skip.add(i + 1)
+            seg_skip[idx] = skip
             command_args = [tok for i, tok in enumerate(seg) if i > 0 and i not in skip]
 
-            is_recognized = False
+            is_file_op = name in _FILE_OP_COMMANDS
+            if not is_file_op and not redirect_targets:
+                return True  # #67 P0-2: neither a recognized file-op, redirect, nor leading cd
+
             operands: list[str] = []
-            if name in _FILE_OP_COMMANDS:
-                is_recognized = True
+            if is_file_op:
                 if name == "cp":
+                    if _cp_has_link_flag(command_args):
+                        return True  # #67 AC3: link/symlink flag -- deny regardless of destination
                     operands = _cp_destination(command_args)
                 else:
                     operands = [a for a in command_args if not a.startswith("-")]
-            if redirect_targets:
-                is_recognized = True
-                operands = operands + redirect_targets
-
-            if not is_recognized:
-                continue
-            recognized_any = True
+            operands = operands + redirect_targets
 
             for operand in operands:
                 if _has_unsafe_operand_chars(operand):
                     return True
-                path = operand if os.path.isabs(operand) else os.path.join(root, operand)
-                real = os.path.realpath(path)
+                if not os.path.isabs(operand):
+                    return True  # #67 P1-1: relative operand -- cwd manipulation out of scope
+                real = os.path.realpath(operand)
                 if not _under_scratch(real):
                     return (
                         "роль read-only: мутирующая команда запрещена контрактом "
                         f"(цель вне scratch: {real})"
                     )
 
-            approved.add(idx)
+            # Only a recognized file-op segment is fully approved (excluded
+            # below from the residual match) -- a segment that got this far
+            # solely because of a redirect keeps its non-redirect tokens
+            # visible to the residual check (#67 P0-1).
+            if is_file_op:
+                approved.add(idx)
 
-        if not recognized_any:
-            return True  # only the git-mutation family (or something unrecognized) fired
+        remaining_parts: list[str] = []
+        for idx, seg in enumerate(segments):
+            if not seg or idx in approved:
+                continue
+            skip = seg_skip.get(idx, set())
+            remaining_parts.extend(tok for i, tok in enumerate(seg) if i not in skip)
 
-        remaining = " ".join(
-            tok for idx, seg in enumerate(segments) if idx not in approved for tok in seg
-        )
+        remaining = " ".join(remaining_parts)
         match = rule.get("match")
         if isinstance(match, list) and any(
             isinstance(p, str) and re.search(p, remaining) for p in match

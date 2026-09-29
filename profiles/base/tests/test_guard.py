@@ -87,6 +87,9 @@ def build_guard_config() -> dict:
             "$CLAUDE_PROJECT_DIR", "~/.claude/projects/*/memory/", "~/.claude/plans/",
             "/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*",
         ],
+        "readonly_scratch_prefixes": [
+            "/private/tmp/claude-*", "/tmp/claude-*", "$TMPDIR/claude-*",
+        ],
         "permissions_deny": [
             "Bash(git push --force*)",
             "Bash(git push -f*)",
@@ -1231,10 +1234,12 @@ def test_happy_path_pr_shepherd_merge_allows_with_clean_preflight(tmp_path, monk
 # readonly_scratch_only` (evaluator `_readonly_scratch_only` in
 # zprof-guard.py), which narrows the whole-command `$mutating_bash_patterns`
 # match down to real repo mutations: a read-only role's `mkdir`/`touch`/
-# `mv`/`cp`/`rm`/`tee`/redirect whose every path operand resolves under an
-# `allow_write_prefixes` scratch entry (never `$CLAUDE_PROJECT_DIR`) is now
-# allowed; anything else (repo-internal targets, the git-mutation family,
-# unparseable/dangerous constructs) still denies exactly as before.
+# `mv`/`cp`/`rm`/`tee`/redirect whose every path operand resolves under a
+# `readonly_scratch_prefixes` scratch entry (a narrower, ephemeral-only list
+# than `allow_write_prefixes` -- never `$CLAUDE_PROJECT_DIR`, never the
+# persistent `~/.claude/projects/*/memory/`/`~/.claude/plans/`, #67 P1-2) is
+# now allowed; anything else (repo-internal targets, the git-mutation
+# family, unparseable/dangerous constructs) still denies exactly as before.
 def test_readonly_mutation_mkdir_in_allow_write_prefix_allows(tmp_path):
     _write_config(tmp_path, build_guard_config())
     payload = _payload("Bash", _bash("mkdir -p /tmp/claude-sess123/repro"),
@@ -1245,13 +1250,18 @@ def test_readonly_mutation_mkdir_in_allow_write_prefix_allows(tmp_path):
 READONLY_SCRATCH_ALLOW_CASES = [
     "mkdir -p /tmp/claude-x/repro",
     "cat foo > /tmp/claude-x/bar",             # bare redirect, not one of the six commands
-    "echo hi | tee /tmp/claude-x/log",         # pipe segment split; only the tee side writes
 ]
 
 READONLY_SCRATCH_DENY_CASES = [
     "mkdir -p cli/x",                            # repo-internal path
     "mkdir -p /tmp/claude-x/a && git stash",     # residual git-mutation match after removal
     "mkdir $HOME/x",                             # $-bearing operand, unsafe regardless of prefix
+    # AC2 (#67 P0-2): a segment with neither a recognized file-op nor a
+    # redirect at all denies outright now, even piped into a scratch-safe
+    # `tee` -- "echo" being harmless isn't provable from a deny-by-default
+    # posture, so the whole command denies (used to slip through as a false
+    # allow before this fix, since `echo hi` was silently ignored).
+    "echo hi | tee /tmp/claude-x/log",
     "cp /tmp/claude-x/a README.md",              # destination is repo-internal
     "mv README.md /tmp/claude-x/",               # source repo-internal even though dest is scratch
     'mkdir "/tmp/claude-x/unterminated',         # malformed shell quoting -- parse failure denies
@@ -1429,5 +1439,111 @@ def test_readonly_scratch_only_pr_shepherd_unaffected(tmp_path):
     _write_config(tmp_path, build_guard_config())
     payload = _payload(
         "Bash", _bash("mkdir -p cli/x"), role="pr-shepherd", cwd=tmp_path,
+    )
+    assert zprof_guard.pre_tool(payload) is None
+
+
+# --- adversarial review fail-open gaps closed (independent review, #67) -----
+#
+# A reviewer pass on a49e7b3/6d84333/8d773a4 found several ways the
+# "fail-closed on any ambiguity" promise had holes. Each test below pins one
+# closed gap; see the AC1-AC7 labels in the corresponding commit message.
+
+def _readonly_deny(tmp_path, command, role="bug-hunter"):
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role=role, cwd=tmp_path)
+    out = zprof_guard.pre_tool(payload)
+    assert out is not None, command
+    assert out["hookSpecificOutput"]["permissionDecisionReason"].startswith(
+        "zprof guard [readonly_mutation]:"), command
+    return out
+
+
+def test_readonly_scratch_only_redirect_does_not_approve_whole_segment(tmp_path):
+    """AC1 (#67 P0-1): a segment whose leading command isn't a recognized
+    file-op must not be fully approved just because it also carries a
+    scratch-bound redirect -- `git commit` must still be visible to the
+    residual `rule["match"]` re-check and deny, even though the redirect
+    target itself resolves under scratch."""
+    _readonly_deny(tmp_path, 'git commit -m "x" > /tmp/claude-x/log')
+
+
+def test_readonly_scratch_only_unrecognized_command_denies(tmp_path):
+    """AC2 (#67 P0-2): an entirely unrecognized command with no redirect at
+    all (not in `_FILE_OP_COMMANDS`, no `>`/`>>`) must deny outright rather
+    than being silently ignored -- closes the `ln`-style hardlink/symlink
+    bypass even though `ln` isn't in `$mutating_bash_patterns` either.
+    Chained after a scratch-safe `mkdir` so `readonly_mutation`'s own
+    `match` gate fires at all (a bare `ln ...` alone never matches
+    `$mutating_bash_patterns` and so never even reaches this evaluator --
+    that pattern-list gap is the separate, out-of-scope P2 the reviewer
+    flagged); the real-world bypass this closes is exactly this chained
+    shape, where the first segment's approval used to leave the second one
+    silently unchecked."""
+    _readonly_deny(tmp_path, "mkdir -p /tmp/claude-x/a && ln -s /tmp/claude-x/a cli/target.py")
+
+
+def test_readonly_scratch_only_cp_link_flag_denies_even_in_scratch(tmp_path):
+    """AC3 (#67 P0-2): `cp -l` (hardlink) must deny even though both the
+    source and destination paths resolve to scratch -- a hardlink created in
+    scratch can alias a repo file that a later write then mutates."""
+    _readonly_deny(tmp_path, "cp -l /tmp/claude-x/a /tmp/claude-x/b")
+
+
+def test_readonly_scratch_only_relative_operand_after_leading_cd_denies(tmp_path):
+    """AC4/AC5 interaction (#67 P1-1): the leading `cd` segment (index 0) is
+    exempt, but a later segment's relative operand must still deny -- must
+    not resolve against a `cd`-shifted cwd. Confirms the final verdict is
+    driven by the relative operand, not the (permitted) leading `cd`."""
+    _readonly_deny(tmp_path, "cd /tmp/claude-x && mkdir foo")
+
+
+@pytest.mark.parametrize("command", [
+    "(cd /tmp/claude-x && rm -rf *)",          # subshell -- unrecognized operator
+    "mkdir /tmp/claude-x/a & git stash",       # backgrounding `&` -- unrecognized operator
+])
+def test_readonly_scratch_only_subshell_and_background_operators_deny(tmp_path, command):
+    """AC5 (#67 P1-1): a subshell `(`/`)` or a backgrounding `&` must deny --
+    neither is in this evaluator's explicit operator allow-list, and a `cd`
+    hidden inside a subshell must not be reachable via the leading-`cd`
+    exemption."""
+    _readonly_deny(tmp_path, command)
+
+
+def test_readonly_scratch_only_excludes_persistent_claude_plans_dir(tmp_path):
+    """AC6 (#67 P1-2): `~/.claude/plans/` is in `allow_write_prefixes` (for
+    `write_outside_repo`) but must NOT be treated as scratch here -- the
+    literal `~` form denies via the unsafe-operand-char check regardless
+    (kept as the literal case the review report named), see the dedicated
+    test below for the mechanism-isolating absolute-path form."""
+    _readonly_deny(tmp_path, "rm -rf ~/.claude/plans/*")
+
+
+def test_readonly_scratch_only_persistent_dirs_not_in_scratch_prefixes(tmp_path, monkeypatch):
+    """AC6 (#67 P1-2), mechanism-isolating variant: an absolute (non-tilde,
+    non-glob) path under the real `~/.claude/plans/` must still deny --
+    proving the fix is `readonly_scratch_prefixes` no longer matching that
+    directory, not merely the unsafe-operand-char check on a literal `~`."""
+    home = tmp_path / "home"
+    (home / ".claude" / "plans").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    target = str(home / ".claude" / "plans" / "x")
+    _readonly_deny(tmp_path, f"touch {target}")
+
+
+def test_readonly_scratch_only_exact_prefix_root_denies(tmp_path):
+    """AC7 (#67 P2): a target resolving to EXACTLY a matched scratch prefix
+    root, with no path segment beneath it, must deny -- `rm -rf
+    /tmp/claude-501` must not be allowed to nuke the whole shared
+    session-scratch root; only paths strictly beneath a prefix are scratch."""
+    _readonly_deny(tmp_path, "rm -rf /tmp/claude-501")
+
+
+def test_readonly_scratch_only_beneath_prefix_root_still_allows(tmp_path):
+    """AC7 counterpart: confirms the exact-root check above didn't
+    over-tighten -- a path strictly beneath the prefix root still allows."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload(
+        "Bash", _bash("mkdir -p /tmp/claude-x/repro"), role="bug-hunter", cwd=tmp_path,
     )
     assert zprof_guard.pre_tool(payload) is None
