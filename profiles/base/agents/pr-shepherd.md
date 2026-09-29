@@ -140,6 +140,8 @@ Many projects using this pipeline write `PR N` / `0000000` placeholders into `ta
 4. **Standalone `git -C "$WT" push origin HEAD:<DEFAULT_BRANCH>`** — read the output visibly, line by line (never `&&`-chained, never tail-truncated). Verify: `git -C "$WT" rev-parse HEAD` vs `git rev-parse origin/<DEFAULT_BRANCH>` — must be equal.
 5. `git worktree remove "$WT"` — clean up the detached worktree now; this is the last action of this successful path.
 
+On any failure inside §5 — the script fails in step 1, `git commit` fails in step 3, or `git push` / the post-push SHA check fails in step 4 — `git worktree remove "$WT"` first, then return the matching verdict/report; combined with step 2's own `git worktree remove "$WT"` on an unexpected diff, `$WT` is removed on every exit from §5, success or failure alike, never left behind.
+
 If no `stamp-merge.sh` exists inside `$WT` → skip stamping, `git worktree remove "$WT"` immediately (nothing further to do against it), note in return `notes: "no stamp convention in this project"`.
 
 If already stamped (grep the target files inside `$WT` for the SHA / PR number and find them already present) → skip stamping, `git worktree remove "$WT"`, and say so.
