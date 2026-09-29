@@ -37,6 +37,18 @@ Key invariants:
     `.zprof.yaml`'s `score:` block — and a present-but-empty list in `schema.json`
     **replaces**, not extends, the default (`config.go:161-217`; verified by
     `TestLoadConfig_P2ExemptPatternsFromSchema`, `config_test.go`).
+  - `compilePatterns` (`config.go:127-137`) fails loud: it returns an error
+    naming the first pattern `regexp.Compile` (Go RE2, no lookaround
+    support) rejects, instead of silently shrinking the compiled list.
+    `LoadConfig` propagates that error for a bad `mutating_bash_patterns`/
+    `p2_exempt_patterns` entry in `schema.json` (`config.go:205-221`);
+    `Defaults()`'s own hardcoded lists go through `mustCompilePatterns`
+    (`config.go:146-152`), which panics instead — the compiled-in default
+    list is under this package's own control and must never fail. Before
+    issue #79, `compilePatterns` silently dropped any pattern it couldn't
+    compile, which let two RE2-incompatible lookahead patterns vanish from
+    `mutating_bash_patterns` unnoticed (see the "Config loading and
+    WeightsHash" section below).
   - `computeBusyPoll` scores the 4th-and-later consecutive non-mutating `Bash` call
     in an unbroken streak (`busyPollThreshold = 3`, `metrics.go:305`) — a `sleep`/
     `wait` (`IsP2Exempt`) or any mutating event (`isMutating`) resets the streak to
@@ -55,8 +67,18 @@ Spec refs: docs/superpowers/specs/2026-09-26-task-scorecard-design.md §6 (P1-P7
   model), §7 (card format), §8 (commands/config); docs/adr/0008-guard-events-score-integration.md
   (P7 guard-events.jsonl integration, documented in full in guard.md's
   "Score and stats integration")
-Test coverage: `go test ./cli/internal/score/...` — 70 tests passed (verified
-  2026-09-29, branch `fix/async-wait-p2-exempt-53`). Issue #53 additions:
+Test coverage: `go test ./cli/internal/score/...` — 74 tests passed (verified
+  2026-09-29, branch `fix/79-score-re2-lookahead-drop`). Issue #79 adds
+  `re2_compat_test.go`: `TestTelemetryPatternsCompileUnderRE2` (every
+  `telemetry.yaml` `mutating_bash_patterns`/`p2_exempt_patterns` entry must
+  compile under Go RE2, catching the class of bug #79 fixed),
+  `TestCompilePatterns_ErrorsOnBadPattern`,
+  `TestLoadConfig_SchemaJsonBadPatternErrors`,
+  `TestLoadConfig_FixedGitPatterns_IsMutatingBash` (end-to-end regression:
+  the rewritten git/stash patterns still match every real mutation and
+  still spare `merge-base`/`commit-tree`/`checkout-index`/`stash list`/
+  `stash show`). `profiles/base/telemetry_test.py` extended with matching
+  positive/negative cases for the rewritten patterns. Issue #53 additions:
   `config_test.go` (`TestDefaults_P2ExemptMatchesSleepAndWaitOnly`,
   `TestIsP2Exempt_RtkPrefixStripped`, `TestLoadConfig_P2ExemptPatternsFromSchema`,
   `TestWeightsHash_SensitiveToP2ExemptPatterns`), `metrics_test.go`
@@ -192,7 +214,14 @@ project's schema at build time). `LoadConfig(projectDir, agentlogDir)`
 1. Compiled defaults.
 2. `<agentlogDir>/schema.json` (this project's deployed `telemetry.yaml`, written
    by `apply.DeployTelemetry` — see [Apply](apply.md)) — a present, non-empty list
-   field **replaces** the corresponding default list wholesale.
+   field **replaces** the corresponding default list wholesale, and any entry
+   that fails `regexp.Compile` (Go RE2) makes `LoadConfig` return an error
+   naming the bad pattern rather than dropping it and continuing
+   (`compilePatterns`, `config.go:127-137,205-221` — issue #79: this used to
+   fail silently, which is how two `mutating_bash_patterns` entries with
+   RE2-unsupported negative lookahead, added by #75, vanished from
+   `zprof score` with no error or log anywhere until a `re2_compat_test.go`
+   regression test caught it).
 3. `<projectDir>/.zprof.yaml`'s `score:` block (`manifest.LoadProject`) — only
    known weight/saturation/threshold keys are merged (`mergeFloats`,
    `mergeThresholds`), and `score.enabled` can turn scoring off entirely.
