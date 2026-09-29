@@ -5,6 +5,7 @@ cli/bin/
 __pycache__/
 *.pyc
 .agentlog/
+.claude/guard.json
 .zprof/runs/
 .pytest_cache/
 
