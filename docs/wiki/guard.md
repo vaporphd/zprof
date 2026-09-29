@@ -78,6 +78,23 @@ Key invariants:
     path unchanged — only the six file-op commands plus redirects gained path
     awareness, not the whole rule (`zprof-guard.py:1093-1302`, helpers
     `:1018-1091` and `:447-485, 615-634`).
+  - `readonly_mutation`'s own `$mutating_bash_patterns` git-subcommand
+    alternation closed with a plain `\b`, which also matches between a
+    letter and `-`: `git merge-base`/`commit-tree`/`checkout-index` were
+    denied as their shorter mutating siblings (`merge`/`commit`/`checkout`),
+    and `git stash list`/`git stash show` as the mutating `stash` — real
+    reviewer-deny false positives reproduced from run #59's
+    `.agentlog/guard-events.jsonl`. Fixed by replacing the trailing `\b`
+    with `(?![\w-])` and splitting `stash` into its own pattern with the
+    same `(?!\s+(list|show))` exclusion `guard.yaml`'s `stash_in_worktree`
+    already used, keeping both files' `stash` exclusions in sync
+    (`telemetry.yaml:90-99`, `guard.yaml:98-104`). The same fix exempts
+    `/dev/null` as a redirect target inside `_readonly_scratch_only` above —
+    a safe discard sink, deliberately *not* added to
+    `readonly_scratch_prefixes` (which requires resolving strictly *beneath*
+    a prefix, a check `/dev/null` itself can never satisfy); a genuinely
+    mutating command redirected to `/dev/null` still denies on its residual
+    `$mutating_bash_patterns` match (#75; `zprof-guard.py:1278-1297`).
   - `merge_preflight` (#25) is also fail-open, but through a third mechanism,
     distinct from both #24 patterns: any `gh` failure (non-zero exit, timeout,
     bad JSON, unexpected shape) calls `_note_unverified`, not
@@ -302,7 +319,19 @@ Test coverage: 112 unit + subprocess end-to-end tests in `test_guard.py` (stop-l
   -m pytest profiles/base/tests/test_guard.py -q` → 190 passed, the four guard
   test files together → 352 passed, `profiles/base/tests/` as a whole → 586
   passed (verified 2026-09-29,
-  `fix/guard-readonly-mutation-scratch-67`@`2a5ea9b`).
+  `fix/guard-readonly-mutation-scratch-67`@`2a5ea9b`). #75's git-subcommand
+  `\b`→`(?![\w-])` boundary fix and `/dev/null` redirect exemption (see the
+  AI Context bullet above) add 17 more test-case assertions across 9
+  functions to `test_guard.py`: the hyphenated-plumbing and
+  `stash list`/`show` non-match cases plus their mutating-`stash pop`/
+  `$(`-construct-still-denies counterparts (`dfce692`), and the two full
+  run-#59 command-chain repros, the stderr-`/dev/null`-and-piped-`stash
+  list` shape variants, and a baseline-deny table confirming the narrowing
+  didn't widen the read-only contract (`e729ee8`). `python3 -m pytest
+  profiles/base/tests/test_guard.py -q` → 207 passed, the four guard test
+  files together → 369 passed, `profiles/base/tests/` as a whole → 603
+  passed (verified 2026-09-29,
+  `fix/75-guard-readonly-mutation-reviewer-deny`@`e729ee8`).
 
 ---
 
@@ -426,7 +455,7 @@ ADR-0005 E6 fail-closed pattern but is a #67 bugfix, not a new ADR):
 | `linked_worktree` | `stash_in_worktree` | `git rev-parse --git-dir --git-common-dir`, both resolved relative to the command's working dir (not the guard process's cwd) via `os.path.realpath`, differ (`zprof-guard.py:370-393`) |
 | `write_outside_repo` | `write_outside_repo` | the realpath'd `file_path`/`notebook_path` target matches none of `allow_write_prefixes` (glob-aware, `$VAR`/`~` expanded) and isn't inside a linked worktree of this repo (`git rev-parse --git-common-dir`, run from the nearest existing ancestor dir, resolves to `$CLAUDE_PROJECT_DIR/.git`) (`zprof-guard.py:463-508`) |
 | `branch_pr_merged` | `remote_ref_delete_unmerged` (`roles: [pr-shepherd]`) | a parsed `git push --delete`/`:<ref>` names exactly one branch, and `gh pr list --head <name> --state merged --json number` returns no merged PR (`zprof-guard.py:515-581`) |
-| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every segment is a recognized file-op (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, no link-creating `cp` flag, every operand an absolute path resolving strictly beneath a dedicated `readonly_scratch_prefixes` entry), the literal leading `cd`, or a redirect-bearing segment whose target clears the same check — and, after removing only the fully-approved (file-op) segments, no leftover text still matches `$mutating_bash_patterns`. A segment that's neither a file-op, redirect-bearing, nor the leading `cd`, or any operator outside an explicit allow-list, denies outright regardless of path — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1093-1302`) |
+| `readonly_scratch_only` | `readonly_mutation` (`roles: $readonly_roles`) | **inverted** — the rule's own `$mutating_bash_patterns` regex already matched; this evaluator fires (confirms the deny) *unless* every segment is a recognized file-op (`mkdir`/`touch`/`mv`/`cp`/`rm`/`tee`, no link-creating `cp` flag, every operand an absolute path resolving strictly beneath a dedicated `readonly_scratch_prefixes` entry), the literal leading `cd`, or a redirect-bearing segment whose target clears the same check (`/dev/null` always clears it as a safe discard sink, #75 — see the AI Context bullet above) — and, after removing only the fully-approved (file-op) segments, no leftover text still matches `$mutating_bash_patterns`. A segment that's neither a file-op, redirect-bearing, nor the leading `cd`, or any operator outside an explicit allow-list, denies outright regardless of path — the git-mutation family (`git commit`/`stash`/`checkout`/…) has no recognized operand, so it is untouched and always denies (`zprof-guard.py:1093-1302`) |
 
 All external calls go through `_run` (`zprof-guard.py:291-317`) — a `subprocess.run`
 wrapper with a timeout (`_GIT_TIMEOUT` 3s, `_GH_TIMEOUT` 10s) and

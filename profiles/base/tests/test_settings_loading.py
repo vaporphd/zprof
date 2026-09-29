@@ -37,7 +37,10 @@ def _deployed(tmp_path):
 def test_quoted_list_parser_reads_any_key():
     data = _schema_from_yaml()
     assert len(data["redaction_patterns"]) == 8
-    assert len(data["mutating_bash_patterns"]) == 8
+    # 9, not 8: issue #75 split the single `git ...` pattern into a
+    # hyphen-suffix-safe alternation plus a dedicated `stash list`/`show`
+    # exclusion, mirroring guard.yaml's own `stash_in_worktree` pattern.
+    assert len(data["mutating_bash_patterns"]) == 9
     assert "\\bsed\\s+-i\\b" in data["mutating_bash_patterns"]
 
 
@@ -45,12 +48,12 @@ def test_deployed_layout_falls_back_to_schema_json(tmp_path):
     mod = _deployed(tmp_path)
     assert not (tmp_path / ".claude" / "telemetry.yaml").exists()
     assert len(mod._load_redaction_patterns(str(tmp_path))) >= 8
-    assert len(mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 8
+    assert len(mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 9
 
 
 def test_source_layout_counts_match(tmp_path):
     assert len(src_mod._load_redaction_patterns(str(tmp_path))) >= 8
-    assert len(src_mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 8
+    assert len(src_mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 9
 
 
 def test_deployed_redaction_actually_redacts(tmp_path):
@@ -72,4 +75,4 @@ def test_invalid_pattern_in_schema_json_is_skipped(tmp_path):
     data = _schema_from_yaml()
     data["mutating_bash_patterns"].append("([unclosed")
     (tmp_path / ".agentlog" / "schema.json").write_text(json.dumps(data))
-    assert len(mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 8
+    assert len(mod._load_pattern_list("mutating_bash_patterns", str(tmp_path))) == 9

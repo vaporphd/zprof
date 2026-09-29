@@ -1547,3 +1547,129 @@ def test_readonly_scratch_only_beneath_prefix_root_still_allows(tmp_path):
         "Bash", _bash("mkdir -p /tmp/claude-x/repro"), role="bug-hunter", cwd=tmp_path,
     )
     assert zprof_guard.pre_tool(payload) is None
+
+
+# --- issue #75: git-subcommand regex boundary + /dev/null redirect sink ----
+#
+# `readonly_mutation`'s git-subcommand pattern closed with a plain `\b`,
+# which matches between a letter and `-`: `git merge-base` was denied as
+# `merge`, `git commit-tree` as `commit`, `git checkout-index` as `checkout`
+# (real reviewer-deny false positives from run #59). `git stash list`/`git
+# stash show` had the same problem via the bare `stash` alternative. A
+# `/dev/null` redirect target was separately denied as "outside scratch"
+# even though it only discards.
+
+@pytest.mark.parametrize("command", [
+    "git merge-base main HEAD",
+    "git commit-tree abc123 -m x",
+    "git checkout-index -a",
+])
+def test_readonly_mutation_hyphenated_git_plumbing_not_matched_as_mutating(tmp_path, command):
+    """AC1 (#75): a hyphen-suffixed git plumbing subcommand must not be
+    matched as its shorter mutating sibling."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", ["git stash list", "git stash show"])
+def test_readonly_mutation_stash_list_show_not_matched_as_mutating(tmp_path, command):
+    """AC2 (#75): `git stash list`/`git stash show` are read-only -- must not
+    be matched as the mutating `git stash`, mirroring guard.yaml's own
+    `stash_in_worktree` exclusion."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_mutation_git_stash_pop_still_denies(tmp_path):
+    """AC2 counterpart (#75): the split-out `stash` pattern still catches a
+    genuinely mutating stash subcommand."""
+    _readonly_deny(tmp_path, "git stash pop", role="reviewer")
+
+
+@pytest.mark.parametrize("command", [
+    "cmp a b > /dev/null",
+    "git diff HEAD > /dev/null",
+])
+def test_readonly_mutation_dev_null_redirect_allowed(tmp_path, command):
+    """AC3 (#75): `/dev/null` is a safe discard sink for a read-only role's
+    own diagnostic redirect -- must not deny as "outside scratch", without
+    widening `readonly_scratch_prefixes` itself."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+def test_readonly_mutation_dev_null_does_not_shield_residual_mutation(tmp_path):
+    """AC3 counterpart: a `/dev/null` redirect must not blanket-approve the
+    rest of the segment -- a genuinely mutating command redirected to
+    /dev/null still denies on its own residual `git commit` match."""
+    _readonly_deny(tmp_path, "git commit -m x > /dev/null", role="reviewer")
+
+
+def test_readonly_mutation_dollar_paren_append_to_runs_dir_still_denies(tmp_path):
+    """AC4 (#75): the 02:34 event's shape -- a `$(`-bearing command
+    appending to `.zprof/runs/...` -- must remain denied. Confirms none of
+    the narrowing above (git-subcommand lookahead, /dev/null exemption)
+    loosened the dangerous-construct check."""
+    _readonly_deny(
+        tmp_path,
+        'cd /tmp/claude-x; echo "$(date)" >> .zprof/runs/59.md',
+        role="reviewer",
+    )
+
+
+@pytest.mark.parametrize("command", [
+    # 2026-09-28T23:46:53Z, run #59: `git merge-base` denied as `merge`
+    # inside a longer `&&`-chained read-only command.
+    ('git log --oneline main..HEAD && git merge-base main HEAD && '
+     'git diff main...HEAD --stat && git status --porcelain && '
+     'gh issue view 62 2>&1 | head -80'),
+    # 2026-09-29T05:26:40Z, run #59: same regex bug, denied as `merge` from
+    # `git merge-base main chore/59-guard-deploy-copy` deep in a `;`-chained
+    # read-only verification command.
+    ('cmp .claude/zprof-collect.py profiles/base/zprof-collect.py && '
+     'echo COLLECT_SAME; git rev-parse 3d0074d:.claude/zprof-guard.py '
+     '3d0074d:profiles/base/zprof-guard.py main:profiles/base/zprof-guard.py; '
+     'git rev-parse 3d0074d:.claude/zprof-collect.py '
+     '3d0074d:profiles/base/zprof-collect.py; '
+     'git merge-base main chore/59-guard-deploy-copy; git rev-parse main; '
+     'git ls-files -s .claude/zprof-guard.py .claude/zprof-collect.py '
+     'profiles/base/zprof-guard.py'),
+])
+def test_readonly_mutation_full_reproduced_chains_from_run_59_allow(tmp_path, command):
+    """AC3/AC4 (#75): the exact full command chains reconstructed from
+    `.agentlog/guard-events.jsonl` (23:46 and 05:26 deny entries, run #59)
+    must allow end-to-end, not just the isolated `git merge-base ...`
+    fragment -- regression coverage for the real reviewer-deny reports, not
+    only the minimal unit case."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", [
+    "git diff HEAD 2> /dev/null",   # stderr sink, not stdout
+    "git stash list | head -2",     # piped, not a bare segment
+])
+def test_readonly_mutation_dev_null_and_stash_list_variant_shapes_allow(tmp_path, command):
+    """AC3 (#75) exact repro shapes from the issue: a stderr-only `/dev/null`
+    redirect, and a piped `git stash list`. Both must allow like their
+    simpler siblings already covered above."""
+    _write_config(tmp_path, build_guard_config())
+    payload = _payload("Bash", _bash(command), role="reviewer", cwd=tmp_path)
+    assert zprof_guard.pre_tool(payload) is None, command
+
+
+@pytest.mark.parametrize("command", [
+    "git merge main",
+    "git commit -m x",
+    "echo x > README.md",
+])
+def test_readonly_mutation_baseline_deny_cases_unaffected_by_narrowing(tmp_path, command):
+    """AC6 (#75): none of the narrowing above widens the read-only contract
+    -- a genuinely mutating git subcommand, a bare mutating commit, and a
+    relative-path write inside the repo must all still deny for a
+    read-only role."""
+    _readonly_deny(tmp_path, command, role="reviewer")

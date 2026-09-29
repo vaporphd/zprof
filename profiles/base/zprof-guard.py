@@ -1105,16 +1105,17 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
     a `readonly_scratch_prefixes` entry, (b) the literal leading `cd`
     (segment 0, token 0 -- nothing else about it is inspected), or (c) a
     segment with no recognized file-op command that still carries a bare
-    `>`/`>>` redirect, whose target is checked the same way while its
-    non-redirect tokens stay visible to the residual `rule["match"]`
-    re-check (so e.g. `git commit -m x > /tmp/claude-x/log` still denies on
-    the `git commit` residual even though the redirect target is scratch).
-    Any other segment -- an entirely unrecognized command with no redirect
-    at all (`ln -s ... cli/target.py`), a `cp` flag that creates a link
-    instead of copying, a `cd`/`pushd`/`popd` anywhere but that one leading
-    position, a relative operand, or a shell operator this evaluator doesn't
-    explicitly allow (subshell `(`/`)`, backgrounding `&`, `|&`, `&>`, `>|`,
-    ...) -- denies outright.
+    `>`/`>>` redirect, whose target is checked the same way (plus one
+    exemption: `/dev/null` always stands down as a safe discard sink, #75)
+    while its non-redirect tokens stay visible to the residual
+    `rule["match"]` re-check (so e.g. `git commit -m x > /tmp/claude-x/log`
+    still denies on the `git commit` residual even though the redirect
+    target is scratch). Any other segment -- an entirely unrecognized
+    command with no redirect at all (`ln -s ... cli/target.py`), a `cp`
+    flag that creates a link instead of copying, a `cd`/`pushd`/`popd`
+    anywhere but that one leading position, a relative operand, or a shell
+    operator this evaluator doesn't explicitly allow (subshell `(`/`)`,
+    backgrounding `&`, `|&`, `&>`, `>|`, ...) -- denies outright.
 
     `readonly_scratch_prefixes` (guard.yaml) is deliberately narrower than
     `allow_write_prefixes`: no `$CLAUDE_PROJECT_DIR`, no persistent
@@ -1262,7 +1263,6 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
                     operands = _cp_destination(command_args)
                 else:
                     operands = [a for a in command_args if not a.startswith("-")]
-            operands = operands + redirect_targets
 
             for operand in operands:
                 if _has_unsafe_operand_chars(operand):
@@ -1270,6 +1270,27 @@ def _readonly_scratch_only(call: dict, rule: dict, config: dict) -> "bool | str 
                 if not os.path.isabs(operand):
                     return True  # #67 P1-1: relative operand -- cwd manipulation out of scope
                 real = os.path.realpath(operand)
+                if not _under_scratch(real):
+                    return (
+                        "роль read-only: мутирующая команда запрещена контрактом "
+                        f"(цель вне scratch: {real})"
+                    )
+
+            # Redirect targets get the same checks as file-op operands, plus
+            # one exemption: `/dev/null` is a safe sink for a read-only
+            # role's own diagnostic output (`cmp a b > /dev/null`, `git diff
+            # ... 2> /dev/null`) -- it discards, never persists (#75). Not
+            # added to `readonly_scratch_prefixes`: that list requires a path
+            # strictly *beneath* the prefix, which `/dev/null` itself never
+            # satisfies, so the exemption has to live here instead.
+            for operand in redirect_targets:
+                if _has_unsafe_operand_chars(operand):
+                    return True
+                if not os.path.isabs(operand):
+                    return True  # #67 P1-1: relative operand -- cwd manipulation out of scope
+                real = os.path.realpath(operand)
+                if real == os.devnull:
+                    continue
                 if not _under_scratch(real):
                     return (
                         "роль read-only: мутирующая команда запрещена контрактом "
